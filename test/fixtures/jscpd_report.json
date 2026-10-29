@@ -1,0 +1,71 @@
+{
+  "duplicates": [
+    {
+      "firstFile": {
+        "end": 10,
+        "endLoc": {
+          "column": 3,
+          "line": 10,
+          "position": 257
+        },
+        "name": "other.jl",
+        "start": 1,
+        "startLoc": {
+          "column": 0,
+          "line": 1,
+          "position": 0
+        }
+      },
+      "format": "julia",
+      "fragment": "function calculate_sum(alpha::Int, beta::Int)::Int\n    first = alpha + beta\n    second = first * alpha\n    third = second + beta\n    fourth = third * alpha\n    fifth = fourth + beta\n    sixth = fifth * alpha\n    seventh = sixth + beta\n    return seventh\nend",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 10,
+      "secondFile": {
+        "end": 10,
+        "endLoc": {
+          "column": 3,
+          "line": 10,
+          "position": 257
+        },
+        "name": "source.jl",
+        "start": 1,
+        "startLoc": {
+          "column": 0,
+          "line": 1,
+          "position": 0
+        }
+      },
+      "tokens": 54
+    }
+  ],
+  "statistics": {
+    "detectionDate": "2026-11-01T01:23:18.177Z",
+    "formats": {
+      "julia": {
+        "clones": 1,
+        "duplicatedLines": 10,
+        "duplicatedTokens": 54,
+        "lines": 20,
+        "newClones": 0,
+        "newDuplicatedLines": 0,
+        "percentage": 50.0,
+        "percentageTokens": 50.0,
+        "sources": 2,
+        "tokens": 108
+      }
+    },
+    "total": {
+      "clones": 1,
+      "duplicatedLines": 10,
+      "duplicatedTokens": 54,
+      "lines": 20,
+      "newClones": 0,
+      "newDuplicatedLines": 0,
+      "percentage": 50.0,
+      "percentageTokens": 50.0,
+      "sources": 2,
+      "tokens": 108
+    }
+  }
+}

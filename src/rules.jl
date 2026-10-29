@@ -1392,6 +1392,78 @@ end
 """The site of `found`, a `FATOU_FINDING` match, in the repository at `root`."""
 fatou_site(root::AbstractString, found::RegexMatch)::Site = Site("$(found[1]) $(found[3])", joinpath(root, found[1]), parse(Int, found[2]), "")
 
+"""The path to `raw_path` relative to `root`, whether `raw_path` is already absolute or relative to `root`."""
+function site_path(root::AbstractString, raw_path::AbstractString)::String
+    if isabspath(raw_path)
+        return raw_path
+    end
+    return joinpath(root, raw_path)
+end
+
+"""One `Site` from `duplicate`, a `jscpd` JSON report item in `repository`."""
+function jscpd_site(repository::Repository, duplicate::AbstractDict)::Site
+    first_file = site_path(repository.root, string(duplicate["firstFile"]["name"]))
+    second_file = site_path(repository.root, string(duplicate["secondFile"]["name"]))
+    rel_first = relpath(first_file, repository.root)
+    rel_second = relpath(second_file, repository.root)
+    start_line = Int(duplicate["secondFile"]["start"])
+    end_line = Int(duplicate["secondFile"]["end"])
+    return Site("$rel_second $rel_first", second_file, start_line, end_line, "")
+end
+
+"""The `Cmd` running `jscpd` against `dirs` with report written to `report_dir`."""
+function jscpd_command(
+        jscpd::AbstractString,
+        repository::Repository,
+        dirs::AbstractVector{String},
+        report_dir::AbstractString,
+    )::Cmd
+    ignore = String[]
+    if !isempty(repository.skipped_directories)
+        ignore = String["--ignore", join(["**/$d/**" for d in repository.skipped_directories], ",")]
+    end
+    return Cmd(
+        `$jscpd --mode mild --min-lines 5 --min-tokens 50 --silent --no-tips --absolute --reporters json --output $report_dir $ignore $dirs`;
+        dir = repository.root,
+    )
+end
+
+"""
+One site per duplicate code block found by `jscpd` over `directories` of `repository`, keyed by
+the duplicate file and the duplicated file, placed at the duplicate block's lines. `jscpd` must be
+installed and on PATH; an execution failure throws.
+"""
+function jscpd_sites( # lint: abstract-local  JSON report tables are untyped
+        repository::Repository,
+        directories::Tuple{Vararg{String}},
+    )::Vector{Site}
+    jscpd = Sys.which("jscpd")
+    if isnothing(jscpd)
+        error("jscpd is not on PATH; the jscpd rule runs `jscpd`")
+    end
+    dirs = present_directories(repository, directories)
+    if isempty(dirs)
+        return Site[]
+    end
+    report_dir = mktempdir()
+    try
+        command = jscpd_command(jscpd, repository, collect(dirs), report_dir)
+        printed = IOBuffer()
+        run(pipeline(ignorestatus(command); stdout = printed, stderr = printed))
+        report_file = joinpath(report_dir, "jscpd-report.json")
+        if !isfile(report_file)
+            unread = String(take!(printed))
+            error("jscpd produced no report:\n$unread")
+        end
+        json = Base.require(@__MODULE__, :JSON)
+        report = Base.invokelatest(json.parsefile, report_file; dicttype = Dict{String, Any})
+        duplicates = report["duplicates"]
+        return jscpd_site.((repository,), duplicates)
+    finally
+        rm(report_dir; recursive = true, force = true)
+    end
+end
+
 """A `Site` keyed `name` at the declaration of struct `name`."""
 function struct_site(name::Symbol, locations::Dict{Symbol, Tuple{String, Int}})::Site
     file, line = get(locations, name, ("", 0))

@@ -6,7 +6,7 @@ using TOML: TOML
 using Corset: Corset
 using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, abstract_locals,
     c_type_sites, impure_captures, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
-    inferred_methods, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
+    inferred_methods, jscpd_sites, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
     where_return_sites, entry_signatures, entry_frames, frame_callees, mentions_module, builtin_callee, invoked_instance, logging_call
@@ -56,6 +56,31 @@ relative_sources(repository::Repository, root::AbstractString)::Vector{String} =
 function fake_fatou(bin::AbstractString, printed::AbstractString)::String
     write_tree(bin, ["fatou" => "#!/bin/sh\nprintf '$printed'\n"])
     chmod(joinpath(bin, "fatou"), 0o755)
+    return bin
+end
+
+"""Install in `bin` a `jscpd` executable script that creates `jscpd-report.json` with `report_json` in the `--output` directory and return `bin`."""
+function fake_jscpd(bin::AbstractString, report_json::AbstractString)::String
+    script = """#!/bin/sh
+    printf '%s\n' "\$@" > '$bin/args.txt'
+    out=""
+    while [ \$# -gt 0 ]; do
+        if [ "\$1" = "-o" ] || [ "\$1" = "--output" ]; then
+            out="\$2"
+            shift 2
+        else
+            shift
+        fi
+    done
+    if [ -n "\$out" ]; then
+        mkdir -p "\$out"
+        cat << 'EOF' > "\$out/jscpd-report.json"
+    $report_json
+    EOF
+    fi
+    """
+    write_tree(bin, ["jscpd" => script])
+    chmod(joinpath(bin, "jscpd"), 0o755)
     return bin
 end
 
@@ -298,6 +323,39 @@ end
             @test_throws ErrorException fatou_sites(Repository(tree), (".",))
             ENV["PATH"] = string(mktempdir())
             @test_throws ErrorException fatou_sites(Repository(tree), (".",))
+        finally
+            ENV["PATH"] = path
+        end
+    end
+
+    @testset "jscpd: findings of `jscpd`" begin
+        tree = write_tree(mktempdir(), ["source.jl" => "one() = 1\n", "other.jl" => "two() = 2\n"])
+        fixture_report = read(joinpath(FIXTURES, "jscpd_report.json"), String)
+        bin = fake_jscpd(mktempdir(), fixture_report)
+        path = ENV["PATH"]
+        ENV["PATH"] = "$bin:$path"
+        try
+            @test jscpd_sites(Repository(tree), (".",)) == [Site("source.jl other.jl", joinpath(tree, "source.jl"), 1, 10, "")]
+            abs_report = replace(fixture_report, "\"name\": \"source.jl\"" => "\"name\": \"$(escape_string(joinpath(tree, "source.jl")))\"")
+            fake_jscpd(bin, abs_report)
+            @test jscpd_sites(Repository(tree), (".",)) == [Site("source.jl other.jl", joinpath(tree, "source.jl"), 1, 10, "")]
+            fake_jscpd(bin, "{}")
+            @test_throws KeyError jscpd_sites(Repository(tree), (".",))
+            fake_jscpd(bin, "{\"duplicates\": []}")
+            @test isempty(jscpd_sites(Repository(tree), (".",)))
+            @test !("--ignore" in readlines(joinpath(bin, "args.txt")))
+            @test isempty(jscpd_sites(Repository(tree; skipped_directories = ("vendor",)), (".",)))
+            args = readlines(joinpath(bin, "args.txt"))
+            @test "--ignore" in args
+            @test "**/vendor/**" in args
+            @test "--mode" in args
+            @test "--min-lines" in args
+            @test "--min-tokens" in args
+            @test isempty(jscpd_sites(Repository(tree), ("nonexistent",)))
+            write_tree(bin, ["jscpd" => "#!/bin/sh\nexit 1\n"])
+            @test_throws ErrorException jscpd_sites(Repository(tree), (".",))
+            ENV["PATH"] = string(mktempdir())
+            @test_throws ErrorException jscpd_sites(Repository(tree), (".",))
         finally
             ENV["PATH"] = path
         end

@@ -262,6 +262,7 @@ end
     write(joinpath(root, "Project.toml"), "name = \"Demo\"\n")
     config = with_overrides(load_config(root), true, Pair{String, Symbol}[])
     bin = fake_fatou(mktempdir(), "src/smells.jl:3:5: warning[unused-binding] unused\\nchecked 1 file(s): 1 finding\\n")
+    fake_jscpd(bin, """{"duplicates": [{"firstFile": {"name": "src/smells.jl", "start": 1, "end": 5}, "secondFile": {"name": "src/smells.jl", "start": 6, "end": 10}}]}""")
     path = ENV["PATH"]
     ENV["PATH"] = "$bin:$path"
     try

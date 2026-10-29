@@ -1,2 +1,3 @@
 [tools]
 "github:jolars/fatou" = "0.24.0"
+"github:kucherenko/jscpd" = "5.4.2"

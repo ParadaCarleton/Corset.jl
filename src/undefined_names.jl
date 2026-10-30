@@ -15,9 +15,6 @@ function import_names!( # lint: abstract-local  walks Julia ASTs, whose nodes ar
     node,
 )
     for clause in node.args
-        if !(clause isa Expr)
-            continue
-        end
         if clause.head === :(:)
             for imported in clause.args[(begin + 1):end]
                 if imported isa Expr && imported.head === :.
@@ -52,10 +49,7 @@ function declared_name( # lint: abstract-local  walks Julia ASTs, whose nodes ar
     while declaration isa Expr && declaration.head in (:curly, :(<:))
         declaration = first(declaration.args)
     end
-    if declaration isa Symbol
-        return declaration
-    end
-    return Symbol("")
+    return declaration
 end
 
 """

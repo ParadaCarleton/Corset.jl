@@ -831,6 +831,14 @@ include("cli.jl")
     )
     @test undefined_names(joinpath(loop, "main.jl"); scope = @__MODULE__) ==
         (String[], String[])
+    # Imports of whole modules, destructuring, `where` return types, parametric structs and body imports are all definitions.
+    forms = write_scan(
+        "using Corset\nimport Test\nusing NoSuchModuleAnywhere\nleft, right = 1, 2\n" *
+            "function typed(x::T)::Int where {T}\n 1\nend\nstruct Wrapped{T} <: Any end\n" *
+            "@testset \"f\" begin\n using Test: @test\n @test typed(left) + right == 3\n @test Wrapped{Int} isa Type\n" *
+            " @test Test.detect_ambiguities isa Function && undefined_names isa Function\n @test include(joinpath(@__DIR__, left)) == 1\nend\n",
+    )
+    @test first(undefined_names(forms; scope = @__MODULE__)) == String[]
     # An include argument that is not a literal path is never evaluated.
     marker = joinpath(mktempdir(), "ran")
     lazy = write_scan(

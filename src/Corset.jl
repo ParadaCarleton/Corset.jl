@@ -7,13 +7,21 @@ source files they read, and their limits.
 """
 module Corset
 
-export Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops
+export Repository,
+    Site,
+    ratchet!,
+    offenders!,
+    @call_sites,
+    @opt_sites,
+    float64_ops,
+    undefined_names
 
 include("ratchet.jl")
 include("rules.jl")
 include("jet.jl")
 include("float64_scan.jl")
 include("imports.jl")
+include("undefined_names.jl")
 include("where_return.jl")
 include("registry.jl")
 include("config.jl")

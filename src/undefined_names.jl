@@ -10,8 +10,10 @@ Add the names a `using` or `import` statement binds to `names`.
 `using Mod: a, b` binds `a` and `b`; `using Mod` binds whatever `Mod` exports, so
 the module is loaded to ask it; `import Mod` binds `Mod` alone.
 """
-function import_names!(names, node)
-    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function import_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+    names,
+    node,
+)
     for clause in node.args
         if !(clause isa Expr)
             continue
@@ -44,8 +46,9 @@ function import_names!(names, node)
 end
 
 """The name a `struct`, `abstract type` or `module` declares, through `<:` and type parameters."""
-function declared_name(declaration)::Symbol
-    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function declared_name( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+    declaration,
+)::Symbol
     while declaration isa Expr && declaration.head in (:curly, :(<:))
         declaration = first(declaration.args)
     end
@@ -64,8 +67,10 @@ destructuring and imports.
 Over-approximated on purpose, so a reported name is one that nothing in reach
 defines.
 """
-function bound_names!(names, node)
-    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function bound_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+    names,
+    node,
+)
     if !(node isa Expr) || isempty(node.args)
         return names
     end
@@ -108,8 +113,9 @@ Return `node` with every `using` and `import` statement dropped.
 `using` is a top-level form, so a body carrying one cannot sit in a `let`. The
 names it binds are already in the defined set, so dropping it costs nothing.
 """
-function without_imports(node)
-    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function without_imports( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+    node,
+)
     if !(node isa Expr)
         return node
     end
@@ -131,8 +137,10 @@ Resolve an `include` argument to a path, or `nothing` when it is not a literal.
 Only a string, `@__DIR__` and `joinpath` of those resolve; any other expression is
 never evaluated, because scanning a file must not run its code.
 """
-function included_path(argument, directory::AbstractString)
-    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function included_path( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+    argument,
+    directory::AbstractString,
+)
     pieces = path_pieces(argument, directory)
     if isnothing(pieces)
         return nothing
@@ -141,8 +149,10 @@ function included_path(argument, directory::AbstractString)
 end
 
 """The strings `argument` joins (`nothing` when any part is not a literal)."""
-function path_pieces(argument, directory::AbstractString)
-    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function path_pieces( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+    argument,
+    directory::AbstractString,
+)
     if argument isa String
         return [argument]
     end
@@ -162,8 +172,12 @@ function path_pieces(argument, directory::AbstractString)
 end
 
 """Add the names every file `node` includes by literal path binds to `names`, those files' includes too (`visited` stops cycles)."""
-function follow_includes!(names, node, directory::AbstractString, visited = Set{String}())
-    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function follow_includes!( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+    names,
+    node,
+    directory::AbstractString,
+    visited = Set{String}(),
+)
     if !(node isa Expr)
         return names
     end
@@ -193,8 +207,11 @@ Add every name lowered code resolves against `scope` to `names`.
 Lowering resolves every local, so a name still reaching the module is either a
 real global or nothing at all.
 """
-function module_globals!(names, value, scope)
-    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function module_globals!( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+    names,
+    value,
+    scope,
+)
     if value isa GlobalRef
         if value.mod === scope
             push!(names, value.name)
@@ -217,8 +234,10 @@ function module_globals!(names, value, scope)
 end
 
 """The `(line, node)` of every `@testset` under `node`, wherever a block, `let` or wrapper macro puts it; a testset's own body is not searched."""
-function testset_nodes(node, line::Integer)::Vector{Tuple{Int, Any}}
-    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function testset_nodes( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+    node,
+    line::Integer,
+)::Vector{Tuple{Int, Any}}
     found = Tuple{Int, Any}[]
     if !(node isa Expr)
         return found
@@ -253,8 +272,9 @@ that quietly skips a testset reads exactly like one that cleared it.
 `scope` is the module the testsets run in, which owns the macros the bodies use
 and the names they resolve against. Pass `@__MODULE__`.
 """
-function undefined_names(path; scope = Main)
-    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function undefined_names( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+        path; scope = Main,
+    )
     directory = dirname(abspath(path))
     parsed = Meta.parseall(read(path, String); filename = path)
     defined = bound_names!(Set{Symbol}(), parsed)

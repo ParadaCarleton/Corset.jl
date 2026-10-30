@@ -799,4 +799,28 @@ include("cli.jl")
     # A testset whose macro cannot expand here is unscanned, and says so.
     broken = write_scan("@testset \"f\" begin\n @no_such_macro 1\nend\n")
     @test undefined_names(broken; scope = @__MODULE__)[2] == ["line 1"]
+    # Testsets inside `let`/`begin` are found; `as` aliases and declared types are defined.
+    nested = write_scan(
+        "using Test: @test\nimport Base: sum as total\nstruct Box end\nabstract type Shape end\n" *
+            "let\n @testset \"f\" begin\n @test total([1]) == 1\n @test Box() isa Box\n @test Shape isa Type\n @test gone == 1\n end\nend\n",
+    )
+    @test first(undefined_names(nested; scope = @__MODULE__)) == ["line 6: `gone`"]
+    # Includes nest, resolve against the includer's directory, and a cycle ends.
+    deep = write_tree(
+        mktempdir(),
+        [
+            "sub/inner.jl" => "include(\"leaf.jl\")\ninclude(\"inner.jl\")\n",
+            "sub/leaf.jl" => "leaf_name() = 1\n",
+            "main.jl" =>
+                "include(joinpath(@__DIR__, \"sub\", \"inner.jl\"))\n@testset \"f\" begin\n @test leaf_name() == 1\nend\n",
+        ],
+    )
+    @test first(undefined_names(joinpath(deep, "main.jl"); scope = @__MODULE__)) == String[]
+    # An include argument that is not a literal path is never evaluated.
+    marker = joinpath(mktempdir(), "ran")
+    lazy = write_scan(
+        "include(write($(repr(marker)), \"x\") |> string)\n@testset \"f\" begin\n @test 1 == 1\nend\n",
+    )
+    undefined_names(lazy; scope = @__MODULE__)
+    @test !isfile(marker)
 end

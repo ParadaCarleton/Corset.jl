@@ -833,9 +833,9 @@ include("cli.jl")
         (String[], String[])
     # Imports of whole modules, destructuring, `where` return types, parametric structs and body imports are all definitions.
     forms = write_scan(
-        "using Corset\nimport Test\nusing NoSuchModuleAnywhere\nleft, right = 1, 2\n" *
+        "using Corset\nimport Test\nusing NoSuchModuleAnywhere\nleft, (right, _) = 1, (2, 3)\ntyped_binding::Int = 1\nfunction no_methods end\n" *
             "function typed(x::T)::Int where {T}\n 1\nend\nstruct Wrapped{T} <: Any end\n" *
-            "@testset \"f\" begin\n using Test: @test\n @test typed(left) + right == 3\n @test Wrapped{Int} isa Type\n" *
+            "@testset \"f\" begin\n using Test: @test\n @test typed(left) + right + typed_binding == 4 && no_methods isa Function\n @test Wrapped{Int} isa Type\n" *
             " @test Test.detect_ambiguities isa Function && undefined_names isa Function\n @test include(joinpath(@__DIR__, left)) == 1\nend\n",
     )
     @test first(undefined_names(forms; scope = @__MODULE__)) == String[]

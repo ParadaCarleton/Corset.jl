@@ -52,6 +52,21 @@ function declared_name( # lint: abstract-local  walks Julia ASTs, whose nodes ar
     return declaration
 end
 
+"""Add every name an assignment to `target` binds: `x`, `x::T`, and tuples of those, nested."""
+function assigned_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+    names,
+    target,
+)
+    if target isa Symbol
+        push!(names, target)
+    elseif target isa Expr && target.head in (:tuple, :(::), :parameters)
+        for element in target.args
+            assigned_names!(names, element)
+        end
+    end
+    return names
+end
+
 """
     bound_names!(names, node)
 
@@ -83,15 +98,11 @@ function bound_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are
                 signature.head === :call &&
                 first(signature.args) isa Symbol
             push!(names, first(signature.args))
+        elseif node.head === :function && signature isa Symbol
+            push!(names, signature)
         end
-    elseif node.head === :(=) && target isa Symbol
-        push!(names, target)
-    elseif node.head === :(=) && target isa Expr && target.head === :tuple
-        for element in target.args
-            if element isa Symbol
-                push!(names, element)
-            end
-        end
+    elseif node.head === :(=)
+        assigned_names!(names, target)
     elseif node.head === :using || node.head === :import
         import_names!(names, node)
     elseif node.head in (:struct, :module) && length(node.args) >= 2

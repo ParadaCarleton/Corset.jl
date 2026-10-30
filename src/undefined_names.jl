@@ -11,6 +11,7 @@ Add the names a `using` or `import` statement binds to `names`.
 the module is loaded to ask it; `import Mod` binds `Mod` alone.
 """
 function import_names!(names, node)
+    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
     for clause in node.args
         if !(clause isa Expr)
             continue
@@ -50,6 +51,7 @@ Over-approximated on purpose, so a reported name is one that nothing in reach
 defines.
 """
 function bound_names!(names, node)
+    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
     if !(node isa Expr) || isempty(node.args)
         return names
     end
@@ -89,6 +91,7 @@ Return `node` with every `using` and `import` statement dropped.
 names it binds are already in the defined set, so dropping it costs nothing.
 """
 function without_imports(node)
+    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
     if !(node isa Expr)
         return node
     end
@@ -124,6 +127,7 @@ Resolve an `include` argument to a path, or `nothing` when it does not evaluate.
 argument is evaluated with `@__DIR__` replaced by `directory`.
 """
 function included_path(argument, directory)
+    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
     if argument isa String
         return joinpath(directory, argument)
     end
@@ -139,6 +143,7 @@ function included_path(argument, directory)
 end
 
 function follow_includes!(names, node, directory)
+    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
     if !(node isa Expr)
         return names
     end
@@ -166,6 +171,7 @@ Lowering resolves every local, so a name still reaching the module is either a
 real global or nothing at all.
 """
 function module_globals!(names, value, scope)
+    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
     if value isa GlobalRef
         if value.mod === scope
             push!(names, value.name)
@@ -201,6 +207,7 @@ that quietly skips a testset reads exactly like one that cleared it.
 and the names they resolve against. Pass `@__MODULE__`.
 """
 function undefined_names(path; scope = Main)
+    # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
     directory = dirname(abspath(path))
     parsed = Meta.parseall(read(path, String); filename = path)
     defined = bound_names!(Set{Symbol}(), parsed)

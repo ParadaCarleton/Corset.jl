@@ -77,6 +77,12 @@ function bound_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are
     target = first(node.args)
     # `f(x)::T = …` and `function f(x)::T` wrap the call in a return-type assertion.
     signature = target isa Expr && target.head === :(::) ? first(target.args) : target
+    while signature isa Expr && signature.head === :where
+        signature = first(signature.args)
+    end
+    if signature isa Expr && signature.head === :(::)
+        signature = first(signature.args)
+    end
     heads_a_call = node.head === :(=) && signature isa Expr && signature.head === :call
     if node.head === :function || node.head === :macro || heads_a_call
         if signature isa Expr &&
@@ -145,7 +151,7 @@ function included_path( # lint: abstract-local  walks Julia ASTs, whose nodes ar
     if isnothing(pieces)
         return nothing
     end
-    return joinpath(directory, pieces...)
+    return normpath(joinpath(directory, pieces...))
 end
 
 """The strings `argument` joins (`nothing` when any part is not a literal)."""
@@ -293,7 +299,9 @@ function undefined_names( # lint: abstract-local  walks Julia ASTs, whose nodes 
             continue
         end
         for name in sort!(collect(module_globals!(Set{Symbol}(), lowered, scope)))
-            skip = occursin('#', String(name)) || name in defined || isdefined(scope, name)
+            skip = startswith(String(name), '#') ||
+                name in defined ||
+                isdefined(scope, name)
             if !skip
                 push!(unresolved, "line $line: `$name`")
             end

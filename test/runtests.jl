@@ -816,6 +816,21 @@ include("cli.jl")
         ],
     )
     @test first(undefined_names(joinpath(deep, "main.jl"); scope = @__MODULE__)) == String[]
+    # `where` signatures define functions; a `#` inside a name is no excuse; self-includes through `..` end.
+    where_scan = write_scan(
+        "f(x::T) where {T} = x\n@testset \"f\" begin\n @test f(1) == 1\n @test var\"gone#name\" == 1\nend\n",
+    )
+    @test first(undefined_names(where_scan; scope = @__MODULE__)) == ["line 2: `gone#name`"]
+    loop = write_tree(
+        mktempdir(),
+        [
+            "sub/inner.jl" =>
+                "include(joinpath(@__DIR__, \"..\", \"sub\", \"inner.jl\"))\n",
+            "main.jl" => "include(joinpath(@__DIR__, \"sub\", \"inner.jl\"))\n",
+        ],
+    )
+    @test undefined_names(joinpath(loop, "main.jl"); scope = @__MODULE__) ==
+        (String[], String[])
     # An include argument that is not a literal path is never evaluated.
     marker = joinpath(mktempdir(), "ran")
     lazy = write_scan(

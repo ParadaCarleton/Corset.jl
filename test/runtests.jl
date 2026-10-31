@@ -71,7 +71,13 @@ end
 function generated_module(count::Integer)::Module
     generated = Module(:Generated)
     for index in 1:count
-        Core.eval(generated, :(struct $(Symbol(:Shape, index)); $([Symbol(:shape_field, field) for field in 1:index]...) end))
+        Core.eval(
+            generated, :(
+                struct $(Symbol(:Shape, index))
+                    $([Symbol(:shape_field, field) for field in 1:index]...)
+                end
+            )
+        )
         Core.eval(generated, :($(Symbol(:maker, index))(offset::Int) = shift::Int -> offset + shift))
     end
     return generated

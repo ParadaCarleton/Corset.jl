@@ -67,6 +67,26 @@ function placed(files::AbstractVector{<:Pair})::Dict{String, String}
     return Dict(name => read(joinpath(repository.root, name), String) for (name, _) in files)
 end
 
+"""A module of `count` structs, each one field wider than the last, and `count` functions returning a capturing closure."""
+function generated_module(count::Integer)::Module
+    generated = Module(:Generated)
+    for index in 1:count
+        Core.eval(generated, :(struct $(Symbol(:Shape, index)); $([Symbol(:shape_field, field) for field in 1:index]...) end))
+        Core.eval(generated, :($(Symbol(:maker, index))(offset::Int) = shift::Int -> offset + shift))
+    end
+    return generated
+end
+
+"""Every reflection the module rules make on `mod`."""
+function reflect_all(mod::Module)::Nothing
+    structs = module_structs(mod)
+    Corset.defined_methods(mod)
+    abstract_fields.(structs)
+    repeated_prefix.(structs)
+    capturing_closures(mod)
+    return nothing
+end
+
 @testset "Corset" begin
     @testset "a Repository is strict by default" begin
         repository = Repository(".")
@@ -684,6 +704,12 @@ end
         @test logging_call(Expr(:call, Base.CoreLogging.handle_message))
         @test !logging_call(Expr(:call, :plain))
     end
+end
+
+@testset "module reflection compiles nothing per struct or closure of the checked package" begin
+    Base.invokelatest(reflect_all, generated_module(20))
+    # Specializing per binding compiled about 1.5 s here; the warm path compiles none.
+    @test (@timed Base.invokelatest(reflect_all, generated_module(20))).compile_time < 0.25
 end
 
 include("cli.jl")

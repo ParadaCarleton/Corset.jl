@@ -1,7 +1,11 @@
 [deps]
+Corset = "09bf9df1-bea6-4267-acd1-e930da7492cc"
 JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[sources]
+Corset = {path = ".."}
 
 [compat]
 JET = "0.12, 0.13"

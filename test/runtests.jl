@@ -150,9 +150,11 @@ end
         access = Module(:Access)
         Base.include(access, path)
         sites = non_public_accesses(access)
-        @test site_keys(sites) == ["Base.JuliaSyntax", "Base.uniontypes"]
-        @test site_lines(sites) == [3, 1]
+        @test site_keys(sites) == ["Base.JuliaSyntax", "Base.JuliaSyntax", "Base.uniontypes"]
+        @test site_lines(sites) == [3, 7, 1]
         @test first(sites).detail == "`JuliaSyntax` is not public in `Base`"
+        offending = @test_logs (:info, r"1 site\(s\) opted out") (:error, r"Base\.JuliaSyntax = 1 ") offenders!(Repository(dirname(path)), "non-public-access", sites)
+        @test offending == ["Base.JuliaSyntax", "Base.uniontypes"]
         @test "Base.JuliaSyntax" in site_keys(non_public_accesses(Corset))
     end
 

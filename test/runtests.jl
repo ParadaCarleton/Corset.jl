@@ -944,7 +944,8 @@ end
     )
     found = widenings(Corset.DEFAULT_CANDIDATE_LIMIT)
     @testset "a literal, a conversion, a float global, a callee and a returned literal widen, and name their source" begin
-        @test found["scaled"].detail == "`Base.Float64` makes a Float64; the widest float argument is Float32"
+        # Julia 1.13 names the type `Base.Float64`; 1.14 names the binding `Core.Float64`.
+        @test endswith(found["scaled"].detail, ".Float64` makes a Float64; the widest float argument is Float32")
         @test occursin("makes a Float64", found["global_scaled"].detail)
         @test occursin("the widest float argument is Float16", found["floated"].detail)
         @test found["calls_widened"].detail == "`widened` makes a Float64; the widest float argument is Float32"

@@ -55,14 +55,21 @@ struct Operand
     label::String
 end
 
+"""How a detail names IR value `operand`. Julia 1.14 keeps a global as a `Core.BindingPartition`, named by its binding."""
+ir_label(operand::Any)::String = string(operand) # lint: abstract-local  IR operands are any value
+@static if isdefined(Base, :partition_owner)
+    ir_label(operand::Core.BindingPartition)::String = string(Base.partition_owner(operand).globalref) # lint: non-public-access  1.14 only # COV_EXCL_LINE
+end
+
 """The `Operand` of IR value `operand` in `ir`. A type operand (`Float64` in `sitofp(Float64, n)`) brings in its own float."""
 function Operand(operand::Any, ir::COMPILER.IRCode)::Operand # lint: abstract-local  IR operands are any value
-    type = COMPILER.widenconst(COMPILER.argextype(operand, ir))
-    floats = value_floats(type)
-    if type <: Type && type isa DataType && only(type.parameters) isa DataType
-        floats = held_floats(only(type.parameters), 0)
+    extended = COMPILER.argextype(operand, ir)
+    floats = value_floats(COMPILER.widenconst(extended))
+    # Read a type operand from its constant: Julia 1.14 widens `Const(Float64)` to `Core.TypeEgal{Float64}`.
+    if extended isa Core.Const && extended.val isa DataType
+        floats = held_floats(extended.val, 0)
     end
-    return Operand(operand isa Union{Core.Argument, Core.SSAValue}, floats, string(operand))
+    return Operand(operand isa Union{Core.Argument, Core.SSAValue}, floats, ir_label(operand))
 end
 
 """
@@ -73,7 +80,7 @@ statement_operands(statement::Expr, ir::COMPILER.IRCode)::Vector{Operand} = Oper
 statement_operands(statement::Core.PhiNode, ir::COMPILER.IRCode)::Vector{Operand} =
     Operand.(statement.values[isassigned.((statement.values,), eachindex(statement.values))], (ir,))
 statement_operands(statement::Core.PiNode, ir::COMPILER.IRCode)::Vector{Operand} = [Operand(statement.val, ir)]
-statement_operands(statement::GlobalRef, ir::COMPILER.IRCode)::Vector{Operand} = [Operand(statement, ir)]
+statement_operands(statement::Union{GlobalRef, Core.BindingPartition}, ir::COMPILER.IRCode)::Vector{Operand} = [Operand(statement, ir)]
 statement_operands(statement::Core.ReturnNode, ir::COMPILER.IRCode)::Vector{Operand} = returned_operands(statement, ir)
 statement_operands(::Any, ::COMPILER.IRCode)::Vector{Operand} = Operand[]
 
@@ -114,7 +121,7 @@ end
 
 """
 The callee an IR call statement names: an `:invoke`'s method, else its first argument. Another
-statement (a global read Julia 1.14 keeps as a `Core.BindingPartition`) is named by its type.
+statement is named by its type.
 """
 callee_label(statement::Any)::String = string(typeof(statement)) # lint: abstract-local  IR statements are any value
 
@@ -123,7 +130,7 @@ function callee_label(statement::Expr)::String
     if !isnothing(instance)
         return string(instance.def.name)
     end
-    return string(first(statement.args))
+    return ir_label(first(statement.args))
 end
 
 """
@@ -138,7 +145,7 @@ function dispatch_widening(statement::Expr, ir::COMPILER.IRCode, budget::FloatBu
     candidates = call_candidates(statement, ir, search)
     returned = value_floats.(COMPILER.widenconst.(getfield.(getfield.(candidates.frames, :code), :rettype)))
     wide = getfield.(candidates.frames[wider.(returned, (budget,))], :method)
-    callee = first(statement.args)
+    callee = ir_label(first(statement.args))
     if !isempty(wide)
         return "dispatches `$callee`; candidate " * join("`" .* candidate_name.(wide) .* "`", ", ") * " returns a float wider than $(widest(budget.floats))"
     elseif !candidates.complete

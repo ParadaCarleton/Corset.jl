@@ -715,6 +715,7 @@ end
         Tuple{typeof(Mutation.addup), Int, Int}, Tuple{typeof(Mutation.reads), vector},
         Tuple{typeof(Mutation.bangwrite!), vector}, Tuple{typeof(Mutation.countdown), vector, Int},
         Tuple{typeof(Mutation.opaquecall), Function, vector}, Tuple{typeof(Mutation.viaccall), vector},
+        Tuple{typeof(Mutation.opaqueglobal), Function},
     ]
     sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred_methods(Mutation, entry_frames(seeds, Mutation)))
     details = Dict(last(split(site.key)) => site.detail for site in sites)
@@ -725,7 +726,7 @@ end
         @test details["direct"] == "writes argument `v` but its name has no `!`"
     end
     @testset "fresh memory, reads, a rebound local and a `!` function are not reported" begin
-        for name in ("rebound", "viahelper", "fresh", "readonly", "addup", "reads", "bangwrite!", "countdown", "memwrite!", "fieldread")
+        for name in ("rebound", "viahelper", "fresh", "readonly", "addup", "reads", "bangwrite!", "countdown", "memwrite!", "fieldread", "opaqueglobal")
             @test !haskey(details, name)
         end
     end

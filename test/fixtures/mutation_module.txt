@@ -27,4 +27,6 @@ bangwrite!(v) = (v[1] = 1; v)
 @noinline countdown(v, n) = n == 0 ? length(v) : countdown(v, n - 1)
 
 opaquecall(f, x) = f(x)
+const SHARED = Int[]
+opaqueglobal(f) = f(SHARED)
 viaccall(x) = ccall(:jl_typeof_str, Cstring, (Any,), x)

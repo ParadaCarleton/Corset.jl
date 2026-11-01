@@ -22,6 +22,10 @@ function announce!(value::Int)::Nothing
 end
 
 adder(value::Int)::Function = step -> value + step
+labeler(label::String)::Function = step -> (label, step)
+reader(values::Vector{Int})::Function = step -> first(values) + step
+kinded(kind::DataType)::Function = step -> (kind, step)
+field_reader()::Function = held -> held.held
 function boxed(start::Int)::Function
     total = start
     add = step -> total + step

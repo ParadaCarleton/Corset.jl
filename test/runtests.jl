@@ -5,7 +5,7 @@ using JET: JET
 using TOML: TOML
 using Corset: Corset
 using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, abstract_locals,
-    boxed_closures, c_type_sites, capturing_closures, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
+    c_type_sites, impure_closures, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
     inferred_methods, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
@@ -89,7 +89,7 @@ function reflect_all(mod::Module)::Nothing
     Corset.defined_methods(mod)
     abstract_fields.(structs)
     repeated_prefix.(structs)
-    capturing_closures(mod)
+    impure_closures(mod)
     return nothing
 end
 
@@ -165,10 +165,22 @@ end
         @test site_keys(unmarked_effects(repository, inferred)) == ["fixture.jl announce"]
     end
 
-    @testset "closure: closures that capture data, and those holding a Core.Box" begin
-        sites = Dict(site.key => site for site in capturing_closures(fixture))
-        @test Set(keys(sites)) == Set(["fixture.jl adder", "fixture.jl boxed", "fixture.jl lineless"])
-        @test site_keys(boxed_closures(fixture)) == ["fixture.jl boxed"]
+    @testset "closure: closures that capture anything but plain immutable data" begin
+        for (maker, argument) in ((:adder, 1), (:labeler, "a"), (:reader, [1]), (:kinded, Int))
+            Base.invokelatest(Base.invokelatest(getfield(fixture, maker), argument), 2)
+        end
+        sites = Dict(site.key => site for site in impure_closures(fixture))
+        @test Set(keys(sites)) == Set(["fixture.jl boxed", "fixture.jl lineless", "fixture.jl reader", "fixture.jl kinded"])
+        @test sites["fixture.jl boxed"].detail == "holds a Core.Box: a captured variable is rebound"
+        @test occursin("unverified", sites["fixture.jl lineless"].detail)
+        @test sites["fixture.jl reader"].detail == "captures Vector{Int64}, not plain immutable data"
+        @test occursin("{Int64}, not plain", sites["fixture.jl kinded"].detail)
+        @testset "plain immutable data is a non-function bits value, a String or Symbol, or an immutable composite of them" begin
+            @test all(Corset.plain_capture, (Int, Float32, Char, String, Symbol, Nothing, Tuple{Int, String}, @NamedTuple{name::String}, Union{Nothing, String}))
+            @test !any(Corset.plain_capture, (Vector{Int}, Dict{Int, Int}, SubArray{Int, 1, Vector{Int}, Tuple{UnitRange{Int}}, true}, DataType, typeof(sin), Module, Real, Union{Int, Vector{Int}}))
+            @test !Corset.plain_capture(TypeVar(:T))
+            @test Corset.capture_fault(Vector) == "built where the types of its captures are unknown"
+        end
         @testset "a closure built without line numbers sits at the function that creates it" begin
             fixture_lines = readlines(joinpath(root, "fixture.jl"))
             @test sites["fixture.jl lineless"].line == findfirst(startswith("@eval function lineless"), fixture_lines)

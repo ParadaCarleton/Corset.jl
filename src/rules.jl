@@ -475,19 +475,81 @@ function closure_definer(name::Core.TypeName, namers::AbstractDict{Core.TypeName
 end
 
 """
-    closure_site(type, definer, world)
+    closure_site(type, definer, world, detail)
 
 The site of closure type `type`, created by method `definer` (`closure_definer`), keyed by `definer`'s file
 and name (`method_key`) because closure type names carry compiler counters. It sits at the closure's call
 method, or at `definer` when that method has no source file (code built without line numbers).
 """
-function closure_site(type::DataType, definer::Method, world::Integer)::Site # lint: abstract-local  lowered IR statements are untyped
+function closure_site(type::DataType, definer::Method, world::Integer, detail::AbstractString)::Site # lint: abstract-local  lowered IR statements are untyped
     matches = Base._methods_by_ftype(Tuple{type, Vararg}, -1, world)
     placed = definer
     if !isempty(matches) && first(matches).method.file !== :none
         placed = first(matches).method
     end
-    return Site(method_key(definer), string(placed.file), placed.line, "")
+    return Site(method_key(definer), string(placed.file), placed.line, String(detail))
+end
+
+# These helpers pass each type as an argument: a closure capturing a type specializes on it.
+"""The declared field types of `type`, type variables included."""
+field_types(type::DataType)::Vector{Union{Type, TypeVar}} = fieldtype.((type,), 1:fieldcount(type))
+
+"""
+Whether a capture of type `type` is plain immutable data: a non-function `isbits` value, a `String`
+or `Symbol`, or an immutable struct, tuple or small `Union` of such. Arrays, `Ref`s, mutable structs,
+types, functions, modules and `Core.Box` are not.
+"""
+plain_capture(@nospecialize(type::Any))::Bool = false
+plain_capture(type::Union)::Bool = all(plain_capture, Base.uniontypes(type))
+function plain_capture(type::DataType)::Bool
+    if type <: Union{Function, Type, Module, Core.Box} || !isconcretetype(type)
+        return false
+    end
+    if type === String || type === Symbol || isbitstype(type)
+        return true
+    end
+    return !ismutabletype(type) && all(plain_capture, field_types(type))
+end
+
+"""The closure types `Base.specializations` records for the call methods of closure `type`: one per instance the package compiled."""
+closure_instances(type::DataType, world::Integer)::Vector{Type} = unique(
+    Type[
+        first(Base.unwrap_unionall(instance.specTypes).parameters)
+            for match in Base._methods_by_ftype(Tuple{type, Vararg}, -1, world)
+            for instance in Base.specializations(match.method)
+    ]
+)
+
+"""Why closure instance `instance` captures more than `plain_capture` data; empty when it does not."""
+function capture_fault(@nospecialize(instance::Any))::String
+    if !(instance isa DataType && isconcretetype(instance))
+        return "built where the types of its captures are unknown"
+    end
+    impure = filter(!plain_capture, field_types(instance))
+    if isempty(impure)
+        return ""
+    end
+    return "captures $(join(string.(impure), ", ")), not plain immutable data"
+end
+
+"""
+Why closure `type` should be a named function or callable struct: it holds a `Core.Box`, no instance of
+it was compiled (so its captures are unverified), or an instance captures more than plain data. Empty
+for a closure that captures nothing, or only `plain_capture` data in every instance.
+"""
+function closure_fault(type::DataType, world::Integer)::String
+    declared = field_types(type)
+    if isempty(declared)
+        return ""
+    end
+    if Core.Box in declared
+        return "holds a Core.Box: a captured variable is rebound"
+    end
+    instances = closure_instances(type, world)
+    if isempty(instances)
+        return "no compiled instance, so its captures are unverified; cover it in the precompile workload"
+    end
+    return join(filter(!isempty, unique(capture_fault.(instances))), "; ")
 end
 
 """The closure types the current code of `mod` can create (`live_closures`), unwrapped."""
@@ -502,27 +564,21 @@ function live_closure_types(mod::Module)::Vector{DataType}
     ]
 end
 
-"""Each `live_closure_types` closure of `mod` matching `predicate`, as a `closure_site`."""
-function matching_closures(predicate::Function, mod::Module)::Vector{Site}
+"""
+Each `live_closure_types` closure of `mod` that `closure_fault` rejects, as a `closure_site` whose detail is
+the fault. A closure that captures nothing, like `x -> x.field`, passes.
+"""
+function impure_closures(mod::Module)::Vector{Site}
     world = Base.get_world_counter()
     namers = closure_namers(mod, defined_methods(mod))
+    types = live_closure_types(mod)
+    faults = closure_fault.(types, world)
     return [
-        closure_site(type, closure_definer(type.name, namers), world)
-            for type in live_closure_types(mod)
-            if predicate(type)
+        closure_site(type, closure_definer(type.name, namers), world, fault)
+            for (type, fault) in zip(types, faults)
+            if !isempty(fault)
     ]
 end
-
-"""Each `live_closure_types` closure of `mod` that captures data (a closure type with fields), as a `closure_site`."""
-capturing_closures(mod::Module)::Vector{Site} = matching_closures(type -> fieldcount(type) > 0, mod)
-
-"""
-Each `live_closure_types` closure of `mod` holding a `Core.Box`: a captured variable that the
-closure or its definer rebinds, so every read of it is dynamically typed and the two scopes share it.
-The closure ratchet counts capturing closures per file and function against a baseline, so a counted closure that
-gains a Box goes unseen there; a Box is never tolerated.
-"""
-boxed_closures(mod::Module)::Vector{Site} = matching_closures(type -> Core.Box in fieldtypes(type), mod)
 
 """Struct types `mod` defines, closures excluded; a type bound to two names counts once."""
 module_structs(mod::Module)::Vector{DataType} = unique(

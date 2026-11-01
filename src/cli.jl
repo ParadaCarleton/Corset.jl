@@ -220,6 +220,14 @@ function display_path(root::AbstractString, site::Site)::String
     return relpath(site.file, root)
 end
 
+"""The ` (detail)` a concise finding line ends with; empty for a site with no detail."""
+function detail_note(detail::AbstractString)::String
+    if isempty(detail)
+        return ""
+    end
+    return " ($detail)"
+end
+
 """Print `findings` to `io` in `format` (human, concise or json)."""
 function print_findings(
         io::IO,
@@ -233,7 +241,7 @@ function print_findings(
                 rule = finding.rule, level = finding.level, key = finding.site.key, file = display_path(
                     root,
                     finding.site,
-                ), line = finding.site.line,
+                ), line = finding.site.line, detail = finding.site.detail,
             )
                 for finding in findings
         ]
@@ -246,12 +254,15 @@ function print_findings(
         if format == "concise"
             println(
                 io,
-                "$place:$(finding.site.line): $(finding.level): [$(finding.rule)] $(finding.site.key)",
+                "$place:$(finding.site.line): $(finding.level): [$(finding.rule)] $(finding.site.key)" * detail_note(finding.site.detail),
             )
         else
             println(io, "$(finding.level)[$(finding.rule)]: $(finding.site.key)")
             if !isempty(place)
                 println(io, "  --> $place:$(finding.site.line)")
+            end
+            if !isempty(finding.site.detail)
+                println(io, "  = $(finding.site.detail)")
             end
         end
     end

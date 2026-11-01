@@ -96,11 +96,8 @@ abstract_locals(context.repository, context.inferred)
 @rule ModuleRule "bang" :pedantic "functions that always return nothing and have no ! in the name" context ->
 unmarked_effects(context.repository, context.inferred)
 
-@rule ModuleRule "closure" :pedantic "closures that capture data" context ->
-capturing_closures(context.mod)
-
-@rule ModuleRule "closure-box" :default "closures holding a Core.Box, a captured variable that is rebound" context ->
-boxed_closures(context.mod)
+@rule ModuleRule "closure" :default "closures that capture anything but plain immutable data" context ->
+impure_closures(context.mod)
 
 @rule ModuleRule "abstract-field" :default "struct fields of an abstract type or of a container of one" context -> begin
     locations = declared(context)

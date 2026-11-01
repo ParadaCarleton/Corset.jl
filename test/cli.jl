@@ -210,6 +210,10 @@ end
         "human",
     ) ==
         "deny[jet]: scope\n"
+    described = [Finding("closure", :deny, Corset.Site("a.jl f", joinpath(root, "a.jl"), 3, "holds a Core.Box"))]
+    @test sprint(print_findings, root, described, "human") == "deny[closure]: a.jl f\n  --> a.jl:3\n  = holds a Core.Box\n"
+    @test sprint(print_findings, root, described, "concise") == "a.jl:3: deny: [closure] a.jl f (holds a Core.Box)\n"
+    @test occursin("\"detail\":\"holds a Core.Box\"", sprint(print_findings, root, described, "json"))
 
     @test exit_code(findings, false) == 0
     @test exit_code(findings, true) == 1

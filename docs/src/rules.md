@@ -12,7 +12,8 @@ These see inferred types, bindings and closures. They need `using MyPackage`. Th
 inferred types take their signatures from the caller: `inferred_methods(MyPackage, signatures)` infers the
 methods those signatures reach, so the result is the same on every run. `inferred_methods(MyPackage,
 entry_frames(seeds, MyPackage))` reads the frames an entry-point walk already inferred. The `corset`
-command line has no signatures, so it skips these three rules.
+command line has no signatures, so it skips these rules. An opt-out on a method's first line covers
+every site these rules find in that method.
 
 ### `hidden-input`: `hidden_inputs(mod)`
 
@@ -56,6 +57,24 @@ Escape analysis merges the alias sets of a value and the object it is stored in,
 stores `src` into `dest` reports both.
 
 Repair: add the `!`, or copy the argument before writing to the copy.
+
+### `runtime-dispatch`: `runtime_dispatches(repo, inferred_methods(mod, entry_frames(seeds, mod)))`
+
+Pedantic. Calls the optimizer leaves to run-time dispatch in each frame: a `:call` of a generic
+function, or of `Core._apply_iterate` or `Core.invoke`. A logging macro's hand-off to the current
+logger is not reported. Pass the frames of `entry_frames`, so a `@noinline` callee reached only through
+an `:invoke` edge is read too. One site per method and source line.
+
+Repair: make the callee's argument types inferable, or put a function barrier around the untyped part.
+Opt out a deliberate barrier on the method's first line.
+
+### `widened-return`: `widened_returns(repo, inferred_methods(mod, entry_frames(seeds, mod)))`
+
+Pedantic. Methods whose inferred result a caller cannot compile against: anything but a concrete
+type, `Union{}`, a `Type{X}` constant, a union of at most four concrete types, or a fixed-length tuple
+of such members.
+
+Repair: make the result type depend only on the argument types.
 
 ### Anonymous functions: `impure-anonymous-function`, `unstable-anonymous-function`, `overspecialized-anonymous-function`
 

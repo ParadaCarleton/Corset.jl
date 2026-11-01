@@ -1,6 +1,7 @@
 # Code rules checked on a loaded module and on its repository's Julia source: lowered code,
 # bindings, types and parsed text. Each rule reports its sites through `ratchet!`.
 
+const COMPILER = Base.Compiler
 const SYNTAX = Base.JuliaSyntax # lint: non-public-access  the registered JuliaSyntax lags the parser Julia 1.13 ships
 
 """Definitions, not state: a `DataType` is itself `ismutable`."""
@@ -205,7 +206,7 @@ end
 The line of `method`'s source that lowered statement `index` of `code` comes from: the line of the
 method itself for a statement from another file (a macro's).
 """
-function statement_line(code::Core.CodeInfo, method::Method, index::Integer)::Int
+function statement_line(code::Union{Core.CodeInfo, COMPILER.IRCode}, method::Method, index::Integer)::Int
     file = method.file
     own_lines = [node.line for node in Base.IRShow.buildLineInfoNode(code.debuginfo, method, index) if node.file === file]
     return get(own_lines, 1, method.line)
@@ -236,8 +237,6 @@ function statement_hidden_inputs(code::Core.CodeInfo, method::Method, entry::Pai
     end
     return Site.(string.([read.name for read in reads]), string(method.file), statement_line(code, method, first(entry)), "")
 end
-
-const COMPILER = Base.Compiler
 
 """
 A method typed over one signature by a single inference: its unoptimized typed code (named slots and
@@ -397,14 +396,14 @@ end
 """
 Each named local variable (not an argument) of `repository`'s own methods whose inferred type is
 `abstract_local_type`, one site per variable however many specializations ran. A method a macro generated in another package's file
-(`@concrete`'s constructors) and a compiler's unnamed slot are not the repository's variables.
+(`@concrete`'s constructors) and a compiler's unnamed slot are not the repository's variables. An opt-out
+on a method's first line covers all its locals (`audited_frames`).
 """
 function abstract_locals(
         repository::Repository,
         inferred::AbstractVector{Inferred},
     )::Vector{Site}
-    own = inferred[startswith.([string(item.method.file) for item in inferred], repository.root)]
-    return one_per_line(reduce(vcat, abstract_local_sites.(own); init = Site[]))
+    return one_per_line(reduce(vcat, abstract_local_sites.(audited_frames(repository, inferred, "abstract-local")); init = Site[]))
 end
 
 """The `abstract_locals` sites of `item`, one per abstract named local."""

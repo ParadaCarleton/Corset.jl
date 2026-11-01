@@ -5,7 +5,7 @@ using JET: JET
 using TOML: TOML
 using Corset: Corset
 using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, abstract_locals,
-    c_type_sites, impure_captures, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
+    c_type_sites, impure_anonymous_functions, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
     inferred_methods, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
@@ -89,7 +89,7 @@ function reflect_all(mod::Module)::Nothing
     Corset.defined_methods(mod)
     abstract_fields.(structs)
     repeated_prefix.(structs)
-    impure_captures(mod)
+    impure_anonymous_functions(mod)
     return nothing
 end
 
@@ -165,21 +165,29 @@ end
         @test site_keys(unmarked_effects(repository, inferred)) == ["fixture.jl announce"]
     end
 
-    @testset "capture: anonymous functions that capture anything but plain immutable data" begin
+    @testset "impure, unstable and overspecialized anonymous functions" begin
         for (maker, argument) in ((:adder, 1), (:labeler, "a"), (:reader, [1]), (:kinded, Int))
             Base.invokelatest(Base.invokelatest(getfield(fixture, maker), argument), 2)
         end
-        sites = Dict(site.key => site for site in impure_captures(fixture))
-        @test Set(keys(sites)) == Set(["fixture.jl boxed", "fixture.jl lineless", "fixture.jl reader", "fixture.jl kinded"])
+        sites = Dict(site.key => site for site in impure_anonymous_functions(fixture))
+        @test Set(keys(sites)) == Set(["fixture.jl boxed", "fixture.jl lineless", "fixture.jl reader"])
         @test sites["fixture.jl boxed"].detail == "holds a Core.Box: a captured variable is rebound"
         @test occursin("unverified", sites["fixture.jl lineless"].detail)
         @test sites["fixture.jl reader"].detail == "captures Vector{Int64}, not plain immutable data"
-        @test occursin("{Int64}, not plain", sites["fixture.jl kinded"].detail)
+        overspecialized = only(Corset.overspecialized_anonymous_functions(fixture))
+        @test overspecialized.key == "fixture.jl kinded"
+        @test occursin("{Int64}, so it compiles once per value", overspecialized.detail)
+        @test isempty(Corset.unstable_anonymous_functions(fixture))
         @testset "plain immutable data is a non-function bits value, a String or Symbol, or an immutable composite of them" begin
             @test all(Corset.plain_capture, (Int, Float32, Char, String, Symbol, Nothing, Tuple{Int, String}, @NamedTuple{name::String}, Union{Nothing, String}))
             @test !any(Corset.plain_capture, (Vector{Int}, Dict{Int, Int}, SubArray{Int, 1, Vector{Int}, Tuple{UnitRange{Int}}, true}, DataType, typeof(sin), Module, Real, Union{Int, Vector{Int}}))
             @test !Corset.plain_capture(TypeVar(:T))
-            @test Corset.capture_fault(Vector) == "built where the types of its captures are unknown"
+        end
+        @testset "each capture that is not plain data has one kind of fault" begin
+            @test Corset.capture_kind.([Int, Vector{Int}, Module, Union{Int, Vector{Int}}, typeof(sin), Type{Int}, Real, Union{Int, Real}]) ==
+                [:plain, :impure, :impure, :impure, :overspecialized, :overspecialized, :unstable, :unstable]
+            @test Corset.capture_detail(:unstable, Real) == "captures Real, a type inference left abstract"
+            @test Corset.instance_faults(Vector) == [:unstable => "built where the types of its captures are unknown"]
         end
         @testset "a closure built without line numbers sits at the function that creates it" begin
             fixture_lines = readlines(joinpath(root, "fixture.jl"))

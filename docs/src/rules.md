@@ -34,23 +34,20 @@ method beside methods that return values (a dispatch on "off") is not reported.
 
 Repair: add the `!`.
 
-### `capture`: `impure_captures(mod)`
+### Anonymous functions: `impure-anonymous-function`, `unstable-anonymous-function`, `overspecialized-anonymous-function`
 
-Anonymous functions (lambdas, `do` blocks and the generators of comprehensions) that capture anything
-but plain immutable data; Julia calls an anonymous function with captures a closure. One passes when it
-captures nothing (`x -> x.field`), or when every instance the package compiled captures only
+Three rules on anonymous functions (lambdas, `do` blocks and the generators of comprehensions) that
+capture variables; Julia calls these closures. One passes all three when it captures nothing
+(`x -> x.field`), or when every instance the package compiled captures only plain immutable data:
 non-function `isbits` values, `String`s, `Symbol`s, and immutable structs, tuples or small unions of them
-(`x -> x * scale` with `scale::Float64`). The rule reads the compiled instances from
-`Base.specializations`, so it sees what the package's precompile workload ran. The detail names the fault:
+(`x -> x * scale` with `scale::Float64`). The rules read the compiled instances from
+`Base.specializations`, so they see what the package's precompile workload ran.
 
-- a `Core.Box`: the function or its definer rebinds a captured variable, and every read of it is dynamically typed;
-- a capture that is mutable (an array, `Dict`, `Ref`), a type, a function or a module: a type or function
-  capture compiles the function anew for every value, and mutable state belongs in arguments and results;
-- an instance built where the captures' types are unknown;
-- no compiled instance: the captures are unverified until the workload builds the function.
-
-Repair: pass the data as an argument, use `Base.Fix1`/`Base.Fix2` (`filter(in(allowed), items)`), or
-define a callable struct with the captures as fields.
+| Rule | Function | Finds | Repair |
+| --- | --- | --- | --- |
+| `impure-anonymous-function` | `impure_anonymous_functions(mod)` | a mutable capture (an array, `Dict`, `Ref`, a module); a `Core.Box`, a captured variable rebound; no compiled instance, so the captures are unverified | pass the data as an argument, or use `Base.Fix1`/`Base.Fix2` (`filter(in(allowed), items)`); cover an unverified function in the precompile workload |
+| `unstable-anonymous-function` | `unstable_anonymous_functions(mod)` | a capture whose type inference left abstract, or an instance built where the capture types are unknown | make the captured variable's type concrete, or pass it as an argument |
+| `overspecialized-anonymous-function` | `overspecialized_anonymous_functions(mod)` | a captured type or function: the anonymous function compiles anew for every value | pass it as an argument, or define a callable struct whose field is a `DataType` or `Function` |
 
 ### `abstract-field`: `abstract_fields(type)`, `repeated-prefix`: `repeated_prefix(type)`
 

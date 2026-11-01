@@ -522,37 +522,68 @@ closure_instances(type::DataType, world::Integer)::Vector{Type} = unique(
 instance_callees(match::Core.MethodMatch)::Vector{Type} =
     Type[first(Base.unwrap_unionall(instance.specTypes).parameters) for instance in Base.specializations(match.method)]
 
-"""Why closure instance `instance` captures more than `plain_capture` data; empty when it does not."""
-function capture_fault(@nospecialize(instance::Any))::String
+"""
+The kind of fault a capture of type `capture` is, in a compiled closure instance: `:plain` for
+`plain_capture` data, `:overspecialized` for a type or function (one compile per value), `:impure` for
+other concrete data (mutable state or a module), `:unstable` for a type inference left abstract.
+"""
+function capture_kind(@nospecialize(capture::Any))::Symbol
+    if plain_capture(capture)
+        return :plain
+    end
+    # A type capture is `Type{Int}`, or `Core.TypeEgal{Int}` (not a DataType) from Julia 1.14; neither is concrete.
+    if capture isa Type && capture <: Union{Type, Function}
+        return :overspecialized
+    end
+    if (capture isa DataType && isconcretetype(capture)) || (capture isa Union && all(isconcretetype, Base.uniontypes(capture)))
+        return :impure
+    end
+    return :unstable
+end
+
+"""What a capture of type `capture` with fault `kind` (`capture_kind`) costs, for the site's detail."""
+function capture_detail(kind::Symbol, @nospecialize(capture::Any))::String
+    if kind === :overspecialized
+        return "captures $capture, so it compiles once per value; pass it as an argument"
+    end
+    if kind === :unstable
+        return "captures $capture, a type inference left abstract"
+    end
+    return "captures $capture, not plain immutable data"
+end
+
+"""The faults of closure instance `instance`, as `kind => detail` pairs (`capture_kind`, `capture_detail`)."""
+function instance_faults(@nospecialize(instance::Any))::Vector{Pair{Symbol, String}}
     if !(instance isa DataType && isconcretetype(instance))
-        return "built where the types of its captures are unknown"
+        return [:unstable => "built where the types of its captures are unknown"]
     end
-    impure = filter(!plain_capture, field_types(instance))
-    if isempty(impure)
-        return ""
-    end
-    return "captures $(join(string.(impure), ", ")), not plain immutable data"
+    captures = field_types(instance)
+    kinds = capture_kind.(captures)
+    return [kind => capture_detail(kind, capture) for (kind, capture) in zip(kinds, captures) if kind !== :plain]
 end
 
 """
-Why closure `type` should be a named function or callable struct: it holds a `Core.Box`, no instance of
-it was compiled (so its captures are unverified), or an instance captures more than plain data. Empty
-for a closure that captures nothing, or only `plain_capture` data in every instance.
+The faults of closure `type`, as `kind => detail` pairs: a `Core.Box` or no compiled instance (its captures
+unverified) is `:impure`; otherwise the `instance_faults` of every instance. None for a closure that
+captures nothing, or only `plain_capture` data in every instance.
 """
-function closure_fault(type::DataType, world::Integer)::String
+function closure_faults(type::DataType, world::Integer)::Vector{Pair{Symbol, String}}
     declared = field_types(type)
     if isempty(declared)
-        return ""
+        return Pair{Symbol, String}[]
     end
     if Core.Box in declared
-        return "holds a Core.Box: a captured variable is rebound"
+        return [:impure => "holds a Core.Box: a captured variable is rebound"]
     end
     instances = closure_instances(type, world)
     if isempty(instances)
-        return "no compiled instance, so its captures are unverified; cover it in the precompile workload"
+        return [:impure => "no compiled instance, so its captures are unverified; cover it in the precompile workload"]
     end
-    return join(filter(!isempty, unique(capture_fault.(instances))), "; ")
+    return unique(reduce(vcat, instance_faults.(instances); init = Pair{Symbol, String}[]))
 end
+
+"""The details of the `faults` (`closure_faults`) of kind `kind`, joined; empty when there are none."""
+kind_detail(faults::AbstractVector{Pair{Symbol, String}}, kind::Symbol)::String = join(last.(faults[first.(faults) .=== kind]), "; ")
 
 """The closure types the current code of `mod` can create (`live_closures`), unwrapped."""
 function live_closure_types(mod::Module)::Vector{DataType}
@@ -562,18 +593,27 @@ function live_closure_types(mod::Module)::Vector{DataType}
 end
 
 """
-Each `live_closure_types` closure of `mod` that `closure_fault` rejects, as a `closure_site` whose detail is
-the fault. A closure that captures nothing, like `x -> x.field`, passes.
+Each `live_closure_types` closure of `mod` with a fault of kind `kind` (`closure_faults`), as a
+`closure_site` whose detail is the fault. A closure that captures nothing, like `x -> x.field`, passes.
 """
-function impure_captures(mod::Module)::Vector{Site}
+function anonymous_function_sites(mod::Module, kind::Symbol)::Vector{Site}
     world = Base.get_world_counter()
     namers = closure_namers(mod, defined_methods(mod))
     types = live_closure_types(mod)
-    faults = closure_fault.(types, world)
-    faulty = .!isempty.(faults)
+    details = kind_detail.(closure_faults.(types, world), kind)
+    faulty = .!isempty.(details)
     definers = closure_definer.([type.name for type in types[faulty]], (namers,))
-    return closure_site.(types[faulty], definers, world, faults[faulty])
+    return closure_site.(types[faulty], definers, world, details[faulty])
 end
+
+"""Anonymous functions of `mod` that capture mutable state, hold a `Core.Box`, or were never compiled."""
+impure_anonymous_functions(mod::Module)::Vector{Site} = anonymous_function_sites(mod, :impure)
+
+"""Anonymous functions of `mod` built where inference could not pin down the types of their captures."""
+unstable_anonymous_functions(mod::Module)::Vector{Site} = anonymous_function_sites(mod, :unstable)
+
+"""Anonymous functions of `mod` that capture a type or function, so each value compiles a new instance."""
+overspecialized_anonymous_functions(mod::Module)::Vector{Site} = anonymous_function_sites(mod, :overspecialized)
 
 """Struct types `mod` defines, closures excluded; a type bound to two names counts once."""
 function module_structs(mod::Module)::Vector{DataType}

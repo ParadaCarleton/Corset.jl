@@ -531,8 +531,8 @@ function capture_kind(@nospecialize(capture::Any))::Symbol
     if plain_capture(capture)
         return :plain
     end
-    # `Type{Int}` is not `isconcretetype`, so a type capture is matched before concreteness.
-    if capture isa DataType && capture <: Union{Type, Function}
+    # A type capture is `Type{Int}`, or `Core.TypeEgal{Int}` (not a DataType) from Julia 1.14; neither is concrete.
+    if capture isa Type && capture <: Union{Type, Function}
         return :overspecialized
     end
     if (capture isa DataType && isconcretetype(capture)) || (capture isa Union && all(isconcretetype, Base.uniontypes(capture)))

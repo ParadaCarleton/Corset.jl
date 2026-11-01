@@ -929,7 +929,7 @@ end
         Tuple{typeof(Floats.scaled), narrow}, Tuple{typeof(Floats.halved), narrow}, Tuple{typeof(Floats.ratio), Int, Int, narrow},
         Tuple{typeof(Floats.floated), Int, Float16}, Tuple{typeof(Floats.global_scaled), narrow},
         Tuple{typeof(Floats.elementwise), Vector{narrow}}, Tuple{typeof(Floats.chained), narrow},
-        Tuple{typeof(Floats.calls_widened), narrow}, Tuple{typeof(Floats.branchy), narrow, Bool},
+        Tuple{typeof(Floats.calls_widened), narrow}, Tuple{typeof(Floats.branchy), narrow, Bool}, Tuple{typeof(Floats.merged), narrow, Bool},
         Tuple{typeof(Floats.refined), narrow, Union{Nothing, narrow}}, Tuple{typeof(Floats.thrower), narrow},
         Tuple{typeof(Floats.wide), Float64}, Tuple{typeof(Floats.no_floats), Int},
         Tuple{typeof(Floats.grown), narrow, untyped}, Tuple{typeof(Floats.kept), narrow, untyped},
@@ -975,6 +975,10 @@ end
         @test Set(Corset.held_floats(Union{Float32, Vector{Float64}}, 0)) == Set([Float32, Float64])
         @test isempty(Corset.held_floats(Vector{T} where {T}, 0)) && isempty(Corset.held_floats(Float32, 5))
         @test isempty(Corset.value_floats(Type{Float64}))
+    end
+    @testset "a φ merging a literal widens; a plain call is named by its callee" begin
+        @test found["merged"].detail == "`0.0` makes a Float64; the widest float argument is Float32"
+        @test Corset.callee_label(Expr(:call, GlobalRef(Base, :sqrt))) == "Base.sqrt"
     end
 end
 

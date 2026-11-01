@@ -11,6 +11,10 @@ chained(x::Float32) = (y = x * 2.0;
 @noinline widened(x::Float32) = Float64(x)
 calls_widened(x::Float32) = widened(x) + 1
 branchy(x::Float32, flag::Bool) = flag ? x : 0.0
+function merged(x::Float32, flag::Bool)
+    y = flag ? x : 0.0
+    return (y, flag)
+end
 refined(x::Float32, y::Union{Nothing, Float32}) = isnothing(y) ? x : y + x
 thrower(x::Float32) = error("no float here")
 wide(x::Float64) = x * 2.0

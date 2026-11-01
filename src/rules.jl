@@ -69,33 +69,30 @@ function defined_methods(mod::Module)::Vector{Method} # lint: abstract-local  re
             if isdefined(mod, name)
     ]
     world = Base.get_world_counter()
-    function_methods = Method[
-        method
-            for value in values
-            if value isa Function
-            for method in methods(value)
-    ]
-    call_methods = Method[
-        match.method
-            for value in values
-            if value isa Type && Base.unwrap_unionall(value) isa DataType
-            for match in Base._methods_by_ftype(
-                Tuple{Base.unwrap_unionall(value), Vararg{Any}},
-                -1,
-                world,
-            )
-    ]
-    constructors = Method[
-        method
-            for value in values
-            if value isa Type
-            for method in methods(value)
-    ]
-    return unique(
-        method
-            for method in vcat(function_methods, call_methods, constructors)
-            if method.module === mod
+    found = reduce(
+        vcat,
+        vcat(binding_methods.(values, Function), call_methods.(values, world), binding_methods.(values, Type));
+        init = Method[],
     )
+    return unique(method for method in found if method.module === mod)
+end
+
+# The helpers below take each binding as a call argument: a closure capturing a type or function
+# specializes on it, and one compile per binding of the checked package dominated a run.
+"""The methods of binding `value` when it is a `kind`: a function's methods, or a type's constructors."""
+function binding_methods(@nospecialize(value::Any), kind::Type)::Vector{Method}
+    if !(value isa kind)
+        return Method[]
+    end
+    return collect(Method, methods(value))
+end
+
+"""The methods that call an instance of binding `value` when it is a struct type; none otherwise."""
+function call_methods(@nospecialize(value::Any), world::Integer)::Vector{Method}
+    if !(value isa Type && Base.unwrap_unionall(value) isa DataType)
+        return Method[]
+    end
+    return Method[match.method for match in Base._methods_by_ftype(Tuple{Base.unwrap_unionall(value), Vararg}, -1, world)]
 end
 
 """The name of the type whose instances `method` is called on (its function's type), or `nothing`."""
@@ -549,11 +546,13 @@ Fields of `type` declared with an abstract type (not a type parameter, not a `Un
 with a concrete container of one: `Vector{Any}`, `Base.RefValue{Any}` and
 `Dict{Tuple, Any}` are concrete, but every read from them is dynamically dispatched.
 """
-abstract_fields(type::DataType)::Vector{Symbol} = [
-    name
-        for (name, declared) in zip(fieldnames(type), fieldtypes(type))
-        if !(declared isa TypeVar) && !(declared isa Union) && holds_abstract(declared)
-]
+function abstract_fields(type::DataType)::Vector{Symbol}
+    field_names = collect(Symbol, fieldnames(type))
+    return field_names[abstract_declaration.(fieldtype.((type,), field_names))]
+end
+
+"""Whether field type `declared` is abstract: not a type parameter, not a `Union`, and `holds_abstract`."""
+abstract_declaration(@nospecialize(declared::Any))::Bool = !(declared isa TypeVar) && !(declared isa Union) && holds_abstract(declared)
 
 """
 Whether `declared` is abstract or has an abstract type among its parameters, at any depth.
@@ -593,17 +592,18 @@ first word shared by more than half of at least three fields (`continuation_step
 when no word repeats.
 """
 function repeated_prefix(type::DataType)::Union{String, Nothing} # lint: abstract-local  reflects on values of unknown type
-    words = [first_word(name) for name in fieldnames(type) if occursin('_', string(name))]
+    words = String[first_word(name) for name in collect(Symbol, fieldnames(type)) if occursin('_', string(name))]
     own = first_word(nameof(type))
     if own in words
         return own
     end
+    fields = fieldcount(type)
     shared = [
         word
             for word in unique(words)
-            if count(==(word), words) * 2 > fieldcount(type)
+            if count(==(word), words) * 2 > fields
     ]
-    if fieldcount(type) >= 3 && !isempty(shared)
+    if fields >= 3 && !isempty(shared)
         return only(shared)
     end
     return nothing

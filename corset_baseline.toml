@@ -73,6 +73,7 @@
 "float_widening.jl float_widenings" = 1
 "float_widening.jl frame_widenings" = 1
 "float_widening.jl held_floats" = 1
+"float_widening.jl ir_label" = 2
 "float_widening.jl result_floats" = 2
 "float_widening.jl returned_operands" = 1
 "float_widening.jl statement_operands" = 6
@@ -317,11 +318,13 @@
 "Compiler.typeinf_frame" = 1
 "Compiler.widenconst" = 11
 "Core.Argument" = 2
+"Core.BindingPartition" = 1
 "Core.Box" = 2
 "Core.Builtin" = 2
 "Core.CodeInfo" = 10
 "Core.CodeInstance" = 1
 "Core.Compiler" = 1
+"Core.Const" = 1
 "Core.CoreSTDERR" = 1
 "Core.CoreSTDOUT" = 1
 "Core.IntrinsicFunction" = 2

@@ -55,21 +55,21 @@ struct Operand
     label::String
 end
 
-"""IR value `operand` as inference reads it: a global Julia 1.14 keeps as a `Core.BindingPartition` becomes its `GlobalRef`."""
-ir_value(operand::Any)::Any = operand # lint: abstract-local  IR operands are any value
+"""How a detail names IR value `operand`. Julia 1.14 keeps a global as a `Core.BindingPartition`, named by its binding."""
+ir_label(operand::Any)::String = string(operand) # lint: abstract-local  IR operands are any value
 @static if isdefined(Base, :partition_owner)
-    ir_value(operand::Core.BindingPartition)::GlobalRef = Base.partition_owner(operand).globalref # lint: non-public-access
+    ir_label(operand::Core.BindingPartition)::String = string(Base.partition_owner(operand).globalref) # lint: non-public-access  1.14 only # COV_EXCL_LINE
 end
 
 """The `Operand` of IR value `operand` in `ir`. A type operand (`Float64` in `sitofp(Float64, n)`) brings in its own float."""
-function Operand(ir_operand::Any, ir::COMPILER.IRCode)::Operand # lint: abstract-local  IR operands are any value
-    operand = ir_value(ir_operand)
-    type = COMPILER.widenconst(COMPILER.argextype(operand, ir))
-    floats = value_floats(type)
-    if type <: Type && type isa DataType && only(type.parameters) isa DataType
-        floats = held_floats(only(type.parameters), 0)
+function Operand(operand::Any, ir::COMPILER.IRCode)::Operand # lint: abstract-local  IR operands are any value
+    extended = COMPILER.argextype(operand, ir)
+    floats = value_floats(COMPILER.widenconst(extended))
+    # Read a type operand from its constant: Julia 1.14 widens `Const(Float64)` to `Core.TypeEgal{Float64}`.
+    if extended isa Core.Const && extended.val isa DataType
+        floats = held_floats(extended.val, 0)
     end
-    return Operand(operand isa Union{Core.Argument, Core.SSAValue}, floats, string(operand))
+    return Operand(operand isa Union{Core.Argument, Core.SSAValue}, floats, ir_label(operand))
 end
 
 """
@@ -80,7 +80,7 @@ statement_operands(statement::Expr, ir::COMPILER.IRCode)::Vector{Operand} = Oper
 statement_operands(statement::Core.PhiNode, ir::COMPILER.IRCode)::Vector{Operand} =
     Operand.(statement.values[isassigned.((statement.values,), eachindex(statement.values))], (ir,))
 statement_operands(statement::Core.PiNode, ir::COMPILER.IRCode)::Vector{Operand} = [Operand(statement.val, ir)]
-statement_operands(statement::GlobalRef, ir::COMPILER.IRCode)::Vector{Operand} = [Operand(statement, ir)]
+statement_operands(statement::Union{GlobalRef, Core.BindingPartition}, ir::COMPILER.IRCode)::Vector{Operand} = [Operand(statement, ir)]
 statement_operands(statement::Core.ReturnNode, ir::COMPILER.IRCode)::Vector{Operand} = returned_operands(statement, ir)
 statement_operands(::Any, ::COMPILER.IRCode)::Vector{Operand} = Operand[]
 
@@ -101,8 +101,7 @@ The detail of IR statement `statement`, of inferred type `type`, when it widens:
 float wider than `budget` and no computed operand already did. It names the first operand that brings
 the wide float in, else the callee; `nothing` when the statement does not widen.
 """
-function widening_detail(ir_statement::Any, type::Any, ir::COMPILER.IRCode, budget::FloatBudget)::Union{Nothing, String} # lint: abstract-local  IR statements and types are any value
-    statement = ir_value(ir_statement)
+function widening_detail(statement::Any, type::Any, ir::COMPILER.IRCode, budget::FloatBudget)::Union{Nothing, String} # lint: abstract-local  IR statements and types are any value
     operands = statement_operands(statement, ir)
     result = result_floats(statement, type, operands)
     wide = operands[wider.(getfield.(operands, :floats), (budget,))]
@@ -131,7 +130,7 @@ function callee_label(statement::Expr)::String
     if !isnothing(instance)
         return string(instance.def.name)
     end
-    return string(ir_value(first(statement.args)))
+    return ir_label(first(statement.args))
 end
 
 """
@@ -146,7 +145,7 @@ function dispatch_widening(statement::Expr, ir::COMPILER.IRCode, budget::FloatBu
     candidates = call_candidates(statement, ir, search)
     returned = value_floats.(COMPILER.widenconst.(getfield.(getfield.(candidates.frames, :code), :rettype)))
     wide = getfield.(candidates.frames[wider.(returned, (budget,))], :method)
-    callee = first(statement.args)
+    callee = ir_label(first(statement.args))
     if !isempty(wide)
         return "dispatches `$callee`; candidate " * join("`" .* candidate_name.(wide) .* "`", ", ") * " returns a float wider than $(widest(budget.floats))"
     elseif !candidates.complete

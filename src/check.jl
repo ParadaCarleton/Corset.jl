@@ -53,7 +53,7 @@ function judge(
 end
 
 """Whether `rule` reads the types inference gives `signatures` (`inferred_methods`)."""
-reads_signatures(rule::Rule)::Bool = rule isa AbstractLocalRule || rule isa BangRule
+reads_signatures(rule::Rule)::Bool = rule isa Union{AbstractLocalRule, BangRule, UnmarkedMutationRule}
 
 """Whether `rule` has what it reads: the loaded package `mod` for a module rule, `signatures` for a rule that reads inferred types."""
 can_run(rule::Rule, mod::Union{Module, Nothing}, signatures::Union{AbstractVector{<:Type}, Nothing})::Bool =

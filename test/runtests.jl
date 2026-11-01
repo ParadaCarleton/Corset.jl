@@ -686,6 +686,48 @@ end
     end
 end
 
+module Mutation
+    include(joinpath(@__DIR__, "fixtures", "mutation_module.txt"))
+end
+
+@testset "unmarked-mutation reads escape analysis over the walked frames" begin
+    vector = Vector{Int}
+    seeds = Type[
+        Tuple{typeof(Mutation.direct), vector}, Tuple{typeof(Mutation.aliased), vector},
+        Tuple{typeof(Mutation.setprop), Mutation.Box}, Tuple{typeof(Mutation.viafield), Mutation.Box},
+        Tuple{typeof(Mutation.outer), vector}, Tuple{typeof(Mutation.far_outer), vector},
+        Tuple{typeof(Mutation.viaindex), Vector{vector}}, Tuple{typeof(Mutation.stashed), vector},
+        Tuple{typeof(Mutation.rebound), Memory{Int}}, Tuple{typeof(Mutation.viahelper), Mutation.Box},
+        Tuple{typeof(Mutation.fresh)}, Tuple{typeof(Mutation.readonly), vector},
+        Tuple{typeof(Mutation.addup), Int, Int}, Tuple{typeof(Mutation.reads), vector},
+        Tuple{typeof(Mutation.bangwrite!), vector}, Tuple{typeof(Mutation.countdown), vector, Int},
+        Tuple{typeof(Mutation.opaquecall), Function, vector}, Tuple{typeof(Mutation.viaccall), vector},
+    ]
+    sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred_methods(Mutation, entry_frames(seeds, Mutation)))
+    details = Dict(last(split(site.key)) => site.detail for site in sites)
+    @testset "a write through an argument, an alias, a field, an element or a callee is reported" begin
+        for name in ("direct", "aliased", "setprop", "viafield", "outer", "far_helper", "far_outer", "viaindex", "stashed")
+            @test startswith(get(details, name, ""), "writes argument")
+        end
+        @test details["direct"] == "writes argument `v` but its name has no `!`"
+    end
+    @testset "fresh memory, reads, a rebound local and a `!` function are not reported" begin
+        for name in ("rebound", "viahelper", "fresh", "readonly", "addup", "reads", "bangwrite!", "countdown", "memwrite!", "fieldread")
+            @test !haskey(details, name)
+        end
+    end
+    @testset "an argument passed to a dynamic dispatch or a ccall is unverified, never clean" begin
+        @test details["opaquecall"] == "passes argument `x` to a call the analysis cannot follow"
+        @test details["viaccall"] == "passes argument `x` to a call the analysis cannot follow"
+    end
+    @testset "Base.sort and Base.replace copy before they write" begin
+        for signature in (Tuple{typeof(sort), vector}, Tuple{typeof(replace), vector, Pair{Int, Int}})
+            writes = Corset.argument_writes(only(Corset.typed_frames(signature)), Dict{Core.MethodInstance, Corset.Inferred}(), ())
+            @test isempty(writes.written) && isempty(writes.unverified)
+        end
+    end
+end
+
 @testset "entry_frames walks :invoke edges from the seeds and reads nothing the session ran" begin
     outer_call = Tuple{typeof(Probe.outer), Probe.Marker}
     inner_call = Tuple{typeof(Probe.inner), Probe.Marker}

@@ -1,0 +1,30 @@
+# Functions that write, or do not write, through an argument, for the `unmarked-mutation` rule.
+mutable struct Box
+    a::Int
+    inner::Vector{Int}
+end
+direct(v) = (v[1] = 3; v)
+aliased(v) = (w = v; push!(w, 1); w)
+setprop(x) = (x.a = 1; x)
+viafield(x) = (y = x.inner; push!(y, 1); x)
+helper(x) = (x[1] = 1; nothing)
+outer(x) = helper(x)
+@noinline far_helper(x) = (x[1] = 1; nothing)
+far_outer(x) = far_helper(x)
+viaindex(x) = (x[1][1] = 1; nothing)
+stashed(x) = (c = Box(0, x); setfield!(c, :inner, x); getfield(c, :inner)[1] = 1; c)
+
+fresh_memory() = Core.memorynew(Memory{Int}, 1)
+memwrite!(m) = Core.memoryrefset!(Core.memoryrefnew(m), 1, :not_atomic, true)
+rebound(x) = (y = x; y = fresh_memory(); memwrite!(y); y)
+fieldread(b) = getfield(b, :a)
+viahelper(b) = fieldread(b)
+fresh() = (v = Int[]; push!(v, 1); v)
+readonly(b) = (t = similar(b); copyto!(t, b); t)
+addup(a, b) = a + b
+reads(v) = length(v)
+bangwrite!(v) = (v[1] = 1; v)
+@noinline countdown(v, n) = n == 0 ? length(v) : countdown(v, n - 1)
+
+opaquecall(f, x) = f(x)
+viaccall(x) = ccall(:jl_typeof_str, Cstring, (Any,), x)

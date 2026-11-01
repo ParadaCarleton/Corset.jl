@@ -28,6 +28,7 @@
 "candidates.jl call_candidates" = 1
 "candidates.jl candidate_frame" = 1
 "candidates.jl candidate_name" = 1
+"candidates.jl with_limit" = 1
 "check.jl allowances" = 1
 "check.jl disallowed_keys" = 1
 "check.jl file_diff" = 1
@@ -101,16 +102,25 @@
 "jet.jl loaded_jet" = 1
 "mutation.jl alias_indices" = 1
 "mutation.jl argument_writes" = 1
+"mutation.jl candidate_argument" = 1
+"mutation.jl candidate_writes" = 1
+"mutation.jl dispatch_writes" = 1
 "mutation.jl effect_arguments" = 1
 "mutation.jl invoked_writes" = 1
 "mutation.jl mutation_sites" = 1
 "mutation.jl operand_index" = 1
 "mutation.jl operand_indices" = 1
+"mutation.jl position_writers" = 1
 "mutation.jl reached_arguments" = 1
+"mutation.jl reached_writers" = 1
 "mutation.jl statement_writes" = 2
 "mutation.jl unmarked_mutations" = 1
+"mutation.jl unresolved_positions" = 1
 "mutation.jl view_sources" = 1
 "mutation.jl writable_operands" = 1
+"mutation.jl writable_positions" = 1
+"mutation.jl writer_arguments" = 1
+"mutation.jl writer_note" = 1
 "mutation.jl written_detail" = 1
 "non_public_access.jl entry_file" = 1
 "non_public_access.jl non_public_accesses" = 1
@@ -249,7 +259,7 @@
 
 [non-public-access]
 "Base.Compiler" = 1
-"Base.Compiler.EscapeAnalysis.EscapeState" = 12
+"Base.Compiler.EscapeAnalysis.EscapeState" = 16
 "Base.Compiler.EscapeAnalysis.iridx" = 1
 "Base.Compiler.IRShow.buildLineInfoNode" = 1
 "Base.CoreLogging" = 3
@@ -278,12 +288,12 @@
 "Base.uniontypes" = 4
 "Base.unwrap_unionall" = 18
 "Compiler.EscapeAnalysis" = 1
-"Compiler.IRCode" = 15
+"Compiler.IRCode" = 19
 "Compiler.MethodLookupResult" = 1
 "Compiler.NativeInterpreter" = 4
 "Compiler.OptimizationState" = 1
 "Compiler._findall_matches" = 1
-"Compiler.argextype" = 3
+"Compiler.argextype" = 4
 "Compiler.get_escape_cache" = 1
 "Compiler.ignorelimited" = 1
 "Compiler.optimizer_lattice" = 1
@@ -291,7 +301,7 @@
 "Compiler.singleton_type" = 1
 "Compiler.specialize_method" = 1
 "Compiler.typeinf_frame" = 1
-"Compiler.widenconst" = 5
+"Compiler.widenconst" = 6
 "Core.Argument" = 1
 "Core.Box" = 2
 "Core.Builtin" = 2
@@ -301,7 +311,7 @@
 "Core.CoreSTDERR" = 1
 "Core.CoreSTDOUT" = 1
 "Core.IntrinsicFunction" = 2
-"Core.MethodInstance" = 11
+"Core.MethodInstance" = 13
 "Core.MethodMatch" = 3
 "Core.ReturnNode" = 1
 "Core.SSAValue" = 3

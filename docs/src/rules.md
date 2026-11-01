@@ -51,8 +51,13 @@ Functions without `!` in the name that write through an argument: `v[1] = 0`, `x
 `push!(x.items, 1)`, or a write through an alias, a field or an element of the argument. The rule reads each
 frame's optimized IR and asks the compiler's escape analysis which arguments the written object
 aliases. A callee that is not inlined writes its first argument when its name ends in `!`, and what its own frame writes otherwise.
-An argument passed to a runtime dispatch or a `ccall` is reported as one that may be written: the
-analysis cannot read that code. `runtime-dispatch` reports the same dispatch.
+At a runtime dispatch the rule lists the candidate methods (`candidate_limit`, default 4, in the
+`[preferences.Corset]` table, `--candidate-limit` on the command line, or
+`unmarked_mutations(repo, inferred; search = CandidateSearch(inferred; candidate_limit))`). When every
+candidate is listed and none writes the argument, the dispatch writes nothing. A candidate that writes it
+makes the write definite, and the detail names the candidate. An argument passed to a `ccall`, or to a
+dispatch with more candidates than the budget, a candidate inference cannot type, or a candidate that
+itself dispatches on the argument, is reported as one that may be written. `runtime-dispatch` reports the same dispatch.
 A method the package adds to another module's non-`!` function (`Base.length`, `Base.iterate` on a stateful iterator) is checked too: "adds a writing method to `Base.length`, which callers expect not to write". A write to any Julia object counts, an `IOBuffer`, a lock or a `Channel` included. Arguments that cannot
 be written in Julia are never reported: plain immutable data (bits values, `String`s, `Symbol`s), types,
 modules, and OS-backed handles (`IOStream`, files, pipes, sockets, terminals, processes), whose writes

@@ -90,42 +90,58 @@ writable(type::Type)::Bool = !(plain_capture(type) || type <: Union{Type, Module
 
 """
 What a frame or statement does to arguments, as indices: those it writes through, those it passes to
-a runtime dispatch, and those it passes to a `ccall`. The analysis cannot read the last two callees.
+a runtime dispatch it cannot resolve, and those it passes to a `ccall`. The analysis cannot read the
+last two callees. `writers` pairs a written index with the runtime-dispatch candidate that writes it.
 """
 struct ArgumentWrites
     written::Vector{Int}
     dispatched::Vector{Int}
     foreign::Vector{Int}
+    writers::Vector{Pair{Int, Method}}
 end
+
+ArgumentWrites(written::AbstractVector{Int}, dispatched::AbstractVector{Int}, foreign::AbstractVector{Int})::ArgumentWrites =
+    ArgumentWrites(written, dispatched, foreign, Pair{Int, Method}[])
 
 const NO_WRITES = ArgumentWrites(Int[], Int[], Int[])
 
 """
-    argument_writes(frame, frames, stack)
+    argument_writes(frame, frames, stack, search)
 
 The `ArgumentWrites` of `frame`, as argument numbers; a written argument is neither dispatched nor
 foreign. A statically resolved callee writes the arguments its own frame in `frames` (keyed by method
 instance) writes; a callee named with `!` writes its first argument; any other callee writes none.
+A runtime dispatch writes what its `call_candidates` in `search` write (`dispatch_writes`).
 `stack` holds the instances being summarized, which a recursive call skips.
 """
 function argument_writes(
         frame::Inferred,
         frames::AbstractDict{Core.MethodInstance, Inferred},
         stack::Tuple,
+        search::CandidateSearch,
     )::ArgumentWrites
     estate = escape_state(frame.ir, frame.method.nargs)
-    effects = statement_writes.(frame.ir.stmts.stmt, (frame.ir,), (estate,), (frames,), (stack,))
+    effects = statement_writes.(frame.ir.stmts.stmt, (frame.ir,), (estate,), (frames,), (stack,), (search,))
     written = effect_arguments(:written, effects, frame.ir, estate)
     dispatched = setdiff(effect_arguments(:dispatched, effects, frame.ir, estate), written)
-    return ArgumentWrites(written, dispatched, setdiff(effect_arguments(:foreign, effects, frame.ir, estate), written))
+    foreign = setdiff(effect_arguments(:foreign, effects, frame.ir, estate), written)
+    return ArgumentWrites(written, dispatched, foreign, reduce(vcat, reached_writers.(effects, (frame.ir,), (estate,)); init = Pair{Int, Method}[]))
 end
 
 """The arguments that the `field` operands of the statement `effects` reach (`reached_arguments`)."""
 effect_arguments(field::Symbol, effects::AbstractVector{ArgumentWrites}, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::Vector{Int} =
     reached_arguments(reduce(vcat, getfield.(effects, field); init = Int[]), ir, estate)
 
+"""The `writers` of statement `effect`, each index replaced by the arguments it reaches."""
+reached_writers(effect::ArgumentWrites, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::Vector{Pair{Int, Method}} =
+    reduce(vcat, writer_arguments.(effect.writers, (ir,), (estate,)); init = Pair{Int, Method}[])
+
+"""The arguments the index of `writer` reaches (`reached_arguments`), each paired with its candidate."""
+writer_arguments(writer::Pair{Int, Method}, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::Vector{Pair{Int, Method}} =
+    reached_arguments([first(writer)], ir, estate) .=> (last(writer),)
+
 """The `ArgumentWrites` of one IR statement, as the indices of its operands."""
-statement_writes(::Any, ::COMPILER.IRCode, ::ESCAPE.EscapeState, ::AbstractDict, ::Tuple)::ArgumentWrites = NO_WRITES
+statement_writes(::Any, ::COMPILER.IRCode, ::ESCAPE.EscapeState, ::AbstractDict, ::Tuple, ::CandidateSearch)::ArgumentWrites = NO_WRITES
 
 function statement_writes(
         statement::Expr,
@@ -133,9 +149,10 @@ function statement_writes(
         estate::ESCAPE.EscapeState,
         frames::AbstractDict{Core.MethodInstance, Inferred},
         stack::Tuple,
+        search::CandidateSearch,
     )::ArgumentWrites
     if statement.head === :invoke
-        return ArgumentWrites(invoked_writes(statement, estate, frames, stack), Int[], Int[])
+        return ArgumentWrites(invoked_writes(statement, estate, frames, stack, search), Int[], Int[])
     elseif statement.head === :foreigncall
         return ArgumentWrites(Int[], Int[], writable_operands(statement.args[6:(5 + length(statement.args[3]))], ir, estate))
     elseif statement.head !== :call
@@ -145,9 +162,68 @@ function statement_writes(
     if builtin in WRITING_BUILTINS
         return ArgumentWrites(operand_indices(statement.args[2:2], estate), Int[], Int[])
     elseif isnothing(builtin) || builtin in CALLING_BUILTINS
-        return ArgumentWrites(Int[], writable_operands(statement.args[2:end], ir, estate), Int[])
+        return dispatch_writes(statement, ir, estate, frames, stack, search)
     end
     return NO_WRITES
+end
+
+"""
+The `ArgumentWrites` of runtime-dispatch `statement`, read from its `call_candidates`. An operand a
+candidate writes is written, and names that candidate. An operand stays dispatched (unresolved) when
+the candidates are incomplete, one is on `stack`, or one passes it on to a dispatch or a `ccall`.
+"""
+function dispatch_writes(
+        statement::Expr,
+        ir::COMPILER.IRCode,
+        estate::ESCAPE.EscapeState,
+        frames::AbstractDict{Core.MethodInstance, Inferred},
+        stack::Tuple,
+        search::CandidateSearch,
+    )::ArgumentWrites
+    positions = writable_positions(statement.args, ir)
+    candidates = call_candidates(statement, ir, search)
+    if !candidates.complete || any(in(stack), getfield.(getfield.(candidates.frames, :code), :parent))
+        return ArgumentWrites(Int[], operand_indices(statement.args[positions], estate), Int[])
+    end
+    # A candidate's own dispatches stay unresolved: the budget covers one level.
+    effects = candidate_writes.(candidates.frames, (frames,), (stack,), (with_limit(search, 0),))
+    writers = reduce(vcat, position_writers.(candidates.frames, effects, (positions,), (statement.args,), (estate,)); init = Pair{Int, Method}[])
+    unresolved = unique(reduce(vcat, unresolved_positions.(candidates.frames, effects, (positions,)); init = Int[]))
+    return ArgumentWrites(unique(first.(writers)), operand_indices(statement.args[unresolved], estate), Int[], writers)
+end
+
+"""The `ArgumentWrites` of candidate `frame`, summarized with `frame` pushed on `stack`."""
+candidate_writes(frame::Inferred, frames::AbstractDict{Core.MethodInstance, Inferred}, stack::Tuple, search::CandidateSearch)::ArgumentWrites =
+    argument_writes(frame, frames, (stack..., frame.code.parent), search)
+
+"""The operand indices at `positions` of call `operands` that candidate `frame` writes (`effect`), each paired with its method."""
+function position_writers(
+        frame::Inferred,
+        effect::ArgumentWrites,
+        positions::AbstractVector{Int},
+        operands::AbstractVector,
+        estate::ESCAPE.EscapeState,
+    )::Vector{Pair{Int, Method}}
+    written = positions[in.(candidate_argument.((frame.method,), positions), (effect.written,))]
+    return operand_indices(operands[written], estate) .=> (frame.method,)
+end
+
+"""The `positions` whose argument candidate `frame` passes on to a dispatch or a `ccall` (`effect`)."""
+unresolved_positions(frame::Inferred, effect::ArgumentWrites, positions::AbstractVector{Int})::Vector{Int} =
+    positions[in.(candidate_argument.((frame.method,), positions), (vcat(effect.dispatched, effect.foreign),))]
+
+"""The positions (2 and up) of `operands`, a call's arguments with its callee first, whose IR type is `writable`."""
+function writable_positions(operands::AbstractVector, ir::COMPILER.IRCode)::Vector{Int}
+    positions = collect(2:length(operands))
+    return positions[writable.(COMPILER.widenconst.(COMPILER.argextype.(operands[positions], (ir,))))]
+end
+
+"""The argument of `method` that call operand `position` binds: a varargs method gathers the trailing operands into its last."""
+function candidate_argument(method::Method, position::Integer)::Int
+    if method.isva
+        return min(position, Int(method.nargs))
+    end
+    return position
 end
 
 """
@@ -163,6 +239,7 @@ function invoked_writes(
         estate::ESCAPE.EscapeState,
         frames::AbstractDict{Core.MethodInstance, Inferred},
         stack::Tuple,
+        search::CandidateSearch,
     )::Vector{Int}
     instance = invoked_instance(first(statement.args))
     operands = statement.args[2:end]
@@ -173,34 +250,50 @@ function invoked_writes(
     elseif !haskey(frames, instance)
         return Int[]
     end
-    written = argument_writes(frames[instance], frames, (stack..., instance)).written
+    written = argument_writes(frames[instance], frames, (stack..., instance), search).written
     return operand_indices(operands[filter(<=(length(operands)), written)], estate)
 end
 
 """
+    unmarked_mutations(repository, inferred; search = CandidateSearch(inferred))
+
 Each `is_unmarked_method` among `inferred` whose frame writes through one of its arguments, one
-site per method: "writes argument `x`", or "may write" when the argument reaches a runtime dispatch
-(which `runtime-dispatch` also reports) or a `ccall`, whose code the analysis does not read. A
-writing method added to another module's function (`Base.length`, `Base.iterate`) breaks what that
-function's callers expect.
+site per method: "writes argument `x`", or "may write" when the argument reaches a `ccall` or a
+runtime dispatch whose `call_candidates` in `search` are incomplete. `runtime-dispatch` reports
+the dispatch itself. A write by a runtime-dispatch candidate names the candidate. A writing method
+added to another module's function (`Base.length`, `Base.iterate`) breaks what its callers expect.
 """
-function unmarked_mutations(repository::Repository, inferred::AbstractVector{Inferred})::Vector{Site}
+function unmarked_mutations(
+        repository::Repository,
+        inferred::AbstractVector{Inferred};
+        search::CandidateSearch = CandidateSearch(inferred),
+    )::Vector{Site}
     frames = Dict{Core.MethodInstance, Inferred}(item.code.parent => item for item in inferred)
     own = inferred[is_unmarked_method.((repository,), getfield.(inferred, :method))]
-    return one_per_line(reduce(vcat, mutation_sites.(own, (frames,)); init = Site[]))
+    return one_per_line(reduce(vcat, mutation_sites.(own, (frames,), (search,)); init = Site[]))
 end
 
 """The `unmarked_mutations` sites of `item`, one per written or unverified argument."""
-function mutation_sites(item::Inferred, frames::AbstractDict{Core.MethodInstance, Inferred})::Vector{Site}
-    writes = argument_writes(item, frames, (item.code.parent,))
+function mutation_sites(item::Inferred, frames::AbstractDict{Core.MethodInstance, Inferred}, search::CandidateSearch)::Vector{Site}
+    writes = argument_writes(item, frames, (item.code.parent,), search)
     names = "`" .* string.(item.code.slotnames) .* "`"
     reported = Base.Fix1(filter, !Base.Fix1(declared_io, item.method))
+    written = reported(writes.written)
     details = vcat(
-        written_detail.(names[reported(writes.written)], (item.method,)),
+        written_detail.(names[written], (item.method,)) .* writer_note.(written, (writes.writers,)),
         "argument " .* names[reported(writes.dispatched)] .* " reaches a runtime dispatch (`runtime-dispatch`) and may be written",
         "argument " .* names[reported(writes.foreign)] .* " reaches a `ccall` and may be written",
     )
     return Site.(method_key(item.method), string(item.method.file), item.method.line, details)
+end
+
+"""The note naming the runtime-dispatch candidates that write `argument`, among `writers`; empty when none does."""
+function writer_note(argument::Integer, writers::AbstractVector{Pair{Int, Method}})::String
+    methods_ = unique(last.(writers[first.(writers) .== argument]))
+    if isempty(methods_)
+        return ""
+    end
+    return " (runtime-dispatch candidate " * join("`" .* candidate_name.(methods_) .* "`", ", ") * " writes it)"
 end
 
 """The detail of a site where `method` writes its argument `name`, naming the owner of a function another module owns."""

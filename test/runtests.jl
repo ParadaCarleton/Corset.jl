@@ -729,6 +729,8 @@ end
         Tuple{typeof(Mutation.bangwrite!), vector}, Tuple{typeof(Mutation.countdown), vector, Int},
         Tuple{typeof(Mutation.opaquecall), Function, vector}, Tuple{typeof(Mutation.viaccall), vector},
         Tuple{typeof(Mutation.opaqueglobal), Function},
+        Tuple{typeof(show), IOBuffer, Mutation.Box}, Tuple{typeof(Mutation.describe), IOBuffer, Mutation.Box},
+        Tuple{typeof(Mutation.guarded), ReentrantLock}, Tuple{typeof(Mutation.zero_first), vector},
     ]
     sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred_methods(Mutation, entry_frames(seeds, Mutation)))
     details = Dict(last(split(site.key)) => site.detail for site in sites)
@@ -737,6 +739,15 @@ end
             @test startswith(get(details, name, ""), "writes argument")
         end
         @test details["direct"] == "writes argument `v` but its name has no `!`"
+        @test details["zero_first"] == "writes argument `values` but its name has no `!`"
+    end
+    @testset "a write to an IO or a lock argument follows the convention and is not reported" begin
+        for name in ("show", "describe", "guarded")
+            @test !haskey(details, name)
+        end
+        describe = only(Corset.typed_frames(Tuple{typeof(Mutation.describe), IOBuffer, Mutation.Box}))
+        @test !Corset.writable(IOBuffer) && !Corset.writable(ReentrantLock) && Corset.writable(Vector{Int})
+        @test isempty(Corset.argument_writes(describe, Dict{Core.MethodInstance, Corset.Inferred}(), ()).written)
     end
     @testset "fresh memory, reads, a rebound local and a `!` function are not reported" begin
         for name in ("rebound", "viahelper", "fresh", "readonly", "addup", "reads", "bangwrite!", "countdown", "memwrite!", "fieldread", "opaqueglobal")

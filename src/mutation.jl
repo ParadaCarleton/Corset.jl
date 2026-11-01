@@ -69,8 +69,11 @@ function reached_arguments(indices::AbstractVector{<:Integer}, ir::COMPILER.IRCo
     return sort!(arguments[writable.(COMPILER.widenconst.(ir.argtypes[arguments]))])
 end
 
-"""Whether a value of type `type` has memory a callee could write: not `plain_capture` data, a type or a module."""
-writable(type::Type)::Bool = !(plain_capture(type) || type <: Union{Type, Module})
+"""
+Whether a write through a value of type `type` counts: not `plain_capture` data, a type or a module,
+and not an `IO` or a lock, whose functions (`show`, `read`, `lock`) write them without a `!` by convention.
+"""
+writable(type::Type)::Bool = !(plain_capture(type) || type <: Union{Type, Module, IO, Base.AbstractLock})
 
 """What a frame or statement does to arguments: the indices it writes through, and those it passes to a call the analysis cannot follow."""
 struct ArgumentWrites

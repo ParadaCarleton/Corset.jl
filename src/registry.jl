@@ -96,6 +96,9 @@ abstract_locals(context.repository, context.inferred)
 @rule ModuleRule "bang" :pedantic "functions that always return nothing and have no ! in the name" context ->
 unmarked_effects(context.repository, context.inferred)
 
+@rule ModuleRule "unmarked-mutation" :pedantic "functions without ! in the name that write through an argument" context ->
+unmarked_mutations(context.repository, context.inferred)
+
 @rule ModuleRule "impure-anonymous-function" :default "anonymous functions that capture mutable state, rebind a capture, or were never compiled" context ->
 impure_anonymous_functions(context.mod)
 

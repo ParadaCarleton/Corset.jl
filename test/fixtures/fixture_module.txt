@@ -49,6 +49,7 @@ end
 mutable struct Tally
     total::Int
 end
+tally_up(tally::Tally)::Int = (tally.total += 1)
 
 broken(value::Int)::Int = value + "one"
 unstable(box::Base.RefValue{Any})::Int = box[] + 1

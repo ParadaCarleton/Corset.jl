@@ -443,25 +443,29 @@ returns_call(code::Core.CodeInfo, arguments::AbstractUnitRange, statement::Any):
     calls_argument(code.code[statement.val.id], arguments)
 
 """
-Whether `item` is a named function of `repository`, not a closure or another package's function
-(`Base.show`, a keyword call), that inference types as always returning `nothing` yet whose name
-does not end in `!`: it exists for its effect, so its name says so. `__init__` is exempt, since Julia
-fixes its name. A method returning a call to its
-argument (`returns_argument_call`) gets no verdict: its callers' arguments decide its result.
+Whether `method` is a named function of `repository` whose name has no `!`: not a closure, a
+constructor or another package's function (`Base.show`, a keyword call). `__init__` is exempt, since
+Julia fixes its name.
 """
-function is_unmarked_effect(repository::Repository, item::Inferred)::Bool # lint: abstract-local  lowered IR statements are untyped
-    function_type = Base.unwrap_unionall(item.method.sig).parameters[1]
-    name = string(item.method.name)
-    return item.returns_nothing &&
-        !startswith(name, "#") &&
+function is_unmarked_function(repository::Repository, method::Method)::Bool # lint: abstract-local  a signature's first parameter is any type
+    function_type = Base.unwrap_unionall(method.sig).parameters[1]
+    name = string(method.name)
+    return !startswith(name, "#") &&
         !endswith(name, "!") &&
         name != "__init__" &&
         function_type isa DataType &&
         function_type <: Function &&
-        function_type.name.module === item.method.module &&
-        startswith(string(item.method.file), repository.root) &&
-        !returns_argument_call(item.method)
+        function_type.name.module === method.module &&
+        startswith(string(method.file), repository.root)
 end
+
+"""
+Whether `item` is an `is_unmarked_function` that inference types as always returning `nothing`: it
+exists for its effect, so its name says so. A method returning a call to its argument
+(`returns_argument_call`) gets no verdict: its callers' arguments decide its result.
+"""
+is_unmarked_effect(repository::Repository, item::Inferred)::Bool =
+    item.returns_nothing && is_unmarked_function(repository, item.method) && !returns_argument_call(item.method)
 
 """
 Each method of `is_unmarked_effect` whose function has no method that returns a value, one site at its

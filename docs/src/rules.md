@@ -10,7 +10,9 @@ source files.
 
 These see inferred types, bindings and closures. They need `using MyPackage`. The rules that read
 inferred types take their signatures from the caller: `inferred_methods(MyPackage, signatures)` infers the
-methods those signatures reach, so the result is the same on every run. The `corset` command line has no signatures, so it skips these two rules.
+methods those signatures reach, so the result is the same on every run. `inferred_methods(MyPackage,
+entry_frames(seeds, MyPackage))` reads the frames an entry-point walk already inferred. The `corset`
+command line has no signatures, so it skips these three rules.
 
 ### `hidden-input`: `hidden_inputs(mod)`
 
@@ -33,6 +35,19 @@ Functions that always return `nothing` and have no `!` in the name. A function w
 method beside methods that return values (a dispatch on "off") is not reported.
 
 Repair: add the `!`.
+
+### `unmarked-mutation`: `unmarked_mutations(repo, inferred_methods(mod, signatures))`
+
+Functions without `!` in the name that write through an argument: `v[1] = 0`, `x.field = 1`,
+`push!(x.items, 1)`, or a write through an alias, a field or an element of the argument. The rule reads each
+frame's optimized IR and asks the compiler's escape analysis which arguments the written object
+aliases. A callee that is not inlined writes its first argument when its name ends in `!`, and what its own frame writes otherwise.
+An argument passed to a dynamic dispatch or a `ccall` is reported as unverified: the analysis cannot read that code.
+Plain immutable arguments (bits values, `String`s, `Symbol`s), types and modules are never reported.
+Escape analysis merges the alias sets of a value and the object it is stored in, so `write(dest, src)` that
+stores `src` into `dest` reports both.
+
+Repair: add the `!`, or copy the argument before writing to the copy.
 
 ### Anonymous functions: `impure-anonymous-function`, `unstable-anonymous-function`, `overspecialized-anonymous-function`
 

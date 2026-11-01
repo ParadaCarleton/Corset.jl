@@ -29,8 +29,9 @@ end
 
 `SIGNATURES` is the fixed list of method signatures the rules type the package over (for example
 `Tuple{typeof(solve), Float32}`), so the result does not change with test order.
-`entry_signatures(seeds, MyPackage)` builds it from entry-point call signatures: it walks their
-optimized IR along `:invoke` edges and returns every frame they compile.
+`entry_frames(seeds, MyPackage)` builds the workload from entry-point call signatures: it walks their
+optimized IR along `:invoke` edges and returns every frame they compile, inferred once.
+`inferred_methods(MyPackage, entry_frames(seeds, MyPackage))` reads those frames without inferring again.
 
 The baseline file allows today's offenders, fails on new ones and lowers itself as old ones are fixed.
 The [documentation](https://paradacarleton.github.io/Corset.jl/dev/) has the guide (baselines,

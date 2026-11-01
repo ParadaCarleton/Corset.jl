@@ -178,13 +178,15 @@ function invoked_writes(
 end
 
 """
-Each `is_unmarked_function` among `inferred` whose frame writes through one of its arguments, one
+Each `is_unmarked_method` among `inferred` whose frame writes through one of its arguments, one
 site per method: "writes argument `x`", or "may write" when the argument reaches a runtime dispatch
-(which `runtime-dispatch` also reports) or a `ccall`, whose code the analysis does not read.
+(which `runtime-dispatch` also reports) or a `ccall`, whose code the analysis does not read. A
+writing method added to another module's function (`Base.length`, `Base.iterate`) breaks what that
+function's callers expect.
 """
 function unmarked_mutations(repository::Repository, inferred::AbstractVector{Inferred})::Vector{Site}
     frames = Dict{Core.MethodInstance, Inferred}(item.code.parent => item for item in inferred)
-    own = inferred[is_unmarked_function.((repository,), getfield.(inferred, :method))]
+    own = inferred[is_unmarked_method.((repository,), getfield.(inferred, :method))]
     return one_per_line(reduce(vcat, mutation_sites.(own, (frames,)); init = Site[]))
 end
 
@@ -194,11 +196,20 @@ function mutation_sites(item::Inferred, frames::AbstractDict{Core.MethodInstance
     names = "`" .* string.(item.code.slotnames) .* "`"
     reported = Base.Fix1(filter, !Base.Fix1(declared_io, item.method))
     details = vcat(
-        "writes argument " .* names[reported(writes.written)] .* " but its name has no `!`",
+        written_detail.(names[reported(writes.written)], (item.method,)),
         "argument " .* names[reported(writes.dispatched)] .* " reaches a runtime dispatch (`runtime-dispatch`) and may be written",
         "argument " .* names[reported(writes.foreign)] .* " reaches a `ccall` and may be written",
     )
     return Site.(method_key(item.method), string(item.method.file), item.method.line, details)
+end
+
+"""The detail of a site where `method` writes its argument `name`, naming the owner of a function another module owns."""
+function written_detail(name::AbstractString, method::Method)::String
+    owner = function_owner(method)
+    if owner === method.module
+        return "writes argument $name but its name has no `!`"
+    end
+    return "adds a writing method to `$owner.$(method.name)`, which callers expect not to write: it writes argument $name"
 end
 
 """

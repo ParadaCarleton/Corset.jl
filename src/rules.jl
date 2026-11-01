@@ -278,7 +278,7 @@ end
     inferred_methods(mod, signatures)
     inferred_methods(mod, frames)
 
-Each method of `mod` (`module_methods`) that inference reaches from `signatures`, typed over each
+Each method `mod` defines (methods it adds to another module's function included) that inference reaches from `signatures`, typed over each
 signature that selects it; the result depends on `signatures` alone. Given the `frames` of
 `entry_frames`, it filters them and infers nothing.
 """
@@ -288,9 +288,9 @@ inferred_methods(mod::Module, signatures::AbstractVector{<:Type})::Vector{Inferr
 inferred_methods(mod::Module, frames::AbstractDict{Type, Vector{Inferred}})::Vector{Inferred} =
     module_frames(mod, reduce(vcat, collect(values(frames)); init = Inferred[]))
 
-"""The `frames` whose method is one of `mod`'s (`module_methods`)."""
+"""The `frames` whose method `mod` defines, on its own function or on another module's (`Base.show`)."""
 module_frames(mod::Module, frames::AbstractVector{Inferred})::Vector{Inferred} =
-    frames[in.(getfield.(frames, :method), (Set{Method}(module_methods(mod)),))]
+    frames[getfield.(getfield.(frames, :method), :module) .=== (mod,)]
 
 """The slots of `code` that a `catch` binds, which Julia always types `Any`."""
 function caught_slots(code::Core.CodeInfo)::Set{Int} # lint: abstract-local  lowered IR statements are untyped
@@ -442,11 +442,11 @@ returns_call(code::Core.CodeInfo, arguments::AbstractUnitRange, statement::Any):
     calls_argument(code.code[statement.val.id], arguments)
 
 """
-Whether `method` is a named function of `repository` whose name has no `!`: not a closure, a
-constructor or another package's function (`Base.show`, a keyword call). `__init__` is exempt, since
-Julia fixes its name.
+Whether `method` is a method of `repository` for a named function whose name has no `!`, whoever owns
+the function (`Base.length` counts): not a closure, a constructor or a keyword call. `__init__` is
+exempt, since Julia fixes its name.
 """
-function is_unmarked_function(repository::Repository, method::Method)::Bool # lint: abstract-local  a signature's first parameter is any type
+function is_unmarked_method(repository::Repository, method::Method)::Bool # lint: abstract-local  a signature's first parameter is any type
     function_type = Base.unwrap_unionall(method.sig).parameters[1]
     name = string(method.name)
     return !startswith(name, "#") &&
@@ -454,9 +454,16 @@ function is_unmarked_function(repository::Repository, method::Method)::Bool # li
         name != "__init__" &&
         function_type isa DataType &&
         function_type <: Function &&
-        function_type.name.module === method.module &&
+        function_type !== typeof(Core.kwcall) &&
         startswith(string(method.file), repository.root)
 end
+
+"""The module that owns the function `method` is a method of."""
+function_owner(method::Method)::Module = Base.unwrap_unionall(method.sig).parameters[1].name.module
+
+"""An `is_unmarked_method` of a function its own module owns: not a method added to another package's function (`Base.show`)."""
+is_unmarked_function(repository::Repository, method::Method)::Bool =
+    is_unmarked_method(repository, method) && function_owner(method) === method.module
 
 """
 Whether `item` is an `is_unmarked_function` that inference types as always returning `nothing`: it

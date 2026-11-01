@@ -730,7 +730,7 @@ end
         Tuple{typeof(Mutation.bangwrite!), vector}, Tuple{typeof(Mutation.countdown), vector, Int},
         Tuple{typeof(Mutation.opaquecall), Function, vector}, Tuple{typeof(Mutation.viaccall), vector},
         Tuple{typeof(Mutation.opaqueglobal), Function},
-        Tuple{typeof(show), IOBuffer, Mutation.Box}, Tuple{typeof(Mutation.describe), IOBuffer, Mutation.Box},
+        Tuple{typeof(Mutation.describe), IOBuffer, Mutation.Box}, Tuple{typeof(Mutation.log_to), IOStream, Mutation.Box},
         Tuple{typeof(Mutation.guarded), ReentrantLock}, Tuple{typeof(Mutation.zero_first), vector},
     ]
     sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred_methods(Mutation, entry_frames(seeds, Mutation)))
@@ -742,27 +742,27 @@ end
         @test details["direct"] == "writes argument `v` but its name has no `!`"
         @test details["zero_first"] == "writes argument `values` but its name has no `!`"
     end
-    @testset "a write to an IO or a lock argument follows the convention and is not reported" begin
-        for name in ("show", "describe", "guarded")
-            @test !haskey(details, name)
-        end
-        describe = only(Corset.typed_frames(Tuple{typeof(Mutation.describe), IOBuffer, Mutation.Box}))
-        @test !Corset.writable(IOBuffer) && !Corset.writable(ReentrantLock) && Corset.writable(Vector{Int})
-        @test isempty(Corset.argument_writes(describe, Dict{Core.MethodInstance, Corset.Inferred}(), ()).written)
+    @testset "an IOBuffer and a lock are Julia objects; a file handle writes outside Julia" begin
+        @test details["describe"] == "writes argument `io` but its name has no `!`"
+        @test details["guarded"] == "writes argument `gate` but its name has no `!`"
+        @test !haskey(details, "log_to")
+        @test !Corset.writable(IOStream) && !Corset.writable(Base.PipeEndpoint) && !Corset.writable(Base.DevNull)
+        @test Corset.writable(IOBuffer) && Corset.writable(Base.BufferStream) && Corset.writable(Base.LibuvStream)
+        @test Corset.writable(IO) && Corset.writable(IOContext{IOBuffer}) && Corset.writable(ReentrantLock)
     end
     @testset "fresh memory, reads, a rebound local and a `!` function are not reported" begin
         for name in ("rebound", "viahelper", "fresh", "readonly", "addup", "reads", "bangwrite!", "countdown", "memwrite!", "fieldread", "opaqueglobal")
             @test !haskey(details, name)
         end
     end
-    @testset "an argument passed to a dynamic dispatch or a ccall is unverified, never clean" begin
-        @test details["opaquecall"] == "passes argument `x` to a call the analysis cannot follow"
-        @test details["viaccall"] == "passes argument `x` to a call the analysis cannot follow"
+    @testset "an argument passed to a runtime dispatch or a ccall may be written, never clean" begin
+        @test details["opaquecall"] == "argument `x` reaches a runtime dispatch (`runtime-dispatch`) and may be written"
+        @test details["viaccall"] == "argument `x` reaches a `ccall` and may be written"
     end
     @testset "Base.sort and Base.replace copy before they write" begin
         for signature in (Tuple{typeof(sort), vector}, Tuple{typeof(replace), vector, Pair{Int, Int}})
             writes = Corset.argument_writes(only(Corset.typed_frames(signature)), Dict{Core.MethodInstance, Corset.Inferred}(), ())
-            @test isempty(writes.written) && isempty(writes.unverified)
+            @test isempty(writes.written) && isempty(writes.dispatched) && isempty(writes.foreign)
         end
     end
 end

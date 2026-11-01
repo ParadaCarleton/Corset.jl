@@ -1,7 +1,7 @@
 # Code rules checked on a loaded module and on its repository's Julia source: lowered code,
 # bindings, types and parsed text. Each rule reports its sites through `ratchet!`.
 
-const SYNTAX = Base.JuliaSyntax
+const SYNTAX = Base.JuliaSyntax # lint: non-public-access  the registered JuliaSyntax lags the parser Julia 1.13 ships
 
 """Definitions, not state: a `DataType` is itself `ismutable`."""
 is_definition(value::Any)::Bool = value isa Union{Type, Function, Module}

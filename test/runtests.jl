@@ -6,7 +6,7 @@ using TOML: TOML
 using Corset: Corset
 using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, abstract_locals,
     c_type_sites, impure_anonymous_functions, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
-    inferred_methods, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
+    inferred_methods, jscpd_sites, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
     where_return_sites, entry_frames, frame_callees, mentions_module, builtin_callee, invoked_instance, logging_call
@@ -51,13 +51,6 @@ concrete_signatures(mod::Module)::Vector{Type} = Type[method.sig for method in C
 
 """The files `repository_sources` finds under `src` of `repository`, relative to `root`."""
 relative_sources(repository::Repository, root::AbstractString)::Vector{String} = [relpath(file, root) for file in repository_sources(repository, ("src",))]
-
-"""Install in `bin` a `fatou` that prints `printed` (a `printf` format) and return `bin`."""
-function fake_fatou(bin::AbstractString, printed::AbstractString)::String
-    write_tree(bin, ["fatou" => "#!/bin/sh\nprintf '$printed'\n"])
-    chmod(joinpath(bin, "fatou"), 0o755)
-    return bin
-end
 
 """The text `place_imports!` leaves in `files` (name => text) written into a fresh tree, which then has no misplaced import."""
 function placed(files::AbstractVector{<:Pair})::Dict{String, String}
@@ -293,21 +286,41 @@ end
         @test length(one_letter_sites(Repository(dirname(path); one_letter_exempt = (:p,)), path)) == 1
     end
 
-    @testset "fatou: findings of `fatou lint`" begin
-        tree = write_tree(mktempdir(), ["source.jl" => "one() = 1\n"])
-        bin = fake_fatou(mktempdir(), "source.jl:3:5: warning[unused-binding] unused\\nchecked 1 file(s): 1 finding\\n")
+    @testset "fatou: findings of the real `fatou lint` (from mise.toml)" begin
+        tree = write_tree(mktempdir(), ["src/source.jl" => SNIPPETS["fatou"]["source"], "clean/one.jl" => "one() = 1\n"])
+        @test fatou_sites(Repository(tree), ("src",)) == [Site("src/source.jl unused-binding", joinpath(tree, "src", "source.jl"), 2, "")]
+        @test isempty(fatou_sites(Repository(tree), ("clean",)))
+        # fatou prints `error: failed to walk …`, no finding, for a missing directory.
+        @test_throws ErrorException fatou_sites(Repository(tree), ("missing",))
         path = ENV["PATH"]
-        ENV["PATH"] = "$bin:$path"
         try
-            @test fatou_sites(Repository(tree), (".",)) == [Site("source.jl unused-binding", joinpath(tree, "source.jl"), 3, "")]
-            fake_fatou(bin, "checked 1 file(s): clean\\n")
-            @test isempty(fatou_sites(Repository(tree), (".",)))
-            fake_fatou(bin, "source.jl: parse error\\n")
-            @test_throws ErrorException fatou_sites(Repository(tree), (".",))
-            ENV["PATH"] = string(mktempdir())
-            @test_throws ErrorException fatou_sites(Repository(tree), (".",))
+            ENV["PATH"] = mktempdir()
+            @test_throws ErrorException fatou_sites(Repository(tree), ("src",))
         finally
             ENV["PATH"] = path
+        end
+    end
+
+    @testset "jscpd: findings of the real `jscpd` (from mise.toml)" begin
+        copies = SNIPPETS["jscpd"]["source"]
+        tree = write_tree(mktempdir(), ["copies.jl" => copies, "single.jl" => "one() = 1\n", "vendor/copies.jl" => copies])
+        inner = Site("copies.jl copies.jl", joinpath(tree, "copies.jl"), 8, 14, "")
+        vendored = Site("vendor/copies.jl copies.jl", joinpath(tree, "vendor", "copies.jl"), 1, 14, "")
+        @test Set(jscpd_sites(Repository(tree), (".",))) == Set([inner, vendored])
+        @test jscpd_sites(Repository(tree; skipped_directories = ("vendor",)), (".",)) == [inner]
+        @test isempty(jscpd_sites(Repository(tree), ("nonexistent",)))
+        @testset "a jscpd that writes no report, or none on PATH, is an error" begin
+            path = ENV["PATH"]
+            broken = write_tree(mktempdir(), ["jscpd" => "#!/bin/sh\nexit 1\n"])
+            chmod(joinpath(broken, "jscpd"), 0o755)
+            try
+                ENV["PATH"] = "$broken:$path"
+                @test_throws ErrorException jscpd_sites(Repository(tree), (".",))
+                ENV["PATH"] = mktempdir()
+                @test_throws ErrorException jscpd_sites(Repository(tree), (".",))
+            finally
+                ENV["PATH"] = path
+            end
         end
     end
 

@@ -159,6 +159,9 @@ misplaced_imports(context.repository, context.directories)
 @rule TreeRule "fatou" :pedantic "findings of fatou lint (fatou on PATH)" context ->
 fatou_sites(context.repository, context.directories)
 
+@rule TreeRule "jscpd" :pedantic "findings of jscpd duplicate code checks (jscpd on PATH)" context ->
+jscpd_sites(context.repository, context.directories)
+
 fixable(::MisplacedImportRule)::Bool = true
 fix!(::MisplacedImportRule, context::Context)::Nothing = (place_imports!(context.repository, context.directories); nothing)
 

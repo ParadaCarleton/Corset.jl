@@ -12,6 +12,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      # The fatou tests run the real fatou that mise.toml pins.
+      - uses: jdx/mise-action@v2
       - uses: julia-actions/setup-julia@v2
         with:
           version: "1.13"

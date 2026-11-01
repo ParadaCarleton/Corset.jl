@@ -52,13 +52,6 @@ concrete_signatures(mod::Module)::Vector{Type} = Type[method.sig for method in C
 """The files `repository_sources` finds under `src` of `repository`, relative to `root`."""
 relative_sources(repository::Repository, root::AbstractString)::Vector{String} = [relpath(file, root) for file in repository_sources(repository, ("src",))]
 
-"""Install in `bin` a `fatou` that prints `printed` (a `printf` format) and return `bin`."""
-function fake_fatou(bin::AbstractString, printed::AbstractString)::String
-    write_tree(bin, ["fatou" => "#!/bin/sh\nprintf '$printed'\n"])
-    chmod(joinpath(bin, "fatou"), 0o755)
-    return bin
-end
-
 """The text `place_imports!` leaves in `files` (name => text) written into a fresh tree, which then has no misplaced import."""
 function placed(files::AbstractVector{<:Pair})::Dict{String, String}
     repository = Repository(write_tree(mktempdir(), files))
@@ -293,19 +286,16 @@ end
         @test length(one_letter_sites(Repository(dirname(path); one_letter_exempt = (:p,)), path)) == 1
     end
 
-    @testset "fatou: findings of `fatou lint`" begin
-        tree = write_tree(mktempdir(), ["source.jl" => "one() = 1\n"])
-        bin = fake_fatou(mktempdir(), "source.jl:3:5: warning[unused-binding] unused\\nchecked 1 file(s): 1 finding\\n")
+    @testset "fatou: findings of the real `fatou lint` (from mise.toml)" begin
+        tree = write_tree(mktempdir(), ["src/source.jl" => SNIPPETS["fatou"]["source"], "clean/one.jl" => "one() = 1\n"])
+        @test fatou_sites(Repository(tree), ("src",)) == [Site("src/source.jl unused-binding", joinpath(tree, "src", "source.jl"), 2, "")]
+        @test isempty(fatou_sites(Repository(tree), ("clean",)))
+        # fatou prints `error: failed to walk …`, no finding, for a missing directory.
+        @test_throws ErrorException fatou_sites(Repository(tree), ("missing",))
         path = ENV["PATH"]
-        ENV["PATH"] = "$bin:$path"
         try
-            @test fatou_sites(Repository(tree), (".",)) == [Site("source.jl unused-binding", joinpath(tree, "source.jl"), 3, "")]
-            fake_fatou(bin, "checked 1 file(s): clean\\n")
-            @test isempty(fatou_sites(Repository(tree), (".",)))
-            fake_fatou(bin, "source.jl: parse error\\n")
-            @test_throws ErrorException fatou_sites(Repository(tree), (".",))
-            ENV["PATH"] = string(mktempdir())
-            @test_throws ErrorException fatou_sites(Repository(tree), (".",))
+            ENV["PATH"] = mktempdir()
+            @test_throws ErrorException fatou_sites(Repository(tree), ("src",))
         finally
             ENV["PATH"] = path
         end

@@ -80,6 +80,14 @@ pid()::Int = Int(ccall(:getpid, Cint, (Ref{Cint},), C_NULL))
 generic(box::Ref{Int})::Int = box[]
 '''
 
+[fatou]
+source = '''
+function unused_local(value::Integer)::Integer
+    unused = value + 1
+    return value
+end
+'''
+
 [annotation]
 source = '''
 untyped(value) = value

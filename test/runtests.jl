@@ -184,8 +184,8 @@ end
             @test !Corset.plain_capture(TypeVar(:T))
         end
         @testset "each capture that is not plain data has one kind of fault" begin
-            @test Corset.capture_kind.([Int, Vector{Int}, Module, Union{Int, Vector{Int}}, typeof(sin), Real, Union{Int, Real}]) ==
-                [:plain, :impure, :impure, :impure, :overspecialized, :unstable, :unstable]
+            @test Corset.capture_kind.([Int, Vector{Int}, Module, Union{Int, Vector{Int}}, typeof(sin), Type{Int}, Real, Union{Int, Real}]) ==
+                [:plain, :impure, :impure, :impure, :overspecialized, :overspecialized, :unstable, :unstable]
             @test Corset.capture_detail(:unstable, Real) == "captures Real, a type inference left abstract"
             @test Corset.instance_faults(Vector) == [:unstable => "built where the types of its captures are unknown"]
         end

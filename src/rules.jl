@@ -531,7 +531,8 @@ function capture_kind(@nospecialize(capture::Any))::Symbol
     if plain_capture(capture)
         return :plain
     end
-    if capture isa DataType && isconcretetype(capture) && capture <: Union{Type, Function}
+    # `Type{Int}` is not `isconcretetype`, so a type capture is matched before concreteness.
+    if capture isa DataType && capture <: Union{Type, Function}
         return :overspecialized
     end
     if (capture isa DataType && isconcretetype(capture)) || (capture isa Union && all(isconcretetype, Base.uniontypes(capture)))

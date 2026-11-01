@@ -592,6 +592,13 @@ end
     end
 end
 
+@testset "defined_methods finds methods added to another module's function" begin
+    external = Module(:ExternalExtension)
+    Base.eval(external, :(Base.length(::Type{Val{:corset_probe}})::Int = 1))
+    defined = Corset.defined_methods(external)
+    @test any(method -> method.name === :length && method.module === external, defined)
+end
+
 @testset "closure reflection follows nested closures and macro-made code" begin
     closure_chain = Module(:ClosureChain)
     Base.include(closure_chain, joinpath(FIXTURES, "closure_module.txt"))

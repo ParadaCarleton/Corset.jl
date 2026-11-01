@@ -14,7 +14,7 @@ and the rule in opt-out comments. [`offenders!`](@ref) does the same without the
 
 There are two kinds of rules.
 
-- **Module rules** read a loaded module: `hidden_inputs(MyPackage)`, `boxed_closures(MyPackage)`,
+- **Module rules** read a loaded module: `hidden_inputs(MyPackage)`, `impure_closures(MyPackage)`,
   `abstract_locals(repo, inferred_methods(MyPackage, SIGNATURES))`.
 - **Source rules** read a file's syntax. Parse each file once with `located_source`, then hand it to
   each rule: `nothing_returns(file, located_source(file))`. `repository_sources(repo, ("src",))`

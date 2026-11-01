@@ -55,8 +55,15 @@ struct Operand
     label::String
 end
 
+"""IR value `operand` as inference reads it: a global Julia 1.14 keeps as a `Core.BindingPartition` becomes its `GlobalRef`."""
+ir_value(operand::Any)::Any = operand # lint: abstract-local  IR operands are any value
+@static if isdefined(Base, :partition_owner)
+    ir_value(operand::Core.BindingPartition)::GlobalRef = Base.partition_owner(operand).globalref # lint: non-public-access
+end
+
 """The `Operand` of IR value `operand` in `ir`. A type operand (`Float64` in `sitofp(Float64, n)`) brings in its own float."""
-function Operand(operand::Any, ir::COMPILER.IRCode)::Operand # lint: abstract-local  IR operands are any value
+function Operand(ir_operand::Any, ir::COMPILER.IRCode)::Operand # lint: abstract-local  IR operands are any value
+    operand = ir_value(ir_operand)
     type = COMPILER.widenconst(COMPILER.argextype(operand, ir))
     floats = value_floats(type)
     if type <: Type && type isa DataType && only(type.parameters) isa DataType
@@ -94,7 +101,8 @@ The detail of IR statement `statement`, of inferred type `type`, when it widens:
 float wider than `budget` and no computed operand already did. It names the first operand that brings
 the wide float in, else the callee; `nothing` when the statement does not widen.
 """
-function widening_detail(statement::Any, type::Any, ir::COMPILER.IRCode, budget::FloatBudget)::Union{Nothing, String} # lint: abstract-local  IR statements and types are any value
+function widening_detail(ir_statement::Any, type::Any, ir::COMPILER.IRCode, budget::FloatBudget)::Union{Nothing, String} # lint: abstract-local  IR statements and types are any value
+    statement = ir_value(ir_statement)
     operands = statement_operands(statement, ir)
     result = result_floats(statement, type, operands)
     wide = operands[wider.(getfield.(operands, :floats), (budget,))]
@@ -114,7 +122,7 @@ end
 
 """
 The callee an IR call statement names: an `:invoke`'s method, else its first argument. Another
-statement (a global read Julia 1.14 keeps as a `Core.BindingPartition`) is named by its type.
+statement is named by its type.
 """
 callee_label(statement::Any)::String = string(typeof(statement)) # lint: abstract-local  IR statements are any value
 
@@ -123,7 +131,7 @@ function callee_label(statement::Expr)::String
     if !isnothing(instance)
         return string(instance.def.name)
     end
-    return string(first(statement.args))
+    return string(ir_value(first(statement.args)))
 end
 
 """

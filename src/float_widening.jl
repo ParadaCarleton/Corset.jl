@@ -112,7 +112,12 @@ function widening_source(statement::Any, wide::AbstractVector{Operand})::String 
     return "`$(callee_label(statement))`"
 end
 
-"""The callee an IR call statement names: an `:invoke`'s method, else its first argument."""
+"""
+The callee an IR call statement names: an `:invoke`'s method, else its first argument. Another
+statement (a global read Julia 1.14 keeps as a `Core.BindingPartition`) is named by its type.
+"""
+callee_label(statement::Any)::String = string(typeof(statement)) # lint: abstract-local  IR statements are any value
+
 function callee_label(statement::Expr)::String
     instance = invoked_instance(first(statement.args))
     if !isnothing(instance)

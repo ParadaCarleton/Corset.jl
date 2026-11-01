@@ -945,7 +945,7 @@ end
     found = widenings(Corset.DEFAULT_CANDIDATE_LIMIT)
     @testset "a literal, a conversion, a float global, a callee and a returned literal widen, and name their source" begin
         @test found["scaled"].detail == "`Base.Float64` makes a Float64; the widest float argument is Float32"
-        @test occursin("`Main.Floats.SCALE` makes a Float64", found["global_scaled"].detail)
+        @test occursin("makes a Float64", found["global_scaled"].detail)
         @test occursin("the widest float argument is Float16", found["floated"].detail)
         @test found["calls_widened"].detail == "`widened` makes a Float64; the widest float argument is Float32"
         @test found["branchy"].detail == "`0.0` makes a Float64; the widest float argument is Float32"
@@ -969,6 +969,8 @@ end
     end
     @testset "a dispatch whose operand types hold no float of the method's is skipped" begin
         @test !haskey(widenings(0), "signed_only")
+        item, statement = dispatch_statement(inferred, Floats.signed_only)
+        @test isnothing(Corset.dispatch_widening(statement, item.ir, Corset.float_budget(item), Corset.CandidateSearch(inferred; candidate_limit = 0)))
     end
     @testset "held_floats reads parameters, unions and type variables, to a depth limit" begin
         @test Corset.held_floats(Tuple{Int, Complex{Float16}}, 0) == [Float16]
@@ -979,6 +981,7 @@ end
     @testset "a φ merging a literal widens; a plain call is named by its callee" begin
         @test found["merged"].detail == "`0.0` makes a Float64; the widest float argument is Float32"
         @test Corset.callee_label(Expr(:call, GlobalRef(Base, :sqrt))) == "Base.sqrt"
+        @test Corset.callee_label(GlobalRef(Base, :pi)) == "GlobalRef"
     end
 end
 

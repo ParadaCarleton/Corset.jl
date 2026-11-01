@@ -151,12 +151,14 @@ function CheckOptions(arguments::AbstractDict)::CheckOptions
         arguments["deny-warnings"],
         arguments["update-baseline"],
         arguments["no-load"],
-        Pair{String, Symbol}[
-            rule => Symbol(name)
-                for name in ("allow", "warn", "deny")
-                for rule in something(arguments[name], String[])
-        ],
+        vcat(level_overrides.((arguments,), ("allow", "warn", "deny"))...),
     )
+end
+
+"""The `rule => level` pairs the option `name` (`allow`, `warn` or `deny`) of `arguments` sets."""
+function level_overrides(arguments::AbstractDict, name::AbstractString)::Vector{Pair{String, Symbol}}
+    level = Symbol(name)
+    return Pair{String, Symbol}[rule => level for rule in something(arguments[name], String[])]
 end
 
 """The typed options of the command ArgParse parsed into `parsed`."""
@@ -279,7 +281,7 @@ rule_line(config::Config, rule::Rule)::String = rpad(rule_name(rule), 20) * rpad
 
 """`corset rules`: one line per rule with its group and the level `config` gives it."""
 function print_rules(io::IO, config::Config)::Nothing
-    foreach(line -> println(io, line), rule_line.(Ref(config), RULES))
+    println(io, join(rule_line.((config,), RULES), "\n"))
     return nothing
 end
 

@@ -37,10 +37,7 @@ merged(under::Any, over::Any)::Any = something(over, under, Some(nothing))
 
 """`over`'s keys where it sets them, else `under`'s; nested dictionaries are merged."""
 overlay(under::Preferences, over::Preferences)::Preferences = Preferences(
-    (
-        merged(getfield(under, name), getfield(over, name))
-            for name in fieldnames(Preferences)
-    )...
+    merged.(getfield.((under,), fieldnames(Preferences)), getfield.((over,), fieldnames(Preferences)))...
 )
 
 """The preferences in the TOML `file` below the `path` of table names (`("preferences", "Corset")`); none set when there is no file or table."""

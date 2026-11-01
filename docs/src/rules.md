@@ -34,19 +34,20 @@ method beside methods that return values (a dispatch on "off") is not reported.
 
 Repair: add the `!`.
 
-### `closure`: `impure_closures(mod)`
+### `capture`: `impure_captures(mod)`
 
-Closures that capture anything but plain immutable data. A closure passes when it captures nothing
-(`x -> x.field`), or when every instance the package compiled captures only non-function `isbits`
-values, `String`s, `Symbol`s, and immutable structs, tuples or small unions of them
+Anonymous functions (lambdas, `do` blocks and the generators of comprehensions) that capture anything
+but plain immutable data; Julia calls an anonymous function with captures a closure. One passes when it
+captures nothing (`x -> x.field`), or when every instance the package compiled captures only
+non-function `isbits` values, `String`s, `Symbol`s, and immutable structs, tuples or small unions of them
 (`x -> x * scale` with `scale::Float64`). The rule reads the compiled instances from
 `Base.specializations`, so it sees what the package's precompile workload ran. The detail names the fault:
 
-- a `Core.Box`: the closure or its definer rebinds a captured variable, and every read of it is dynamically typed;
+- a `Core.Box`: the function or its definer rebinds a captured variable, and every read of it is dynamically typed;
 - a capture that is mutable (an array, `Dict`, `Ref`), a type, a function or a module: a type or function
-  capture compiles a new closure for every value, and mutable state belongs in arguments and results;
+  capture compiles the function anew for every value, and mutable state belongs in arguments and results;
 - an instance built where the captures' types are unknown;
-- no compiled instance: the captures are unverified until the workload builds the closure.
+- no compiled instance: the captures are unverified until the workload builds the function.
 
 Repair: pass the data as an argument, use `Base.Fix1`/`Base.Fix2` (`filter(in(allowed), items)`), or
 define a callable struct with the captures as fields.

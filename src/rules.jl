@@ -344,12 +344,13 @@ function slot_line(inferred::Inferred, index::Integer)::Int # lint: abstract-loc
     return inferred.method.line
 end
 
-"""The key an offender of a method goes under: its file and name, the file alone for a closure (whose name carries compiler counters)."""
+"""The key an offender of a method goes under: its file and name, the file and "anonymous function" for a closure (whose name carries compiler counters)."""
 function method_key(method::Method)::String
     name = string(method.name)
-    return startswith(name, "#") ?
-        "$(basename(string(method.file))) closure" :
-        "$(basename(string(method.file))) $name"
+    if startswith(name, "#")
+        name = "anonymous function"
+    end
+    return "$(basename(string(method.file))) $name"
 end
 
 """
@@ -564,7 +565,7 @@ end
 Each `live_closure_types` closure of `mod` that `closure_fault` rejects, as a `closure_site` whose detail is
 the fault. A closure that captures nothing, like `x -> x.field`, passes.
 """
-function impure_closures(mod::Module)::Vector{Site}
+function impure_captures(mod::Module)::Vector{Site}
     world = Base.get_world_counter()
     namers = closure_namers(mod, defined_methods(mod))
     types = live_closure_types(mod)

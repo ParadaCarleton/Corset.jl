@@ -1,0 +1,6 @@
+using Base: uniontypes
+using Base: Fix2
+const PARSER = Base.JuliaSyntax
+increment(by::Int)::Base.Fix1 = Base.Fix1(+, by)
+halve()::Base.Fix2 = Fix2(/, 2)
+members(type::Type)::Vector = uniontypes(type)

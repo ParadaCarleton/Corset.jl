@@ -6,7 +6,7 @@ using TOML: TOML
 using Corset: Corset
 using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, abstract_locals,
     c_type_sites, impure_anonymous_functions, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
-    inferred_methods, jscpd_sites, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
+    inferred_methods, jscpd_sites, located_source, misplaced_imports, missing_annotations, module_structs, non_public_accesses, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
     where_return_sites, entry_frames, frame_callees, mentions_module, builtin_callee, invoked_instance, logging_call
@@ -143,6 +143,17 @@ end
 
     @testset "hidden-input: a read of a mutable or non-constant global" begin
         @test unique(site_keys(hidden_inputs(fixture))) == ["counter"]
+    end
+
+    @testset "non-public-access: a qualified access or explicit import of a non-public name" begin
+        path = joinpath(write_tree(mktempdir(), ["access.jl" => read(joinpath(FIXTURES, "access_module.txt"), String)]), "access.jl")
+        access = Module(:Access)
+        Base.include(access, path)
+        sites = non_public_accesses(access)
+        @test site_keys(sites) == ["Base.JuliaSyntax", "Base.uniontypes"]
+        @test site_lines(sites) == [3, 1]
+        @test first(sites).detail == "`JuliaSyntax` is not public in `Base`"
+        @test "Base.JuliaSyntax" in site_keys(non_public_accesses(Corset))
     end
 
     @testset "abstract-local: a local variable that infers no concrete type" begin

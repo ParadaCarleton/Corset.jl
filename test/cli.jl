@@ -59,6 +59,17 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
         @test config.levels == Dict("float64" => :deny, "where-return" => :deny)
     end
 
+    @testset "candidate_limit: the config's, else the default; the CLI flag wins; a negative one fails loud" begin
+        @test config.candidate_limit == Corset.DEFAULT_CANDIDATE_LIMIT
+        limited = load_config(package_tree("name = \"D\"\n[preferences.Corset]\ncandidate_limit = 9\n", Pair[]))
+        @test limited.candidate_limit == 9
+        @test with_overrides(limited, false, Pair{String, Symbol}[], nothing).candidate_limit == 9
+        @test with_overrides(limited, false, Pair{String, Symbol}[], 0).candidate_limit == 0
+        @test_throws ErrorException with_overrides(limited, false, Pair{String, Symbol}[], -1)
+        @test_throws ErrorException load_config(package_tree("name = \"D\"\n[preferences.Corset]\ncandidate_limit = -2\n", Pair[]))
+        @test Corset.command_options(Corset.parse_args(["check", "--candidate-limit", "7"], Corset.argument_settings())).candidate_limit == 7
+    end
+
     @testset "a typo fails loud" begin
         @test_throws ErrorException load_config(
             package_tree(
@@ -78,7 +89,7 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
                 Pair[],
             )
         )
-        @test_throws ErrorException with_overrides(config, false, ["no-such-rule" => :deny])
+        @test_throws ErrorException with_overrides(config, false, ["no-such-rule" => :deny], nothing)
     end
 
     @test_throws ErrorException project_root(mktempdir())
@@ -181,7 +192,7 @@ end
 
     @testset "module rules run on a loaded package" begin
         findings, skipped = run_rules(
-            with_overrides(load_config(root), false, ["hidden-input" => :deny]),
+            with_overrides(load_config(root), false, ["hidden-input" => :deny], nothing),
             root;
             mod = Corset.WorkloadPackage,
             signatures = concrete_signatures(Corset.WorkloadPackage),
@@ -260,7 +271,7 @@ end
     smells = join((SNIPPETS[name]["source"] for name in ("nothing-return", "range-guard", "return-type", "concrete-arg", "concrete-return", "float64", "c-type", "ref", "annotation", "one-letter", "fatou", "jscpd")), "\n")
     write(joinpath(root, "src", "smells.jl"), smells)
     write(joinpath(root, "Project.toml"), "name = \"Demo\"\n")
-    config = with_overrides(load_config(root), true, Pair{String, Symbol}[])
+    config = with_overrides(load_config(root), true, Pair{String, Symbol}[], nothing)
     findings, skipped = run_rules(config, root; mod = fixture, signatures = concrete_signatures(fixture))
     @test isempty(skipped)
     pedantic = [rule_name(rule) for rule in RULES if rule_group(rule) === :pedantic]

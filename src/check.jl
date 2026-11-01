@@ -117,7 +117,7 @@ function fix_diff(config::Config, root::AbstractString)::String
     end
     apply_fixes!(
         enabled_rules(config),
-        Context(repository(config, copies), directories, nothing, Inferred[]),
+        Context(repository(config, copies), directories, nothing),
     )
     labels = relpath.(repository_sources(original, directories), original.root)
     return join(file_diff.(labels, joinpath.(original.root, labels), joinpath.(copies, labels)))
@@ -146,13 +146,13 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
     runnable = enabled[collect(can_run.(enabled, (mod,), (signatures,)))]
     skipped = setdiff(module_rule_names(enabled), module_rule_names(runnable))
     if fix
-        apply_fixes!(runnable, Context(repository_, directories, mod, Inferred[]))
+        apply_fixes!(runnable, Context(repository_, directories, mod))
     end
     inferred = Inferred[]
     if any(reads_signatures, runnable)
         inferred = inferred_methods(mod, signatures)
     end
-    context = Context(repository_, directories, mod, inferred)
+    context = Context(repository_, directories, mod, inferred, CandidateSearch(inferred; config.candidate_limit))
     sites = Dict{String, Vector{Site}}(rule_name(rule) => Site[] for rule in runnable)
     for rule in runnable
         if !(rule isa FileRule)

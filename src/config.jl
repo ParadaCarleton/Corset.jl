@@ -8,7 +8,8 @@ using Configurations: @option, from_dict, FieldTypeConversionError, InvalidKeyEr
 
 What a project sets for `corset`: the source `directories` to read, the `baseline` file, the
 `Repository` exemptions, whether the `pedantic` group is on, and per-rule `levels` (`:allow`,
-`:warn` or `:deny`) that override a rule's group.
+`:warn` or `:deny`) that override a rule's group, and the `candidate_limit` of the typed rules'
+`CandidateSearch`.
 """
 struct Config
     directories::Tuple{Vararg{String}}
@@ -17,6 +18,7 @@ struct Config
     skipped_directories::Tuple{Vararg{String}}
     pedantic::Bool
     levels::Dict{String, Symbol}
+    candidate_limit::Int
 end
 
 const LEVELS = (:allow, :warn, :deny)
@@ -29,6 +31,7 @@ const LEVELS = (:allow, :warn, :deny)
     skipped_directories::Union{Nothing, Vector{String}} = nothing
     pedantic::Union{Nothing, Bool} = nothing
     levels::Union{Nothing, Dict{String, String}} = nothing
+    candidate_limit::Union{Nothing, Int} = nothing
 end
 
 """Merge two preference dictionaries, with `over` overriding matching keys in `under`."""
@@ -94,7 +97,16 @@ function load_config(root::AbstractString)::Config
         Tuple(something(prefs.skipped_directories, String[])),
         something(prefs.pedantic, false),
         levels,
+        checked_limit(something(prefs.candidate_limit, DEFAULT_CANDIDATE_LIMIT), "[preferences.Corset] candidate_limit"),
     )
+end
+
+"""`limit`, a `candidate_limit` set by `source`; a negative one throws."""
+function checked_limit(limit::Integer, source::AbstractString)::Int
+    if limit < 0
+        error("$source is $limit; 0 lists no runtime-dispatch candidates, a positive count caps them")
+    end
+    return limit
 end
 
 """The `Repository` for `config` rooted at `root`; a relative baseline path is taken from `root`."""

@@ -1,0 +1,46 @@
+# Runtime-dispatch calls whose candidate methods `call_candidates` lists. Each function has four
+# methods, past inference's three-method limit, so a call on a `Vector{Any}` element stays dynamic.
+mutable struct Counter
+    hits::Int
+end
+struct Circle end
+struct Square end
+struct Triangle end
+struct Hexagon end
+
+measure(::Circle, counter::Counter) = counter.hits
+measure(::Square, counter::Counter) = counter.hits + 1
+measure(::Triangle, counter::Counter) = counter.hits + 2
+measure(::Hexagon, counter::Counter) = counter.hits + 3
+
+tally(::Circle, counter::Counter) = (counter.hits += 1; nothing)
+tally(::Square, counter::Counter) = nothing
+tally(::Triangle, counter::Counter) = nothing
+tally(::Hexagon, counter::Counter) = nothing
+
+gathered(::Circle, counters::Counter...) = (first(counters).hits = 0; nothing)
+gathered(::Square, counters::Counter...) = nothing
+gathered(::Triangle, counters::Counter...) = nothing
+gathered(::Hexagon, counters::Counter...) = nothing
+
+relay(::Circle, counter::Counter, shapes::Vector{Any}) = tally(first(shapes), counter)
+relay(::Square, counter::Counter, shapes::Vector{Any}) = nothing
+relay(::Triangle, counter::Counter, shapes::Vector{Any}) = nothing
+relay(::Hexagon, counter::Counter, shapes::Vector{Any}) = nothing
+
+broken(::Circle, counter::Counter) = nothing
+broken(::Square, counter::Counter) = nothing
+broken(::Triangle, counter::Counter) = nothing
+@generated broken(::Hexagon, counter::Counter) = error("this generator throws")
+
+echo(::Circle, counter::Counter) = nothing
+echo(::Square, counter::Counter) = nothing
+echo(::Triangle, counter::Counter) = nothing
+echo(shapes::Vector{Any}, counter::Counter) = echo(first(shapes), counter)
+
+inspect(shapes::Vector{Any}, counter::Counter) = measure(first(shapes), counter)
+record(shapes::Vector{Any}, counter::Counter) = tally(first(shapes), counter)
+spread(shapes::Vector{Any}, counter::Counter) = gathered(first(shapes), counter, counter)
+forward(shapes::Vector{Any}, counter::Counter) = relay(first(shapes), counter, shapes)
+breaks(shapes::Vector{Any}, counter::Counter) = broken(first(shapes), counter)
+splatted(shapes::Vector{Any}, counter::Counter) = measure(shapes..., counter)

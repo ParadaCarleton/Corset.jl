@@ -210,9 +210,9 @@ end
         "human",
     ) ==
         "deny[jet]: scope\n"
-    described = [Finding("capture", :deny, Corset.Site("a.jl f", joinpath(root, "a.jl"), 3, "holds a Core.Box"))]
-    @test sprint(print_findings, root, described, "human") == "deny[capture]: a.jl f\n  --> a.jl:3\n  = holds a Core.Box\n"
-    @test sprint(print_findings, root, described, "concise") == "a.jl:3: deny: [capture] a.jl f (holds a Core.Box)\n"
+    described = [Finding("impure-anonymous-function", :deny, Corset.Site("a.jl f", joinpath(root, "a.jl"), 3, "holds a Core.Box"))]
+    @test sprint(print_findings, root, described, "human") == "deny[impure-anonymous-function]: a.jl f\n  --> a.jl:3\n  = holds a Core.Box\n"
+    @test sprint(print_findings, root, described, "concise") == "a.jl:3: deny: [impure-anonymous-function] a.jl f (holds a Core.Box)\n"
     @test occursin("\"detail\":\"holds a Core.Box\"", sprint(print_findings, root, described, "json"))
 
     @test exit_code(findings, false) == 0

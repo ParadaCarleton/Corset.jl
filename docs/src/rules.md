@@ -34,7 +34,7 @@ method beside methods that return values (a dispatch on "off") is not reported.
 
 Repair: add the `!`.
 
-### `capture`: `impure_captures(mod)`
+### `impure-anonymous-function`: `impure_anonymous_functions(mod)`
 
 Anonymous functions (lambdas, `do` blocks and the generators of comprehensions) that capture anything
 but plain immutable data; Julia calls an anonymous function with captures a closure. One passes when it

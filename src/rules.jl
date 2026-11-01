@@ -565,7 +565,7 @@ end
 Each `live_closure_types` closure of `mod` that `closure_fault` rejects, as a `closure_site` whose detail is
 the fault. A closure that captures nothing, like `x -> x.field`, passes.
 """
-function impure_captures(mod::Module)::Vector{Site}
+function impure_anonymous_functions(mod::Module)::Vector{Site}
     world = Base.get_world_counter()
     namers = closure_namers(mod, defined_methods(mod))
     types = live_closure_types(mod)

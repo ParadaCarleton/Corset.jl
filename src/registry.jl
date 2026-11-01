@@ -96,8 +96,8 @@ abstract_locals(context.repository, context.inferred)
 @rule ModuleRule "bang" :pedantic "functions that always return nothing and have no ! in the name" context ->
 unmarked_effects(context.repository, context.inferred)
 
-@rule ModuleRule "capture" :default "anonymous functions that capture anything but plain immutable data" context ->
-impure_captures(context.mod)
+@rule ModuleRule "impure-anonymous-function" :default "anonymous functions that capture anything but plain immutable data" context ->
+impure_anonymous_functions(context.mod)
 
 """The sites of the struct `types`, each placed at its declaration in `context`'s sources."""
 struct_sites(types::AbstractVector{DataType}, context::Context)::Vector{Site} = struct_site.(nameof.(types), (declared(context),))

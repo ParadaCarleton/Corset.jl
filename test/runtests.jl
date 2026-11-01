@@ -463,6 +463,10 @@ end
     @test check("wrap(element::Float32)::Wrapped = Wrapped(element)\n") == 1
     @test check("(wrap(element::Float32)::Wrapped{E}) where {T} = Wrapped(element)\n") == 1
     @test check("(listed(element::E)::Vector{E}) where {E} = [element]\n") == 1
+    # A macro-named function keys by the macro name alone, with no line-number node.
+    path = tempname() * ".jl"
+    write(path, "(@main)(args::AbstractVector)::Int = 0\n")
+    @test only(concrete_returns(path, located_source(path), scope)).key == "$(basename(path)) @main"
 end
 
 @testset "a name used only inside a macro call counts as used" begin

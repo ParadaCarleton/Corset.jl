@@ -52,6 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The pedantic fatou and jscpd rules run the tools mise.toml pins.
+      - uses: jdx/mise-action@v2
       - uses: julia-actions/setup-julia@v2
         with:
           version: "1"

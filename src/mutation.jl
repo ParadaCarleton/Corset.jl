@@ -69,27 +69,40 @@ function reached_arguments(indices::AbstractVector{<:Integer}, ir::COMPILER.IRCo
     return sort!(arguments[writable.(COMPILER.widenconst.(ir.argtypes[arguments]))])
 end
 
-"""
-Whether a write through a value of type `type` counts: not `plain_capture` data, a type or a module,
-and not an `IO` or a lock, whose functions (`show`, `read`, `lock`) write them without a `!` by convention.
-"""
-writable(type::Type)::Bool = !(plain_capture(type) || type <: Union{Type, Module, IO, Base.AbstractLock})
+# Handles whose writes leave Julia: files, pipes, sockets, terminals and processes.
+const OS_HANDLES = Union{
+    IOStream, Base.Filesystem.File, Base.DevNull, Core.CoreSTDOUT, Core.CoreSTDERR,
+    Base.LibuvServer, Base.Process, Base.ProcessChain, Pipe,
+}
 
-"""What a frame or statement does to arguments: the indices it writes through, and those it passes to a call the analysis cannot follow."""
+"""Whether every value of type `type` is an OS-backed handle: an `OS_HANDLES` type or a libuv stream other than the in-memory `BufferStream`."""
+os_handle(type::Type)::Bool = type <: OS_HANDLES || (type <: Base.LibuvStream && !(Base.BufferStream <: type))
+
+"""
+Whether a write through a value of type `type` changes a Julia object: not `plain_capture` data, a
+type or a module, and not an `os_handle`, whose writes reach the file system or the OS.
+"""
+writable(type::Type)::Bool = !(plain_capture(type) || type <: Union{Type, Module} || os_handle(type))
+
+"""
+What a frame or statement does to arguments, as indices: those it writes through, those it passes to
+a runtime dispatch, and those it passes to a `ccall`. The analysis cannot read the last two callees.
+"""
 struct ArgumentWrites
     written::Vector{Int}
-    unverified::Vector{Int}
+    dispatched::Vector{Int}
+    foreign::Vector{Int}
 end
 
-const NO_WRITES = ArgumentWrites(Int[], Int[])
+const NO_WRITES = ArgumentWrites(Int[], Int[], Int[])
 
 """
     argument_writes(frame, frames, stack)
 
-The `ArgumentWrites` of `frame`, as argument numbers. A statically resolved callee writes the
-arguments its own frame in `frames` (keyed by method instance) writes; a callee named with `!` writes
-its first argument; any other callee writes none. `stack` holds the instances being summarized,
-which a recursive call skips.
+The `ArgumentWrites` of `frame`, as argument numbers; a written argument is neither dispatched nor
+foreign. A statically resolved callee writes the arguments its own frame in `frames` (keyed by method
+instance) writes; a callee named with `!` writes its first argument; any other callee writes none.
+`stack` holds the instances being summarized, which a recursive call skips.
 """
 function argument_writes(
         frame::Inferred,
@@ -98,10 +111,14 @@ function argument_writes(
     )::ArgumentWrites
     estate = escape_state(frame.ir, frame.method.nargs)
     effects = statement_writes.(frame.ir.stmts.stmt, (frame.ir,), (estate,), (frames,), (stack,))
-    written = reached_arguments(reduce(vcat, getfield.(effects, :written); init = Int[]), frame.ir, estate)
-    unverified = reached_arguments(reduce(vcat, getfield.(effects, :unverified); init = Int[]), frame.ir, estate)
-    return ArgumentWrites(written, setdiff(unverified, written))
+    written = effect_arguments(:written, effects, frame.ir, estate)
+    dispatched = setdiff(effect_arguments(:dispatched, effects, frame.ir, estate), written)
+    return ArgumentWrites(written, dispatched, setdiff(effect_arguments(:foreign, effects, frame.ir, estate), written))
 end
+
+"""The arguments that the `field` operands of the statement `effects` reach (`reached_arguments`)."""
+effect_arguments(field::Symbol, effects::AbstractVector{ArgumentWrites}, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::Vector{Int} =
+    reached_arguments(reduce(vcat, getfield.(effects, field); init = Int[]), ir, estate)
 
 """The `ArgumentWrites` of one IR statement, as the indices of its operands."""
 statement_writes(::Any, ::COMPILER.IRCode, ::ESCAPE.EscapeState, ::AbstractDict, ::Tuple)::ArgumentWrites = NO_WRITES
@@ -114,17 +131,17 @@ function statement_writes(
         stack::Tuple,
     )::ArgumentWrites
     if statement.head === :invoke
-        return ArgumentWrites(invoked_writes(statement, estate, frames, stack), Int[])
+        return ArgumentWrites(invoked_writes(statement, estate, frames, stack), Int[], Int[])
     elseif statement.head === :foreigncall
-        return ArgumentWrites(Int[], writable_operands(statement.args[6:(5 + length(statement.args[3]))], ir, estate))
+        return ArgumentWrites(Int[], Int[], writable_operands(statement.args[6:(5 + length(statement.args[3]))], ir, estate))
     elseif statement.head !== :call
         return NO_WRITES
     end
     builtin = called_builtin(statement, ir)
     if builtin in WRITING_BUILTINS
-        return ArgumentWrites(operand_indices(statement.args[2:2], estate), Int[])
+        return ArgumentWrites(operand_indices(statement.args[2:2], estate), Int[], Int[])
     elseif isnothing(builtin) || builtin in CALLING_BUILTINS
-        return ArgumentWrites(Int[], writable_operands(statement.args[2:end], ir, estate))
+        return ArgumentWrites(Int[], writable_operands(statement.args[2:end], ir, estate), Int[])
     end
     return NO_WRITES
 end
@@ -158,8 +175,8 @@ end
 
 """
 Each `is_unmarked_function` among `inferred` whose frame writes through one of its arguments, one
-site per method: "writes argument `x`", or "passes argument `x` to a call the analysis cannot follow"
-when the argument reaches a dynamic dispatch or a `ccall`, whose code the analysis does not read.
+site per method: "writes argument `x`", or "may write" when the argument reaches a runtime dispatch
+(which `runtime-dispatch` also reports) or a `ccall`, whose code the analysis does not read.
 """
 function unmarked_mutations(repository::Repository, inferred::AbstractVector{Inferred})::Vector{Site}
     frames = Dict{Core.MethodInstance, Inferred}(item.code.parent => item for item in inferred)
@@ -173,7 +190,8 @@ function mutation_sites(item::Inferred, frames::AbstractDict{Core.MethodInstance
     names = "`" .* string.(item.code.slotnames) .* "`"
     details = vcat(
         "writes argument " .* names[writes.written] .* " but its name has no `!`",
-        "passes argument " .* names[writes.unverified] .* " to a call the analysis cannot follow",
+        "argument " .* names[writes.dispatched] .* " reaches a runtime dispatch (`runtime-dispatch`) and may be written",
+        "argument " .* names[writes.foreign] .* " reaches a `ccall` and may be written",
     )
     return Site.(method_key(item.method), string(item.method.file), item.method.line, details)
 end

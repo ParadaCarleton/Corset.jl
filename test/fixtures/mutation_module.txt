@@ -26,9 +26,9 @@ reads(v) = length(v)
 bangwrite!(v) = (v[1] = 1; v)
 @noinline countdown(v, n) = n == 0 ? length(v) : countdown(v, n - 1)
 
-Base.show(io::IO, box::Box) = (write(io, UInt8(box.a)); nothing)
-describe(io::IO, box) = (write(io, UInt8(box.a)); nothing)
-guarded(gate::Base.AbstractLock) = (lock(gate); unlock(gate); nothing)
+describe(io::IOBuffer, box) = (write(io, UInt8(box.a)); nothing)
+log_to(io::IOStream, box) = (write(io, UInt8(box.a)); nothing)
+guarded(gate::ReentrantLock) = (lock(gate); unlock(gate); nothing)
 zero_first(values::Vector{Int}) = (values[1] = 0; nothing)
 
 opaquecall(f, x) = f(x)

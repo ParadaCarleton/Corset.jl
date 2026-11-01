@@ -51,10 +51,14 @@ Functions without `!` in the name that write through an argument: `v[1] = 0`, `x
 `push!(x.items, 1)`, or a write through an alias, a field or an element of the argument. The rule reads each
 frame's optimized IR and asks the compiler's escape analysis which arguments the written object
 aliases. A callee that is not inlined writes its first argument when its name ends in `!`, and what its own frame writes otherwise.
-An argument passed to a dynamic dispatch or a `ccall` is reported as unverified: the analysis cannot read that code.
-Plain immutable arguments (bits values, `String`s, `Symbol`s), types and modules are never reported.
-Escape analysis merges the alias sets of a value and the object it is stored in, so `write(dest, src)` that
-stores `src` into `dest` reports both.
+An argument passed to a runtime dispatch or a `ccall` is reported as one that may be written: the
+analysis cannot read that code. `runtime-dispatch` reports the same dispatch.
+A write to any Julia object counts, an `IOBuffer`, a lock or a `Channel` included. Arguments that cannot
+be written in Julia are never reported: plain immutable data (bits values, `String`s, `Symbol`s), types,
+modules, and OS-backed handles (`IOStream`, files, pipes, sockets, terminals, processes), whose writes
+leave Julia. An abstract `IO` or an `IOContext` is reported, since it may hold an `IOBuffer`.
+Escape analysis merges the alias sets of a value and the object it is stored in, so `deepcopy_internal(x, stackdict)`,
+which stores `x` in `stackdict`, reports both.
 
 Repair: add the `!`, or copy the argument before writing to the copy.
 

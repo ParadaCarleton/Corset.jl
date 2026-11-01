@@ -734,6 +734,7 @@ end
         Tuple{typeof(Mutation.render), IOBuffer, Mutation.Box}, Tuple{typeof(Mutation.render_into), IOBuffer, Mutation.Box},
         Tuple{typeof(Mutation.log_context), IOContext{IOStream}, Mutation.Box},
         Tuple{typeof(Mutation.buffer_context), IOContext{IOBuffer}, Mutation.Box},
+        Tuple{typeof(length), Mutation.Box}, Tuple{typeof(iterate), Mutation.Box}, Tuple{typeof(show), IOBuffer, Mutation.Box},
         Tuple{typeof(Mutation.guarded), ReentrantLock}, Tuple{typeof(Mutation.zero_first), vector},
     ]
     sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred_methods(Mutation, entry_frames(seeds, Mutation)))
@@ -757,6 +758,11 @@ end
     @testset "a method declaring an abstract IO writes its caller's stream; a concrete in-memory declaration flags" begin
         @test !haskey(details, "render") && !haskey(details, "render_into") && !haskey(details, "log_context")
         @test details["buffer_context"] == "writes argument `io` but its name has no `!`"
+    end
+    @testset "a writing method added to another module's non-`!` function breaks its contract" begin
+        @test details["length"] == "adds a writing method to `Base.length`, which callers expect not to write: it writes argument `box`"
+        @test details["iterate"] == "adds a writing method to `Base.iterate`, which callers expect not to write: it writes argument `box`"
+        @test !haskey(details, "show")
         render = only(Corset.typed_frames(Tuple{typeof(Mutation.render), IOBuffer, Mutation.Box}))
         @test Corset.argument_writes(render, Dict{Core.MethodInstance, Corset.Inferred}(), ()).written == [2]
         @test Corset.declared_io(render.method, 2) && !Corset.declared_io(render.method, 3) && !Corset.declared_io(render.method, 9)

@@ -53,7 +53,7 @@ frame's optimized IR and asks the compiler's escape analysis which arguments the
 aliases. A callee that is not inlined writes its first argument when its name ends in `!`, and what its own frame writes otherwise.
 An argument passed to a runtime dispatch or a `ccall` is reported as one that may be written: the
 analysis cannot read that code. `runtime-dispatch` reports the same dispatch.
-A write to any Julia object counts, an `IOBuffer`, a lock or a `Channel` included. Arguments that cannot
+A method the package adds to another module's non-`!` function (`Base.length`, `Base.iterate` on a stateful iterator) is checked too: "adds a writing method to `Base.length`, which callers expect not to write". A write to any Julia object counts, an `IOBuffer`, a lock or a `Channel` included. Arguments that cannot
 be written in Julia are never reported: plain immutable data (bits values, `String`s, `Symbol`s), types,
 modules, and OS-backed handles (`IOStream`, files, pipes, sockets, terminals, processes), whose writes
 leave Julia. So is an `IOContext` around one. A method declaring an abstract `IO` argument (`io::IO`) writes whatever stream its caller passes, so it is not reported even when compiled for an `IOBuffer`; a concrete in-memory declaration (`io::IOBuffer`, `io::IOContext{IOBuffer}`) is.

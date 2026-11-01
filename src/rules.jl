@@ -732,7 +732,15 @@ end
 """The name a parsed function definition `node` defines, or `nothing` when `node` defines none."""
 function defined_name(node::Expr)::Union{Symbol, Nothing} # lint: abstract-local  Expr nodes hold untyped arguments
     call = signature_call(node)
-    return isnothing(call) ? nothing : Symbol(string(call.args[1]))
+    if isnothing(call)
+        return nothing
+    end
+    callee = call.args[1]
+    # `(@main)(...)` names the macro; its line-number argument is no part of the name.
+    if Meta.isexpr(callee, :macrocall)
+        callee = callee.args[1]
+    end
+    return Symbol(string(callee))
 end
 
 """The declared return type of parsed function definition `node`, or `nothing` when it declares none."""

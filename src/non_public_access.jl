@@ -14,8 +14,8 @@ ExplicitImports reads `file` and the files it includes. A qualified access has a
 explicit import has one per name, at its first import.
 """
 function non_public_accesses(mod::Module, file::AbstractString = entry_file(mod))::Vector{Site}
-    analysis = USES(file)
-    accesses = unique([use for (submodule, rows) in improper_qualified_accesses(mod, file) for use in qualified_uses(submodule, rows, analysis)])
+    findings = improper_qualified_accesses(mod, file)
+    accesses = unique(reduce(vcat, qualified_uses.(first.(findings), last.(findings), (USES(file),)); init = NamedTuple[]))
     imports = [row for (_, rows) in improper_explicit_imports(mod, file; strict = false) for row in rows if row.public_import === false]
     return [non_public_site.(accesses, getproperty.(accesses, :accessing_from)); non_public_site.(imports, getproperty.(imports, :importing_from))]
 end
@@ -25,10 +25,17 @@ Every qualified use in `submodule`, from the ExplicitImports file `analysis`, of
 that `findings` (ExplicitImports rows, one per name) report.
 """
 function qualified_uses(submodule::Module, findings::AbstractVector{T}, analysis::Any)::Vector{NamedTuple} where {T <: NamedTuple}
-    flagged = Set((row.name, row.accessing_from) for row in findings if !row.public_access && !row.self_qualified)
-    resolved = [QUALIFIED_USE(use, submodule) for use in MODULE_USES(analysis, submodule).per_usage_info if !isnothing(use.qualified_by)]
-    return [use for use in resolved if !isnothing(use) && (use.name, use.accessing_from) in flagged]
+    flagged = Set(access_key(row) for row in findings if !row.public_access && !row.self_qualified)
+    resolved = QUALIFIED_USE.(filter(is_qualified, MODULE_USES(analysis, submodule).per_usage_info), (submodule,))
+    found = filter(!isnothing, resolved)
+    return found[in.(access_key.(found), (flagged,))]
 end
+
+"""Whether the ExplicitImports per-use row `use` is a qualified access (`Module.name`)."""
+is_qualified(use::Any)::Bool = !isnothing(use.qualified_by)
+
+"""The name of a qualified access `row` and the module it reaches the name in."""
+access_key(row::NamedTuple)::Tuple{Symbol, Module} = (row.name, row.accessing_from)
 
 """The site of the ExplicitImports finding `row`, a name of the module `owner`, keyed `Owner.name`."""
 function non_public_site(row::NamedTuple, owner::Union{Module, Symbol})::Site

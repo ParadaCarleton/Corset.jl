@@ -768,7 +768,7 @@ end
         @test details["iterate"] == "adds a writing method to `Base.iterate`, which callers expect not to write: it writes argument `box`"
         @test !haskey(details, "show")
         render = only(Corset.typed_frames(Tuple{typeof(Mutation.render), IOBuffer, Mutation.Box}))
-        @test Corset.argument_writes(render, Dict{Core.MethodInstance, Corset.Inferred}(), ()).written == [2]
+        @test Corset.argument_writes(render, Dict{Core.MethodInstance, Corset.Inferred}(), (), Corset.CandidateSearch(Corset.Inferred[])).written == [2]
         @test Corset.declared_io(render.method, 2) && !Corset.declared_io(render.method, 3) && !Corset.declared_io(render.method, 9)
     end
     @testset "fresh memory, reads, a rebound local and a `!` function are not reported" begin
@@ -782,7 +782,7 @@ end
     end
     @testset "Base.sort and Base.replace copy before they write" begin
         for signature in (Tuple{typeof(sort), vector}, Tuple{typeof(replace), vector, Pair{Int, Int}})
-            writes = Corset.argument_writes(only(Corset.typed_frames(signature)), Dict{Core.MethodInstance, Corset.Inferred}(), ())
+            writes = Corset.argument_writes(only(Corset.typed_frames(signature)), Dict{Core.MethodInstance, Corset.Inferred}(), (), Corset.CandidateSearch(Corset.Inferred[]))
             @test isempty(writes.written) && isempty(writes.dispatched) && isempty(writes.foreign)
         end
     end
@@ -882,6 +882,39 @@ end
         @test_throws ArgumentError Corset.CandidateSearch(inferred; candidate_limit = -1)
         tally = only(methods(Candidates.tally, (Candidates.Circle, Candidates.Counter)))
         @test Corset.candidate_name(tally) == "$(Candidates).tally at candidates_module.txt:$(tally.line)"
+    end
+end
+
+@testset "unmarked-mutation resolves a runtime dispatch through its candidates" begin
+    inferred = inferred_methods(Candidates, entry_frames(candidate_seeds(), Candidates))
+    repository = Repository(@__DIR__)
+    "The details of `unmarked_mutations` at `limit`, by function name."
+    details(limit::Integer)::Dict{String, String} = Dict(
+        last(split(site.key)) => site.detail
+            for site in Corset.unmarked_mutations(repository, inferred; search = Corset.CandidateSearch(inferred; candidate_limit = limit))
+    )
+    resolved = details(Corset.DEFAULT_CANDIDATE_LIMIT)
+    may_write = "argument `counter` reaches a runtime dispatch (`runtime-dispatch`) and may be written"
+    @testset "candidates that write nothing clear the site; a writing one makes it definite and is named" begin
+        @test !haskey(resolved, "inspect")
+        @test resolved["record"] == "writes argument `counter` but its name has no `!` (runtime-dispatch candidate `$(Corset.candidate_name(first(methods(Candidates.tally, (Candidates.Circle, Candidates.Counter)))))` writes it)"
+        @test startswith(resolved["spread"], "writes argument `counter`") && occursin("gathered", resolved["spread"])
+    end
+    @testset "a budget cut keeps the conservative report" begin
+        for limit in (0, 3)
+            cut = details(limit)
+            @test contains(cut["inspect"], may_write) && contains(cut["record"], may_write)
+        end
+    end
+    @testset "an uninferable candidate, a candidate's own dispatch and a recursive candidate keep it too" begin
+        for name in ("breaks", "forward", "echo")
+            @test contains(resolved[name], may_write)
+        end
+    end
+    @testset "a varargs candidate gathers the trailing operands into its last argument" begin
+        gathered = only(methods(Candidates.gathered, (Candidates.Circle, Vararg{Candidates.Counter})))
+        @test Corset.candidate_argument.((gathered,), 2:5) == [2, 3, 3, 3]
+        @test Corset.candidate_argument(only(methods(Candidates.inspect)), 5) == 5
     end
 end
 

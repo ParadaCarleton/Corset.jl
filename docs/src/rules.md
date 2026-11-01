@@ -56,7 +56,7 @@ analysis cannot read that code. `runtime-dispatch` reports the same dispatch.
 A write to any Julia object counts, an `IOBuffer`, a lock or a `Channel` included. Arguments that cannot
 be written in Julia are never reported: plain immutable data (bits values, `String`s, `Symbol`s), types,
 modules, and OS-backed handles (`IOStream`, files, pipes, sockets, terminals, processes), whose writes
-leave Julia. An abstract `IO` or an `IOContext` is reported, since it may hold an `IOBuffer`.
+leave Julia. So is an `IOContext` around one. A method declaring an abstract `IO` argument (`io::IO`) writes whatever stream its caller passes, so it is not reported even when compiled for an `IOBuffer`; a concrete in-memory declaration (`io::IOBuffer`, `io::IOContext{IOBuffer}`) is.
 Escape analysis merges the alias sets of a value and the object it is stored in, so `deepcopy_internal(x, stackdict)`,
 which stores `x` in `stackdict`, reports both.
 

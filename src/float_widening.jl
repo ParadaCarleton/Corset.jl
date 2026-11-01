@@ -40,7 +40,7 @@ function float_budget(item::Inferred)::FloatBudget
 end
 
 """Whether a frame of `budget` is judged: it receives a float, and none as wide as `Float64`."""
-judged(budget::FloatBudget)::Bool = 0 < budget.bits < precision(Float64)
+judged(budget::FloatBudget)::Bool = 0 < budget.bits < precision(Float64) # lint: float64  the rule measures against Float64
 
 """Whether `floats` hold one wider than `budget` allows."""
 wider(floats::AbstractVector{DataType}, budget::FloatBudget)::Bool = maximum(precision, floats; init = 0) > budget.bits

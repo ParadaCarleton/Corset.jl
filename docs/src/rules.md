@@ -134,6 +134,12 @@ f(x::T)::T where {T} = x      # parses as f(x::T)::(T where {T}); T is not the m
 One site per finding of [Fatou](https://github.com/jolars/fatou)'s `fatou lint`, keyed by file and
 Fatou rule. `fatou` must be on `PATH`; the rule errors if it is not.
 
+### `jscpd`: `jscpd_sites(repo, directories)`
+
+One site per duplicate code block found by [jscpd](https://github.com/kucherenko/jscpd), keyed by
+the duplicate file and the duplicated file, placed at the duplicate block's lines. `jscpd` must be
+on `PATH`; the rule errors if it is not.
+
 ### `jet`: [`@call_sites`](@ref), [`@opt_sites`](@ref)
 
 Reports of `JET.@report_call` and `JET.@report_opt`. See the [guide](guide.md#JET).

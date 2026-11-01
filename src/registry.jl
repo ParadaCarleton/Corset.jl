@@ -113,6 +113,9 @@ unmarked_mutations(context.repository, context.inferred; search = context.candid
 @rule ModuleRule "runtime-dispatch" :pedantic "calls left to run-time dispatch in the frames the signatures compile" context ->
 runtime_dispatches(context.repository, context.inferred)
 
+@rule ModuleRule "float-widening" :pedantic "statements whose float result is wider than every float argument of their method" context ->
+float_widenings(context.repository, context.inferred; search = context.candidates)
+
 @rule ModuleRule "widened-return" :pedantic "methods whose inferred result a caller cannot compile against concretely" context ->
 widened_returns(context.repository, context.inferred)
 

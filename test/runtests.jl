@@ -918,6 +918,66 @@ end
     end
 end
 
+module Floats
+    include(joinpath(@__DIR__, "fixtures", "float_module.txt"))
+end
+
+@testset "float-widening: a float result wider than every float argument" begin
+    untyped = Array{Any, 1}
+    narrow = Float32
+    seeds = Type[
+        Tuple{typeof(Floats.scaled), narrow}, Tuple{typeof(Floats.halved), narrow}, Tuple{typeof(Floats.ratio), Int, Int, narrow},
+        Tuple{typeof(Floats.floated), Int, Float16}, Tuple{typeof(Floats.global_scaled), narrow},
+        Tuple{typeof(Floats.elementwise), Vector{narrow}}, Tuple{typeof(Floats.chained), narrow},
+        Tuple{typeof(Floats.calls_widened), narrow}, Tuple{typeof(Floats.branchy), narrow, Bool},
+        Tuple{typeof(Floats.refined), narrow, Union{Nothing, narrow}}, Tuple{typeof(Floats.thrower), narrow},
+        Tuple{typeof(Floats.wide), Float64}, Tuple{typeof(Floats.no_floats), Int},
+        Tuple{typeof(Floats.grown), narrow, untyped}, Tuple{typeof(Floats.kept), narrow, untyped},
+        Tuple{typeof(Floats.signed_only), narrow, Vector{Signed}},
+    ]
+    inferred = inferred_methods(Floats, entry_frames(seeds, Floats))
+    repository = Repository(@__DIR__)
+    "The `float_widenings` sites at `limit`, by function name."
+    widenings(limit::Integer)::Dict{String, Site} = Dict(
+        last(split(site.key)) => site
+            for site in Corset.float_widenings(repository, inferred; search = Corset.CandidateSearch(inferred; candidate_limit = limit))
+    )
+    found = widenings(Corset.DEFAULT_CANDIDATE_LIMIT)
+    @testset "a literal, a conversion, a float global, a callee and a returned literal widen, and name their source" begin
+        @test found["scaled"].detail == "`Base.Float64` makes a Float64; the widest float argument is Float32"
+        @test occursin("`Main.Floats.SCALE` makes a Float64", found["global_scaled"].detail)
+        @test occursin("the widest float argument is Float16", found["floated"].detail)
+        @test found["calls_widened"].detail == "`widened` makes a Float64; the widest float argument is Float32"
+        @test found["branchy"].detail == "`0.0` makes a Float64; the widest float argument is Float32"
+        @test all(haskey.((found,), ["ratio", "elementwise", "widened"]))
+    end
+    @testset "a value computed from a widened one is not reported again" begin
+        @test found["chained"].line == 9
+    end
+    @testset "narrow arithmetic, Float64 arguments, no float arguments and a throw are skipped" begin
+        @test !any(haskey.((found,), ["halved", "wide", "no_floats", "refined", "thrower"]))
+    end
+    @testset "a dispatch: a wide candidate is definite, narrow ones clear it, a budget cut may widen" begin
+        grow = only(methods(Floats.grow, (Float32,)))
+        @test found["grown"].detail == "dispatches `$(GlobalRef(Floats, :grow))`; candidate `$(Corset.candidate_name(grow))` returns a float wider than Float32"
+        @test !haskey(found, "kept")
+        for limit in (0, 3)
+            cut = widenings(limit)
+            @test cut["kept"].detail == "dispatches `$(GlobalRef(Floats, :keep))` on a Float32 and may widen (`runtime-dispatch`)"
+            @test endswith(cut["grown"].detail, "may widen (`runtime-dispatch`)")
+        end
+    end
+    @testset "a dispatch whose operand types hold no float of the method's is skipped" begin
+        @test !haskey(widenings(0), "signed_only")
+    end
+    @testset "held_floats reads parameters, unions and type variables, to a depth limit" begin
+        @test Corset.held_floats(Tuple{Int, Complex{Float16}}, 0) == [Float16]
+        @test Set(Corset.held_floats(Union{Float32, Vector{Float64}}, 0)) == Set([Float32, Float64])
+        @test isempty(Corset.held_floats(Vector{T} where {T}, 0)) && isempty(Corset.held_floats(Float32, 5))
+        @test isempty(Corset.value_floats(Type{Float64}))
+    end
+end
+
 @testset "entry_frames walks :invoke edges from the seeds and reads nothing the session ran" begin
     outer_call = Tuple{typeof(Probe.outer), Probe.Marker}
     inner_call = Tuple{typeof(Probe.inner), Probe.Marker}

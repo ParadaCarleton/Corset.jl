@@ -85,6 +85,26 @@ of such members.
 
 Repair: make the result type depend only on the argument types.
 
+### `float-widening`: `float_widenings(repo, inferred_methods(mod, entry_frames(seeds, mod)))`
+
+Pedantic. Statements whose float result is wider than every float the method receives in its
+arguments: `x::Float32 * 2.0`, `n / m` on `Int`s in a `Float32` method, `float(n)`, a `Float64`
+global, or a returned `0.0`. The detail names the operand that brings the wide float in (`Base.Float64`
+for a conversion, `0.0`, the global), or the callee. A value computed from an already widened one is
+not reported again. Methods with no float argument, or one already as wide as `Float64`, are skipped.
+Arguments count the floats they hold anywhere in their type (`Vector{Float32}`, `Complex{Float16}`).
+
+At a runtime dispatch the rule lists the candidate methods (`candidate_limit`, as in
+`unmarked-mutation`). A candidate that returns a wider float makes the site definite. A dispatch with
+more candidates than the budget, or one inference cannot type, may widen: "may widen
+(`runtime-dispatch`)". A dispatch whose argument types cannot hold the method's floats is skipped.
+
+`float64` finds the same literals and tokens in the source text of every method; this rule reads what
+the compiler made of them, for the argument types given. [`float64_ops`](@ref) counts the Float64
+operations of one call.
+
+Repair: `oftype(x, 2.0)`, `T(0.5)` or `float(T)(n)`, with `T` the argument's float type.
+
 ### Anonymous functions: `impure-anonymous-function`, `unstable-anonymous-function`, `overspecialized-anonymous-function`
 
 Three rules on anonymous functions (lambdas, `do` blocks and the generators of comprehensions) that
@@ -137,7 +157,7 @@ Each takes a file path and `located_source(file)`, the parsed file.
 | `concrete-arg` | `concrete_arguments` | arguments annotated `Vector`, `Matrix`, `Array` or `Dict` that the method never resizes | `AbstractVector{T}` and the like; they accept views, `OffsetArray` and GPU arrays |
 | `concrete-return` | `concrete_returns(file, located, mod)` | result types that name a concrete type, `Vector{E}` included; `AbstractMatrix{T}` passes; a constructor returning its own type is exempt | annotate by what the arguments bind; `Corset.CONCRETE_RETURN_FIX` is the log text |
 | `annotation` | `missing_annotations` | methods with an unannotated argument or result | annotate |
-| `float64` | `float64_sites(file)` | `Float64` tokens and untyped float literals | `zero(T)`, `T(0.5)` or `oftype(x, 0.5)` |
+| `float64` | `float64_sites(file)` | `Float64` tokens and untyped float literals; `float-widening` reads where they widen a narrower argument | `zero(T)`, `T(0.5)` or `oftype(x, 0.5)` |
 | `ref` | `ref_sites(file)` | `Ref` and `RefValue` outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | Return the changed data from the function that computes it. A broadcast shield (`f.(Ref(x), xs)`) opts out with `# lint: ref` |
 | `c-type` | `c_type_sites(file)` | `Cint`, `Cdouble` and the other C-interop types outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | `Int`, `Float64` or `String`; convert at the `ccall` |
 | `one-letter` | `one_letter_sites(repo, file)` | one-letter variable names (exempt: `_` and `Repository.one_letter_exempt`) | name the variable |

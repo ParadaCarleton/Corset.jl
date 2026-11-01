@@ -1,0 +1,29 @@
+# Methods that receive narrow floats and compute wider ones, or stay narrow, for the `float-widening` rule.
+global SCALE::Float64 = 2.0
+scaled(x::Float32) = x * 2.0
+halved(x::Float32) = x * 0.5f0
+ratio(n::Int, m::Int, x::Float32) = x + n / m
+floated(n::Int, x::Float16) = x + float(n)
+global_scaled(x::Float32) = x * SCALE
+elementwise(values::Vector{Float32}) = first(values) * 2.0
+chained(x::Float32) = (y = x * 2.0;
+    y + 1)
+@noinline widened(x::Float32) = Float64(x)
+calls_widened(x::Float32) = widened(x) + 1
+branchy(x::Float32, flag::Bool) = flag ? x : 0.0
+refined(x::Float32, y::Union{Nothing, Float32}) = isnothing(y) ? x : y + x
+thrower(x::Float32) = error("no float here")
+wide(x::Float64) = x * 2.0
+no_floats(n::Int) = n / 2
+
+grow(x::Float32) = Float64(x)
+grow(x::Int8) = x
+grow(x::Int16) = x
+grow(x::Int32) = x
+keep(x::Float32) = x
+keep(x::Int8) = x
+keep(x::Int16) = x
+keep(x::Int32) = x
+grown(x::Float32, items::Vector{Any}) = grow(first(items))
+kept(x::Float32, items::Vector{Any}) = keep(first(items))
+signed_only(x::Float32, items::Vector{Signed}) = keep(first(items))

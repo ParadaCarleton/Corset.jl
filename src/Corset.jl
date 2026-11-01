@@ -19,6 +19,7 @@ export Repository,
 include("ratchet.jl")
 include("rules.jl")
 include("entry_walk.jl")
+include("candidates.jl")
 include("mutation.jl")
 include("dispatch.jl")
 include("jet.jl")

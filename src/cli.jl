@@ -84,6 +84,12 @@ function argument_settings()::ArgParseSettings
         help = "do not load the package; skip the rules that read it",
         action = :store_true,
     )
+    option!(
+        check,
+        "--candidate-limit";
+        help = "the most methods one runtime-dispatch site lists; 0 lists none (default: the config's, else $DEFAULT_CANDIDATE_LIMIT)",
+        arg_type = Int,
+    )
     option!(check, "--allow"; help = "turn a rule off (repeatable)", action = :append_arg)
     option!(check, "--warn"; help = "set a rule to warn (repeatable)", action = :append_arg)
     option!(check, "--deny"; help = "set a rule to deny (repeatable)", action = :append_arg)
@@ -99,11 +105,15 @@ function project_root(path::AbstractString)::String
     return dirname(project)
 end
 
-"""`config` with the pedantic group switched on when `pedantic` is set and the levels in `overrides` (rule => level) applied."""
+"""
+`config` with the pedantic group switched on when `pedantic` is set, the levels in `overrides` (rule => level)
+applied, and `candidate_limit` set unless it is `nothing`.
+"""
 function with_overrides(
         config::Config,
         pedantic::Bool,
         overrides::AbstractVector{<:Pair{String, Symbol}},
+        candidate_limit::Union{Nothing, Integer},
     )::Config
     levels::Dict{String, Symbol} = merge(config.levels, Dict{String, Symbol}(overrides))
     unknown::Vector{String} = sort!(setdiff(collect(keys(levels)), collect(rule_name.(RULES))))
@@ -119,6 +129,7 @@ function with_overrides(
         config.skipped_directories,
         config.pedantic || pedantic,
         levels,
+        checked_limit(something(candidate_limit, config.candidate_limit), "--candidate-limit"),
     )
 end
 
@@ -139,6 +150,7 @@ struct CheckOptions
     update_baseline::Bool
     no_load::Bool
     overrides::Vector{Pair{String, Symbol}}
+    candidate_limit::Union{Nothing, Int}
 end
 
 function CheckOptions(arguments::AbstractDict)::CheckOptions
@@ -152,6 +164,7 @@ function CheckOptions(arguments::AbstractDict)::CheckOptions
         arguments["update-baseline"],
         arguments["no-load"],
         vcat(level_overrides.((arguments,), ("allow", "warn", "deny"))...),
+        arguments["candidate-limit"],
     )
 end
 
@@ -298,7 +311,7 @@ end
 """Run `corset check` with `options` (from the command line `args`); returns the exit code."""
 function run_options(options::CheckOptions, args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Int
     root = project_root(options.path)
-    config = with_overrides(load_config(root), options.pedantic, options.overrides)
+    config = with_overrides(load_config(root), options.pedantic, options.overrides, options.candidate_limit)
     if options.diff
         return print_fix_diff(out, config, root, options.fix)
     end
@@ -320,7 +333,7 @@ end
 
 """Run `corset rules`: print the rules and their levels to `out`."""
 function run_options(options::RulesOptions, args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Int
-    config = with_overrides(load_config(project_root(options.path)), options.pedantic, Pair{String, Symbol}[])
+    config = with_overrides(load_config(project_root(options.path)), options.pedantic, Pair{String, Symbol}[], nothing)
     print_rules(out, config)
     return 0
 end

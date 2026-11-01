@@ -25,6 +25,9 @@
 "rules.jl" = 1
 
 [concrete-return]
+"candidates.jl call_candidates" = 1
+"candidates.jl candidate_frame" = 1
+"candidates.jl candidate_name" = 1
 "check.jl allowances" = 1
 "check.jl disallowed_keys" = 1
 "check.jl file_diff" = 1
@@ -47,6 +50,7 @@
 "cli.jl run_command" = 1
 "cli.jl run_options" = 2
 "cli.jl with_overrides" = 1
+"config.jl checked_limit" = 1
 "config.jl level" = 1
 "config.jl load_config" = 1
 "config.jl merged" = 1
@@ -261,9 +265,9 @@
 "Base.Process" = 1
 "Base.ProcessChain" = 1
 "Base.UV_EPIPE" = 1
-"Base._methods_by_ftype" = 3
+"Base._methods_by_ftype" = 4
 "Base.current_project" = 1
-"Base.get_world_counter" = 2
+"Base.get_world_counter" = 3
 "Base.isvarargtype" = 1
 "Base.isvatuple" = 1
 "Base.loaded_modules" = 1
@@ -274,19 +278,20 @@
 "Base.uniontypes" = 4
 "Base.unwrap_unionall" = 18
 "Compiler.EscapeAnalysis" = 1
-"Compiler.IRCode" = 13
+"Compiler.IRCode" = 15
 "Compiler.MethodLookupResult" = 1
-"Compiler.NativeInterpreter" = 3
+"Compiler.NativeInterpreter" = 4
 "Compiler.OptimizationState" = 1
 "Compiler._findall_matches" = 1
-"Compiler.argextype" = 2
+"Compiler.argextype" = 3
 "Compiler.get_escape_cache" = 1
 "Compiler.ignorelimited" = 1
 "Compiler.optimizer_lattice" = 1
 "Compiler.run_passes_ipo_safe" = 1
 "Compiler.singleton_type" = 1
+"Compiler.specialize_method" = 1
 "Compiler.typeinf_frame" = 1
-"Compiler.widenconst" = 4
+"Compiler.widenconst" = 5
 "Core.Argument" = 1
 "Core.Box" = 2
 "Core.Builtin" = 2
@@ -296,8 +301,8 @@
 "Core.CoreSTDERR" = 1
 "Core.CoreSTDOUT" = 1
 "Core.IntrinsicFunction" = 2
-"Core.MethodInstance" = 9
-"Core.MethodMatch" = 2
+"Core.MethodInstance" = 11
+"Core.MethodMatch" = 3
 "Core.ReturnNode" = 1
 "Core.SSAValue" = 3
 "Core.SlotNumber" = 3
@@ -314,8 +319,10 @@
 "Core.memoryrefswap!" = 1
 
 [nothing-return]
+call_signature = 1
 called_builtin = 1
 callee_name = 3
+candidate_frame = 1
 defined_name = 1
 invoked_instance = 1
 lowered = 1

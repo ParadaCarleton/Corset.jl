@@ -3,13 +3,21 @@ using InteractiveUtils: subtypes
 # The rules the `corset` command runs, each a singleton type whose name, group, summary and check
 # are methods. The library functions stay callable on their own; a rule here fixes their arguments.
 
-"""Everything a rule reads: the repository, the source directories that exist, and the loaded package."""
+"""
+Everything a rule reads: the repository, the source directories that exist, the loaded package, its
+inferred frames, and the `CandidateSearch` the typed rules share.
+"""
 struct Context
     repository::Repository
     directories::Tuple{Vararg{String}}
     mod::Union{Module, Nothing}
     inferred::Vector{Inferred}
+    candidates::CandidateSearch
 end
+
+"""A `Context` with no inferred frames, for the rules that read no types."""
+Context(repository::Repository, directories::Tuple{Vararg{String}}, mod::Union{Module, Nothing})::Context =
+    Context(repository, directories, mod, Inferred[], CandidateSearch(Inferred[]))
 
 """
 A check with a name, a group (`:default` or `:pedantic`) and a one-line summary. The subtypes say

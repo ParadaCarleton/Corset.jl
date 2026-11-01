@@ -838,6 +838,53 @@ sites_named(sites::AbstractVector{Site}, name::AbstractString)::Vector{Site} = [
     end
 end
 
+module Candidates
+    include(joinpath(@__DIR__, "fixtures", "candidates_module.txt"))
+end
+
+"""The seeds of the `Candidates` fixture: each caller over an untyped vector of shapes and a counter."""
+candidate_seeds()::Vector{Type} = Type[
+    Tuple{typeof(caller), Array{Any, 1}, Candidates.Counter}
+        for caller in (Candidates.inspect, Candidates.record, Candidates.spread, Candidates.forward, Candidates.breaks, Candidates.echo, Candidates.splatted)
+]
+
+"""The frame of `caller` among `inferred`, and its one runtime-dispatch statement."""
+function dispatch_statement(inferred::AbstractVector{Corset.Inferred}, caller::Function)::Tuple{Corset.Inferred, Expr}
+    item = only([item for item in inferred if item.method.name === nameof(caller)])
+    return item, only(filter(Base.Fix2(Corset.dispatches, item.ir), item.ir.stmts.stmt))
+end
+
+@testset "call_candidates lists a runtime dispatch's methods within its budget" begin
+    inferred = inferred_methods(Candidates, entry_frames(candidate_seeds(), Candidates))
+    search = Corset.CandidateSearch(inferred)
+    item, statement = dispatch_statement(inferred, Candidates.inspect)
+    @testset "four methods within the default budget are all inferred, each once" begin
+        listed = Corset.call_candidates(statement, item.ir, search)
+        @test listed.complete && Set(frame.method for frame in listed.frames) == Set(methods(Candidates.measure))
+        known = length(search.frames)
+        again = Corset.call_candidates(statement, item.ir, search)
+        @test length(search.frames) == known && all(again.frames .=== listed.frames)
+    end
+    @testset "a budget cut, a zero budget and a splat list nothing and stay incomplete" begin
+        for limit in (0, 3)
+            cut = Corset.call_candidates(statement, item.ir, Corset.CandidateSearch(inferred; candidate_limit = limit))
+            @test !cut.complete && isempty(cut.frames)
+        end
+        splat, splat_statement = dispatch_statement(inferred, Candidates.splatted)
+        @test Corset.call_candidates(splat_statement, splat.ir, search) === Corset.NO_CANDIDATES
+    end
+    @testset "a candidate inference cannot type leaves the others and marks the list incomplete" begin
+        broken, broken_statement = dispatch_statement(inferred, Candidates.breaks)
+        partial = Corset.call_candidates(broken_statement, broken.ir, search)
+        @test !partial.complete && length(partial.frames) == 3
+    end
+    @testset "a negative budget throws, and a candidate is named by module, file and line" begin
+        @test_throws ArgumentError Corset.CandidateSearch(inferred; candidate_limit = -1)
+        tally = only(methods(Candidates.tally, (Candidates.Circle, Candidates.Counter)))
+        @test Corset.candidate_name(tally) == "$(Candidates).tally at candidates_module.txt:$(tally.line)"
+    end
+end
+
 @testset "entry_frames walks :invoke edges from the seeds and reads nothing the session ran" begin
     outer_call = Tuple{typeof(Probe.outer), Probe.Marker}
     inner_call = Tuple{typeof(Probe.inner), Probe.Marker}

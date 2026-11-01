@@ -39,6 +39,7 @@ corset check [path] [options]
 - `--deny-warnings`: Exit nonzero on warnings in addition to deny-level findings.
 - `--update-baseline`: Seed missing baseline entries and lower counts for improved sites.
 - `--no-load`: Skip loading the package module into Julia; runs only file and tree syntax rules.
+- `--candidate-limit <count>`: The most candidate methods one runtime-dispatch site lists; `0` lists none. Overrides `candidate_limit`.
 - `--allow <rule>`: Disable the specified rule (repeatable).
 - `--warn <rule>`: Set the specified rule to warn (repeatable).
 - `--deny <rule>`: Set the specified rule to deny (repeatable).
@@ -62,6 +63,7 @@ baseline = "code_baseline.toml"
 pedantic = false
 skipped_directories = ["vendor"]
 one_letter_exempt = ["p", "x"]
+candidate_limit = 4
 
 [preferences.Corset.levels]
 float64 = "deny"
@@ -75,6 +77,7 @@ Keys:
 - `pedantic`: Boolean to enable all pedantic rules by default.
 - `skipped_directories`: Directory names omitted wherever they sit.
 - `one_letter_exempt`: Variable names exempt from the `one-letter` rule.
+- `candidate_limit`: The most methods `unmarked-mutation` and `float-widening` list at one runtime-dispatch site (default: `4`; `0` lists none). A site with more methods keeps its conservative report. The budget is a count, so the findings do not depend on timing.
 - `levels`: Map of rule names to `:allow`, `:warn`, or `:deny`.
 
 ## Exit codes

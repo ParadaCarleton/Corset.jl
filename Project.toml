@@ -17,7 +17,7 @@ diffutils_jll = "11f5bf75-d780-529b-b59b-a3a04c974070"
 [compat]
 ArgParse = "1"
 Configurations = "0.17.6"
-ExplicitImports = "1.15.0"
+ExplicitImports = "~1.15"
 InteractiveUtils = "1"
 JSON = "1"
 PrecompileTools = "1"

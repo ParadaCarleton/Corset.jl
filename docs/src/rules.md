@@ -25,7 +25,7 @@ Repair: pass the value as an argument, or return it from the function that compu
 
 Pedantic. Qualified accesses (`Base.JuliaSyntax`) and explicit imports (`using Base: uniontypes`)
 of a name its module neither exports nor declares `public`. Such a name can change in any release.
-ExplicitImports.jl finds them and reports each name once, at its first use.
+ExplicitImports.jl finds them. A qualified access has a site per use, so an opt-out covers only its line.
 
 Repair: use a public name, or opt the line out with the reason the internal is needed.
 

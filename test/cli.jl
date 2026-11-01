@@ -257,12 +257,11 @@ end
 @testset "corset: every pedantic rule reports on a source that breaks it" begin
     root = mktempdir()
     fixture = load_fixture(joinpath(root, "src"))
-    smells = join((SNIPPETS[name]["source"] for name in ("nothing-return", "range-guard", "return-type", "concrete-arg", "concrete-return", "float64", "c-type", "ref", "annotation", "one-letter")), "\n")
+    smells = join((SNIPPETS[name]["source"] for name in ("nothing-return", "range-guard", "return-type", "concrete-arg", "concrete-return", "float64", "c-type", "ref", "annotation", "one-letter", "jscpd")), "\n")
     write(joinpath(root, "src", "smells.jl"), smells)
     write(joinpath(root, "Project.toml"), "name = \"Demo\"\n")
     config = with_overrides(load_config(root), true, Pair{String, Symbol}[])
     bin = fake_fatou(mktempdir(), "src/smells.jl:3:5: warning[unused-binding] unused\\nchecked 1 file(s): 1 finding\\n")
-    fake_jscpd(bin, """{"duplicates": [{"firstFile": {"name": "src/smells.jl", "start": 1, "end": 5}, "secondFile": {"name": "src/smells.jl", "start": 6, "end": 10}}]}""")
     path = ENV["PATH"]
     ENV["PATH"] = "$bin:$path"
     try

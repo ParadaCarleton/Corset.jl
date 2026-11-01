@@ -1432,18 +1432,10 @@ end
 """The site of `found`, a `FATOU_FINDING` match, in the repository at `root`."""
 fatou_site(root::AbstractString, found::RegexMatch)::Site = Site("$(found[1]) $(found[3])", joinpath(root, found[1]), parse(Int, found[2]), "")
 
-"""The path to `raw_path` relative to `root`, whether `raw_path` is already absolute or relative to `root`."""
-function site_path(root::AbstractString, raw_path::AbstractString)::String
-    if isabspath(raw_path)
-        return raw_path
-    end
-    return joinpath(root, raw_path)
-end
-
-"""One `Site` from `duplicate`, a `jscpd` JSON report item in `repository`."""
+"""One `Site` from `duplicate`, an item of a `jscpd --absolute` JSON report on `repository`."""
 function jscpd_site(repository::Repository, duplicate::AbstractDict)::Site
-    first_file = site_path(repository.root, string(duplicate["firstFile"]["name"]))
-    second_file = site_path(repository.root, string(duplicate["secondFile"]["name"]))
+    first_file = string(duplicate["firstFile"]["name"])
+    second_file = string(duplicate["secondFile"]["name"])
     rel_first = relpath(first_file, repository.root)
     rel_second = relpath(second_file, repository.root)
     start_line = Int(duplicate["secondFile"]["start"])

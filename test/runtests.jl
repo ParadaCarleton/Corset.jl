@@ -59,31 +59,6 @@ function fake_fatou(bin::AbstractString, printed::AbstractString)::String
     return bin
 end
 
-"""Install in `bin` a `jscpd` executable script that creates `jscpd-report.json` with `report_json` in the `--output` directory and return `bin`."""
-function fake_jscpd(bin::AbstractString, report_json::AbstractString)::String
-    script = """#!/bin/sh
-    printf '%s\n' "\$@" > '$bin/args.txt'
-    out=""
-    while [ \$# -gt 0 ]; do
-        if [ "\$1" = "-o" ] || [ "\$1" = "--output" ]; then
-            out="\$2"
-            shift 2
-        else
-            shift
-        fi
-    done
-    if [ -n "\$out" ]; then
-        mkdir -p "\$out"
-        cat << 'EOF' > "\$out/jscpd-report.json"
-    $report_json
-    EOF
-    fi
-    """
-    write_tree(bin, ["jscpd" => script])
-    chmod(joinpath(bin, "jscpd"), 0o755)
-    return bin
-end
-
 """The text `place_imports!` leaves in `files` (name => text) written into a fresh tree, which then has no misplaced import."""
 function placed(files::AbstractVector{<:Pair})::Dict{String, String}
     repository = Repository(write_tree(mktempdir(), files))
@@ -336,36 +311,26 @@ end
         end
     end
 
-    @testset "jscpd: findings of `jscpd`" begin
-        tree = write_tree(mktempdir(), ["source.jl" => "one() = 1\n", "other.jl" => "two() = 2\n"])
-        fixture_report = read(joinpath(FIXTURES, "jscpd_report.json"), String)
-        bin = fake_jscpd(mktempdir(), fixture_report)
-        path = ENV["PATH"]
-        ENV["PATH"] = "$bin:$path"
-        try
-            @test jscpd_sites(Repository(tree), (".",)) == [Site("source.jl other.jl", joinpath(tree, "source.jl"), 1, 10, "")]
-            abs_report = replace(fixture_report, "\"name\": \"source.jl\"" => "\"name\": \"$(escape_string(joinpath(tree, "source.jl")))\"")
-            fake_jscpd(bin, abs_report)
-            @test jscpd_sites(Repository(tree), (".",)) == [Site("source.jl other.jl", joinpath(tree, "source.jl"), 1, 10, "")]
-            fake_jscpd(bin, "{}")
-            @test_throws KeyError jscpd_sites(Repository(tree), (".",))
-            fake_jscpd(bin, "{\"duplicates\": []}")
-            @test isempty(jscpd_sites(Repository(tree), (".",)))
-            @test !("--ignore" in readlines(joinpath(bin, "args.txt")))
-            @test isempty(jscpd_sites(Repository(tree; skipped_directories = ("vendor",)), (".",)))
-            args = readlines(joinpath(bin, "args.txt"))
-            @test "--ignore" in args
-            @test "**/vendor/**" in args
-            @test "--mode" in args
-            @test "--min-lines" in args
-            @test "--min-tokens" in args
-            @test isempty(jscpd_sites(Repository(tree), ("nonexistent",)))
-            write_tree(bin, ["jscpd" => "#!/bin/sh\nexit 1\n"])
-            @test_throws ErrorException jscpd_sites(Repository(tree), (".",))
-            ENV["PATH"] = string(mktempdir())
-            @test_throws ErrorException jscpd_sites(Repository(tree), (".",))
-        finally
-            ENV["PATH"] = path
+    @testset "jscpd: findings of the real `jscpd` (from mise.toml)" begin
+        copies = SNIPPETS["jscpd"]["source"]
+        tree = write_tree(mktempdir(), ["copies.jl" => copies, "single.jl" => "one() = 1\n", "vendor/copies.jl" => copies])
+        inner = Site("copies.jl copies.jl", joinpath(tree, "copies.jl"), 8, 14, "")
+        vendored = Site("vendor/copies.jl copies.jl", joinpath(tree, "vendor", "copies.jl"), 1, 14, "")
+        @test Set(jscpd_sites(Repository(tree), (".",))) == Set([inner, vendored])
+        @test jscpd_sites(Repository(tree; skipped_directories = ("vendor",)), (".",)) == [inner]
+        @test isempty(jscpd_sites(Repository(tree), ("nonexistent",)))
+        @testset "a jscpd that writes no report, or none on PATH, is an error" begin
+            path = ENV["PATH"]
+            broken = write_tree(mktempdir(), ["jscpd" => "#!/bin/sh\nexit 1\n"])
+            chmod(joinpath(broken, "jscpd"), 0o755)
+            try
+                ENV["PATH"] = "$broken:$path"
+                @test_throws ErrorException jscpd_sites(Repository(tree), (".",))
+                ENV["PATH"] = mktempdir()
+                @test_throws ErrorException jscpd_sites(Repository(tree), (".",))
+            finally
+                ENV["PATH"] = path
+            end
         end
     end
 

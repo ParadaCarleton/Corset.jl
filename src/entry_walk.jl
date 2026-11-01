@@ -1,5 +1,5 @@
 # The frames an entry point compiles, found by walking optimized IR along `:invoke` edges.
-# `inferred_methods` needs them as its signatures; a dispatch audit reads the same IR.
+# `inferred_methods` filters them for the rules; a dispatch audit reads the same IR.
 
 """
     mentions_module(signature, target, depth)
@@ -50,16 +50,15 @@ logging_call(statement::Expr)::Bool = any(
     argument -> argument isa GlobalRef && argument.mod === Base.CoreLogging || argument === Base.CoreLogging.handle_message,
     statement.args,
 )
-
 """
-    frame_callees(code, target)
+    frame_callees(ir, target)
 
-The signatures `code`, an optimized method body, calls through `:invoke` edges and a walk of `target`
+The signatures `ir`, an optimized method body, calls through `:invoke` edges and a walk of `target`
 follows: callees defined in `target` or whose signature names one of its types (JET's `target_modules`
 scope).
 """
-function frame_callees(code::Core.CodeInfo, target::Module)::Vector{Type}
-    expressions = [statement for statement in code.code if statement isa Expr]
+function frame_callees(ir::COMPILER.IRCode, target::Module)::Vector{Type}
+    expressions = [statement for statement in ir.stmts.stmt if statement isa Expr]
     invoked = [invoked_instance(first(statement.args)) for statement in expressions if statement.head in (:invoke, :invoke_modify)]
     return Type[callee.specTypes for callee in filter(Base.Fix2(followed, target), invoked)]
 end
@@ -71,17 +70,16 @@ followed(callee::Any, target::Module)::Bool = callee isa Core.MethodInstance && 
 """
     entry_frames(seeds, target)
 
-The optimized frames (`code_typed_by_type` results, empty when inference yields none) of every signature
-reachable from `seeds` (entry-point call signatures such as `Tuple{typeof(f), Int}`) along
-`frame_callees` edges, the seeds included. A caller that audits the frames reads them from here and
-infers nothing twice.
+The `typed_frames` of every signature reachable from `seeds` (entry-point call signatures such as
+`Tuple{typeof(f), Int}`) along `frame_callees` edges, the seeds included; empty where inference yields
+none. Pass them to `inferred_methods`, which then infers nothing again.
 """
-function entry_frames(seeds::AbstractVector{<:Type}, target::Module)::Dict{Type, Vector{Pair{Core.CodeInfo, Any}}}
-    frames = Dict{Type, Vector{Pair{Core.CodeInfo, Any}}}()
+function entry_frames(seeds::AbstractVector{<:Type}, target::Module)::Dict{Type, Vector{Inferred}}
+    frames = Dict{Type, Vector{Inferred}}()
     frontier = unique(Type[seeds...])
     while !isempty(frontier)
         for signature in frontier
-            frames[signature] = Pair{Core.CodeInfo, Any}[Base.code_typed_by_type(signature; optimize = true)...]
+            frames[signature] = typed_frames(signature)
         end
         frontier = new_callees(frames, frontier, target)
     end
@@ -95,12 +93,4 @@ new_callees(frames::AbstractDict{Type}, frontier::AbstractVector{<:Type}, target
 
 """The signatures the `frames` of `signature` call (`frame_callees`)."""
 signature_callees(frames::AbstractDict{Type}, signature::Type, target::Module)::Vector{Type} =
-    reduce(vcat, frame_callees.(first.(frames[signature]), (target,)); init = Type[])
-
-"""
-    entry_signatures(seeds, target)
-
-The signatures of `entry_frames(seeds, target)`. Pass them to `inferred_methods`: they name the frames
-the entry points compile, whatever the session ran before.
-"""
-entry_signatures(seeds::AbstractVector{<:Type}, target::Module)::Vector{Type} = collect(keys(entry_frames(seeds, target)))
+    reduce(vcat, frame_callees.(getfield.(frames[signature], :ir), (target,)); init = Type[])

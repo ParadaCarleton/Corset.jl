@@ -237,35 +237,61 @@ function statement_hidden_inputs(code::Core.CodeInfo, method::Method, entry::Pai
     return Site.(string.([read.name for read in reads]), string(method.file), statement_line(code, method, first(entry)), "")
 end
 
+const COMPILER = Base.Compiler
+
 """
-A method of the package with its unoptimized typed code and whether inference found its return type
-to be `Nothing` (after widening, so a constant result `nothing` counts).
+A method typed over one signature by a single inference: its unoptimized typed code (named slots and
+their types), the optimized `IRCode` the optimizer makes of it, and whether inference found its return
+type to be `Nothing` (after widening, so a constant result `nothing` counts).
 """
 struct Inferred
     method::Method
     code::Core.CodeInfo
+    ir::COMPILER.IRCode
     returns_nothing::Bool
 end
 
 """
-Each method of `mod` (`module_methods`) that inference reaches from `signatures`, typed over each signature
-that selects it. The result depends on `signatures` alone. Inference returns a method and its declared type,
-with no code, for one it cannot type (a generated method); that has no locals to report and is left out.
+    typed_frames(signature)
+
+The `Inferred` of every method `signature` selects. Each is inferred once: the unoptimized code is kept
+and the optimizer runs on a copy. A method inference cannot type (a generated method) is left out.
 """
-function inferred_methods(mod::Module, signatures::AbstractVector{<:Type})::Vector{Inferred}
-    methods = Set{Method}(module_methods(mod))
-    return reduce(vcat, signature_inferred.(unique(signatures), (methods,)); init = Inferred[])
+function typed_frames(signature::Type)::Vector{Inferred}
+    interpreter = COMPILER.NativeInterpreter()
+    matches = COMPILER._findall_matches(interpreter, signature)::COMPILER.MethodLookupResult
+    return Inferred[frame for frame in typed_frame.((interpreter,), matches.matches) if !isnothing(frame)]
 end
 
-"""The `Inferred` of each method in `methods` that `signature` selects, typed over it."""
-function signature_inferred(signature::Type, methods::AbstractSet{Method})::Vector{Inferred}
-    typed = filter(Base.Fix2(typed_method_in, methods), Base.code_typed_by_type(signature; optimize = false))
-    return Inferred[Inferred(code.parent.def, code, Core.Compiler.widenconst(result) === Nothing) for (code, result) in typed]
+"""The `Inferred` of method match `match`, or `nothing` when inference cannot type it."""
+function typed_frame(interpreter::COMPILER.NativeInterpreter, match::Core.MethodMatch)::Union{Nothing, Inferred}
+    frame = COMPILER.typeinf_frame(interpreter, match, false)
+    if isnothing(frame)
+        return nothing
+    end
+    code = copy(frame.src)
+    ir = COMPILER.run_passes_ipo_safe(frame.src, COMPILER.OptimizationState(frame, interpreter))
+    return_type = COMPILER.widenconst(COMPILER.ignorelimited(frame.result.result))
+    return Inferred(match.method, code, ir, return_type === Nothing)
 end
 
-"""Whether `entry`, a `code_typed_by_type` result, has code for one of `methods`."""
-typed_method_in(entry::Pair, methods::AbstractSet{Method})::Bool =
-    first(entry) isa Core.CodeInfo && first(entry).parent isa Core.MethodInstance && first(entry).parent.def in methods
+"""
+    inferred_methods(mod, signatures)
+    inferred_methods(mod, frames)
+
+Each method of `mod` (`module_methods`) that inference reaches from `signatures`, typed over each
+signature that selects it; the result depends on `signatures` alone. Given the `frames` of
+`entry_frames`, it filters them and infers nothing.
+"""
+inferred_methods(mod::Module, signatures::AbstractVector{<:Type})::Vector{Inferred} =
+    module_frames(mod, reduce(vcat, typed_frames.(unique(signatures)); init = Inferred[]))
+
+inferred_methods(mod::Module, frames::AbstractDict{Type, Vector{Inferred}})::Vector{Inferred} =
+    module_frames(mod, reduce(vcat, collect(values(frames)); init = Inferred[]))
+
+"""The `frames` whose method is one of `mod`'s (`module_methods`)."""
+module_frames(mod::Module, frames::AbstractVector{Inferred})::Vector{Inferred} =
+    frames[in.(getfield.(frames, :method), (Set{Method}(module_methods(mod)),))]
 
 """The slots of `code` that a `catch` binds, which Julia always types `Any`."""
 function caught_slots(code::Core.CodeInfo)::Set{Int} # lint: abstract-local  lowered IR statements are untyped
@@ -330,18 +356,18 @@ end
 const UNION_SPLIT_LIMIT = 4
 
 """
-The first lowered statement of `inferred` that assigns slot `index`: where the variable is introduced,
+The first statement of `method`'s `code` that assigns slot `index`: where the variable is introduced,
 placed on its source line (the method's own line when no statement assigns it).
 """
-function slot_line(inferred::Inferred, index::Integer)::Int # lint: abstract-local  lowered IR statements are untyped
-    for (position, statement) in pairs(inferred.code.code)
+function slot_line(code::Core.CodeInfo, method::Method, index::Integer)::Int # lint: abstract-local  lowered IR statements are untyped
+    for (position, statement) in pairs(code.code)
         if statement isa Expr &&
                 statement.head === :(=) &&
                 statement.args[1] === Core.SlotNumber(index)
-            return statement_line(inferred.code, inferred.method, position)
+            return statement_line(code, method, position)
         end
     end
-    return inferred.method.line
+    return method.line
 end
 
 """The key an offender of a method goes under: its file and name, the file and "anonymous function" for a closure (whose name carries compiler counters)."""
@@ -386,7 +412,7 @@ function abstract_local_sites(item::Inferred)::Vector{Site}
     slots = collect(eachindex(item.code.slotnames))
     flagged = abstract_slot.((item,), (caught_slots(item.code),), slots, item.code.slotnames, item.code.slottypes)
     details = "local `" .* string.(item.code.slotnames[flagged]) .* "`::" .* string.(item.code.slottypes[flagged])
-    return Site.(method_key(item.method), string(item.method.file), slot_line.((item,), slots[flagged]), details)
+    return Site.(method_key(item.method), string(item.method.file), slot_line.((item.code,), (item.method,), slots[flagged]), details)
 end
 
 """Whether slot `index` of `item`, named `name` and inferred `type`, is a named local (not an argument nor `caught`) of `abstract_local_type`."""

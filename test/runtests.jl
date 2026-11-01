@@ -632,6 +632,7 @@ module Probe
     # `inner` must not be foldable: `outer` must keep an `:invoke` edge to it. A constant body
     # folds away when coverage is off (CI also runs that way), and the walk then finds no callee.
     @noinline inner(point::Marker)::Int = Int(time_ns() % 1) + 1
+    @generated failing_generator(point::Marker)::Expr = error("the generator throws")
     outer(point::Marker)::Int = inner(point) + 1
     function passing(thunk::F) where {F}
         try
@@ -709,6 +710,9 @@ end
     end
     @testset "a seed with no callee in the module is its own walk" begin
         @test collect(keys(entry_frames(Type[inner_call], Probe))) == Type[inner_call]
+    end
+    @testset "a method inference cannot type, a generator that throws, has no frame" begin
+        @test isempty(Corset.typed_frames(Tuple{typeof(Probe.failing_generator), Probe.Marker}))
     end
     @testset "frame_callees keeps the callees naming the target and drops the others" begin
         ir = only(Corset.typed_frames(outer_call)).ir

@@ -7,8 +7,11 @@ makedocs(;
     authors = "Carlos Parada",
     modules = [Corset],
     checkdocs_ignored_modules = [Corset.WorkloadPackage],
-    format = Documenter.HTML(canonical = "https://paradacarleton.github.io/Corset.jl/stable", size_threshold_warn = 200 * 1024, size_threshold = 400 * 1024),
-    pages = ["Home" => "index.md", "Guide" => "guide.md", "CLI" => "cli.md", "Rules" => "rules.md", "API" => "api.md"],
+    format = Documenter.HTML(canonical = "https://paradacarleton.github.io/Corset.jl/stable"),
+    pages = [
+        "Home" => "index.md", "Guide" => "guide.md", "CLI" => "cli.md", "Rules" => "rules.md", "API" => "api.md",
+        "Internals" => ["Source rules" => "internals/source.md", "Typed-code rules" => "internals/typed.md", "Runner" => "internals/runner.md"],
+    ],
     warnonly = false,
 )
 

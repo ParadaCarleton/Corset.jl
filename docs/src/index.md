@@ -91,4 +91,4 @@ rule at a time through a [baseline](guide.md#Adopting-Corset-on-an-existing-pack
 
 - [Guide](guide.md): wiring rules into `runtests.jl`, baselines, exemptions and opt-out comments.
 - [Rules](rules.md): every rule, what it finds and how to repair an offender.
-- [API](api.md): the docstrings.
+- [API](api.md): the exported names. The internals pages hold every other docstring.

@@ -18,7 +18,7 @@ function mentions_module(signature::Any, target::Module, depth::Integer)::Bool
         return false
     end
     return parentmodule(signature) === target ||
-        any(parameter -> mentions_module(parameter, target, depth + 1), signature.parameters)
+        any(mentions_module.(collect(signature.parameters), (target,), depth + 1))
 end
 
 """
@@ -61,12 +61,12 @@ scope).
 function frame_callees(code::Core.CodeInfo, target::Module)::Vector{Type}
     expressions = [statement for statement in code.code if statement isa Expr]
     invoked = [invoked_instance(first(statement.args)) for statement in expressions if statement.head in (:invoke, :invoke_modify)]
-    return Type[
-        callee.specTypes for callee in invoked
-            if callee isa Core.MethodInstance && callee.def isa Method &&
-            (callee.def.module === target || mentions_module(callee.specTypes, target, 0))
-    ]
+    return Type[callee.specTypes for callee in filter(Base.Fix2(followed, target), invoked)]
 end
+
+"""Whether a walk of `target` follows `callee`, an `invoked_instance`: a method of `target`, or one whose signature names a type of it."""
+followed(callee::Any, target::Module)::Bool = callee isa Core.MethodInstance && callee.def isa Method &&
+    (callee.def.module === target || mentions_module(callee.specTypes, target, 0))
 
 """
     entry_frames(seeds, target)
@@ -90,11 +90,12 @@ end
 
 """The signatures the `frontier` frames call that `frames` does not hold yet."""
 new_callees(frames::AbstractDict{Type}, frontier::AbstractVector{<:Type}, target::Module)::Vector{Type} = unique(
-    Type[
-        callee for signature in frontier for (code, _) in frames[signature]
-            for callee in frame_callees(code, target) if !haskey(frames, callee)
-    ],
+    filter(!Base.Fix1(haskey, frames), reduce(vcat, signature_callees.((frames,), frontier, (target,)); init = Type[])),
 )
+
+"""The signatures the `frames` of `signature` call (`frame_callees`)."""
+signature_callees(frames::AbstractDict{Type}, signature::Type, target::Module)::Vector{Type} =
+    reduce(vcat, frame_callees.(first.(frames[signature]), (target,)); init = Type[])
 
 """
     entry_signatures(seeds, target)

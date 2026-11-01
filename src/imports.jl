@@ -193,12 +193,19 @@ function import_file(path::AbstractString, editable::Bool)::ImportFile
     tree = SYNTAX.parseall(SYNTAX.SyntaxNode, text; filename = path)
     lines = split(text, '\n')
     modules = [SYNTAX.byte_range(node) for node in module_nodes(tree)]
-    statements = [import_statement(node, text, lines, any(range -> first(SYNTAX.byte_range(node)) in range, modules)) for node in import_nodes(tree)]
+    nodes = import_nodes(tree)
+    statements = ImportStatement[import_statement.(nodes, text, (lines,), inside_module.(nodes, (modules,)))...]
     return ImportFile(normpath(path), text, Set(name_tokens(tree)), statements, include_paths(tree, dirname(path)), editable)
 end
 
+"""Whether `node` starts inside one of the byte ranges `modules`."""
+inside_module(node::SYNTAX.SyntaxNode, modules::AbstractVector{<:UnitRange})::Bool = any(in.(first(SYNTAX.byte_range(node)), modules))
+
+"""Whether `statement` imports `name`."""
+statement_imports(statement::ImportStatement, name::AbstractString)::Bool = any(==(name), [item.name for item in statement.items])
+
 """Whether `file` imports `name`."""
-imports_name(file::ImportFile, name::AbstractString)::Bool = any(item.name == name for statement in file.statements for item in statement.items)
+imports_name(file::ImportFile, name::AbstractString)::Bool = any(Base.Fix2(statement_imports, name), file.statements)
 
 """
 The files of the module rooted at `path`: it and every file it includes, transitively. An include
@@ -216,7 +223,7 @@ function unit_files(path::AbstractString, known::AbstractDict{String, ImportFile
         import_file(path, false)
     end
     below::Vector{String} = vcat(seen, [path])
-    return vcat([file], ImportFile[found for child in file.includes for found in unit_files(child, known, below)])
+    return reduce(vcat, unit_files.(file.includes, (known,), (below,)); init = [file])
 end
 
 """Whether `file` has a bare `using M`, which may bring in any name `M` exports."""
@@ -233,28 +240,55 @@ function unit_moves(unit::AbstractVector{ImportFile})::Vector{ImportMove}
         return ImportMove[]
     end
     supplied = any(has_bare_using, unit)
-    return [
-        ImportMove(
-            file.path, statement, item, unique(
-                [
-                    other.path for other in unit if other.editable && !supplied && other.path != file.path && item.name in other.used &&
-                        !imports_name(other, item.name) && (!statement.nested || other.path in file.includes)
-                ]
-            )
-        )
-            for file in unit if file.editable for statement in file.statements if !statement.pinned
-            for item in statement.items if occursin(PLACED_NAME, item.name) && !(item.name in file.used)
-    ]
+    editable = filter(file -> file.editable, unit)
+    return reduce(vcat, file_moves.((unit,), supplied, editable); init = ImportMove[])
 end
+
+"""The moves of the unpinned statements of `file`, one of `unit`; `supplied` when a bare `using` is in the unit."""
+file_moves(unit::AbstractVector{ImportFile}, supplied::Bool, file::ImportFile)::Vector{ImportMove} = reduce(
+    vcat, statement_moves.((unit,), supplied, (file,), filter(statement -> !statement.pinned, file.statements)); init = ImportMove[],
+)
+
+"""The moves of the items of `statement` in `file` that `file` does not use."""
+function statement_moves(unit::AbstractVector{ImportFile}, supplied::Bool, file::ImportFile, statement::ImportStatement)::Vector{ImportMove}
+    items = filter(Base.Fix1(placeable, file), statement.items)
+    return ImportMove.(file.path, (statement,), items, move_targets.((unit,), supplied, (file,), (statement,), items))
+end
+
+"""Whether `item` is a name the rule places and `file` does not use."""
+placeable(file::ImportFile, item::ImportItem)::Bool = occursin(PLACED_NAME, item.name) && !(item.name in file.used)
+
+"""The files of `unit` that use `item` of `statement` in `file` without importing it, where the item can move."""
+function move_targets(unit::AbstractVector{ImportFile}, supplied::Bool, file::ImportFile, statement::ImportStatement, item::ImportItem)::Vector{String}
+    targets = unit[move_target.(unit, supplied, (file,), (statement,), (item,))]
+    return unique([target.path for target in targets])
+end
+
+"""Whether `item` of `statement` in `file` can move to `other`: it uses the name, does not import it, and a nested statement only moves into an include."""
+move_target(other::ImportFile, supplied::Bool, file::ImportFile, statement::ImportStatement, item::ImportItem)::Bool =
+    other.editable && !supplied && other.path != file.path && item.name in other.used &&
+    !imports_name(other, item.name) && (!statement.nested || other.path in file.includes)
 
 """Every import move in `files` (the rule's own), module by module; a file in two modules is left alone."""
 function import_moves(files::AbstractVector{ImportFile})::Vector{ImportMove} # lint: abstract-local  files have different numbers of units
     known::Dict{String, ImportFile} = Dict(file.path => file for file in files)
     included::Set{String} = Set(path for file in files for path in file.includes)
-    units = [unit_files(file.path, known, String[]) for file in files if !(file.path in included)]
-    membership::Dict{String, Int} = Dict(path => count(unit -> any(file -> file.path == path, unit), units) for path in keys(known))
-    return [move for unit in units for move in unit_moves(unit) if membership[move.file] == 1 && all(target -> get(membership, target, 0) == 1, move.targets)]
+    roots = filter(!Base.Fix2(in, included), [file.path for file in files])
+    units = unit_files.(roots, (known,), (String[],))
+    paths = collect(keys(known))
+    membership::Dict{String, Int} = Dict(paths .=> unit_count.((units,), paths))
+    return filter(Base.Fix1(single_unit, membership), reduce(vcat, unit_moves.(units); init = ImportMove[]))
 end
+
+"""How many of `units` (each a module's files, ragged) hold the file at `path`."""
+unit_count(units::AbstractVector, path::String)::Int = count(Base.Fix2(unit_holds, path), units)
+
+"""Whether `unit` holds the file at `path`."""
+unit_holds(unit::AbstractVector{ImportFile}, path::String)::Bool = path in [file.path for file in unit]
+
+"""Whether `move`'s file and targets each sit in one unit of `membership`."""
+single_unit(membership::AbstractDict{String, Int}, move::ImportMove)::Bool =
+    membership[move.file] == 1 && all(==(1), get.((membership,), move.targets, 0))
 
 """One site per move, keyed by file and name, at the import's line."""
 import_sites(moves::AbstractVector{ImportMove})::Vector{Site} = [Site("$(basename(move.file)) $(move.item.name)", move.file, move.statement.line, "") for move in moves]
@@ -282,7 +316,7 @@ is_blank(byte::Unsigned)::Bool = byte == UInt8(' ') || byte == UInt8('\t')
 
 """The edit taking `removed` items out of `statement` in `bytes`: the statement rewritten, or its whole lines deleted when nothing stays."""
 function removal_edit(bytes::AbstractVector{UInt8}, statement::ImportStatement, removed::AbstractVector{ImportItem})::Pair{UnitRange{Int}, String}
-    kept::Vector{String} = [item.text for item in statement.items if !(item in removed)]
+    kept::Vector{String} = [item.text for item in filter(!Base.Fix2(in, removed), statement.items)]
     if !isempty(kept)
         return (statement.first_byte:statement.last_byte) => statement.prefix * join(kept, ", ")
     end
@@ -293,9 +327,13 @@ function removal_edit(bytes::AbstractVector{UInt8}, statement::ImportStatement, 
     return (statement.first_byte:statement.last_byte) => ""
 end
 
+"""The import statement of the `items` (prefix => item text) under `prefix`."""
+prefix_statement(items::AbstractVector{Pair{String, String}}, prefix::String)::String =
+    prefix * join(unique([text for (owner, text) in items if owner == prefix]), ", ")
+
 """The edit adding `items` (prefix => item text) to `file`: after its last import, at that import's indent, or at the top of a file with none."""
 function addition_edit(file::ImportFile, items::AbstractVector{Pair{String, String}})::Pair{UnitRange{Int}, String}
-    statements::Vector{String} = [prefix * join(unique(text for (owner, text) in items if owner == prefix), ", ") for prefix in unique(first.(items))]
+    statements::Vector{String} = prefix_statement.((items,), unique(first.(items)))
     if isempty(file.statements)
         if occursin(r"^\s*(bare)?module\s"m, file.text)
             error("$(file.path) holds a module but no import to place $(statements) beside")
@@ -313,12 +351,11 @@ end
 """The text of `file` after `moves`: its moved items taken out, and the items moved to it added."""
 function placed_text(file::ImportFile, moves::AbstractVector{ImportMove})::String
     bytes = codeunits(file.text)
-    own::Vector{ImportMove} = [move for move in moves if move.file == file.path]
-    removals::Vector{Pair{UnitRange{Int}, String}} = [
-        removal_edit(bytes, statement, [move.item for move in own if move.statement === statement])
-            for statement in file.statements if any(move -> move.statement === statement, own)
-    ]
-    added::Vector{Pair{String, String}} = [move.statement.prefix => move.item.text for move in moves if file.path in move.targets]
+    own::Vector{ImportMove} = moves[[move.file for move in moves] .== file.path]
+    touched = filter(!isempty ∘ Base.Fix1(moved_items, own), file.statements)
+    removals::Vector{Pair{UnitRange{Int}, String}} = removal_edit.((bytes,), touched, moved_items.((own,), touched))
+    incoming = moves[in.(file.path, [move.targets for move in moves])]
+    added::Vector{Pair{String, String}} = [move.statement.prefix => move.item.text for move in incoming]
     additions = Pair{UnitRange{Int}, String}[]
     if !isempty(added)
         additions = [addition_edit(file, added)]
@@ -330,6 +367,10 @@ function placed_text(file::ImportFile, moves::AbstractVector{ImportMove})::Strin
     end
     return text
 end
+
+"""The items `moves` take out of `statement`."""
+moved_items(moves::AbstractVector{ImportMove}, statement::ImportStatement)::Vector{ImportItem} =
+    [move.item for move in moves[[move.statement for move in moves] .=== (statement,)]]
 
 """The text `text` with the bytes of `range` replaced by `replacement`."""
 function splice_text(text::T, range::UnitRange{Int}, replacement::AbstractString)::String where {T <: AbstractString}
@@ -346,7 +387,8 @@ Rewrite the Julia files of `directories` so every import sits in the files that 
 function place_imports!(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site}
     files = import_files(repository, directories)
     moves = import_moves(files)
-    touched = Set(path for move in moves for path in vcat([move.file], move.targets))
-    foreach(file -> write(file.path, placed_text(file, moves)), [file for file in files if file.path in touched])
+    touched = Set(reduce(vcat, [vcat([move.file], move.targets) for move in moves]; init = String[]))
+    rewritten = files[in.([file.path for file in files], (touched,))]
+    write.([file.path for file in rewritten], placed_text.(rewritten, (moves,)))
     return import_sites(moves)
 end

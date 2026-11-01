@@ -207,7 +207,7 @@ function path_pieces( # lint: abstract-local  walks Julia ASTs, whose nodes are 
         return [directory]
     end
     if argument isa Expr && argument.head === :call && first(argument.args) === :joinpath
-        parts = [path_pieces(part, directory) for part in argument.args[(begin + 1):end]]
+        parts = path_pieces.(argument.args[(begin + 1):end], directory)
         if any(isnothing, parts)
             return nothing
         end

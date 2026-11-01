@@ -99,20 +99,17 @@ unmarked_effects(context.repository, context.inferred)
 @rule ModuleRule "closure" :default "closures that capture anything but plain immutable data" context ->
 impure_closures(context.mod)
 
-@rule ModuleRule "abstract-field" :default "struct fields of an abstract type or of a container of one" context -> begin
-    locations = declared(context)
-    [struct_site(nameof(type), locations) for type in module_structs(context.mod) if !isempty(abstract_fields(type))]
-end
+"""The sites of the struct `types`, each placed at its declaration in `context`'s sources."""
+struct_sites(types::AbstractVector{DataType}, context::Context)::Vector{Site} = struct_site.(nameof.(types), (declared(context),))
 
-@rule ModuleRule "mutable-struct" :default "structs declared with the mutable keyword" context -> begin
-    locations = declared(context)
-    [struct_site(nameof(type), locations) for type in mutable_structs(context.mod)]
-end
+@rule ModuleRule "abstract-field" :default "struct fields of an abstract type or of a container of one" context ->
+struct_sites(filter(!isempty ∘ abstract_fields, module_structs(context.mod)), context)
 
-@rule ModuleRule "repeated-prefix" :pedantic "field names that repeat a word the type should say once" context -> begin
-    locations = declared(context)
-    [struct_site(nameof(type), locations) for type in module_structs(context.mod) if !isnothing(repeated_prefix(type))]
-end
+@rule ModuleRule "mutable-struct" :default "structs declared with the mutable keyword" context ->
+struct_sites(mutable_structs(context.mod), context)
+
+@rule ModuleRule "repeated-prefix" :pedantic "field names that repeat a word the type should say once" context ->
+struct_sites(filter(!isnothing ∘ repeated_prefix, module_structs(context.mod)), context)
 
 @rule FileRule "nothing-return" :pedantic "declared Union{Nothing, …} results" (context, path, located) ->
 nothing_returns(path, located)

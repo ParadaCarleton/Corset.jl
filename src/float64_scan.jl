@@ -25,7 +25,8 @@ to the filter cannot quietly disarm the check.
 function float64_ops(f::Any, types::Tuple)::Int
     buffer = IOBuffer()
     code_llvm(buffer, f, types; optimize = true, debuginfo = :none)
-    return count(split(String(take!(buffer)), '\n')) do line
-        occursin("double", line) && any(op -> occursin(op, line), FLOAT64_IR_OPS)
-    end
+    return count(float64_line, split(String(take!(buffer)), '\n'))
 end
+
+"""Whether LLVM IR `line` is a `double` operation in `FLOAT64_IR_OPS`."""
+float64_line(line::AbstractString)::Bool = occursin("double", line) && any(occursin.(FLOAT64_IR_OPS, line))

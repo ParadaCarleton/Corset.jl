@@ -24,7 +24,7 @@ function jet_site(scope::String, report::Any)::Site # lint: abstract-local  JET 
 end
 
 """One site per report of JET analysis `result`."""
-jet_sites(scope::String, result::Any)::Vector{Site} = [jet_site(scope, report) for report in Base.invokelatest(loaded_jet().get_reports, result)]
+jet_sites(scope::String, result::Any)::Vector{Site} = jet_site.(scope, Base.invokelatest(loaded_jet().get_reports, result))
 
 """The code of `@call_sites` and `@opt_sites`: `sites` gains the sites of `report_macro` run on `arguments`."""
 function jet_assertion(report_macro::Symbol, scope::String, source::LineNumberNode, sites::Symbol, arguments::Tuple)::Expr

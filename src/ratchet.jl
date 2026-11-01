@@ -101,13 +101,21 @@ end
 """The Julia files below `directory`, in no particular order; hidden directories, those named in `skipped` and links to directories are not entered."""
 function julia_files(directory::AbstractString, skipped::Tuple{Vararg{String}})::Vector{String}
     entries = readdir(directory; join = true)
-    entered::Vector{String} = [entry for entry in entries if isdir(entry) && !islink(entry) && !startswith(basename(entry), ".") && !(basename(entry) in skipped)]
-    return vcat([entry for entry in entries if !isdir(entry) && endswith(entry, ".jl")], (file for nested in entered for file in julia_files(nested, skipped))...)
+    entered = filter(Base.Fix2(entered_directory, skipped), entries)
+    return reduce(vcat, julia_files.(entered, (skipped,)); init = filter(julia_file, entries))
 end
 
+"""Whether `julia_files` enters `entry`: a directory, not a link, not hidden and not named in `skipped`."""
+entered_directory(entry::AbstractString, skipped::Tuple{Vararg{String}})::Bool =
+    isdir(entry) && !islink(entry) && !startswith(basename(entry), ".") && !(basename(entry) in skipped)
+
+"""Whether `entry` is a Julia file."""
+julia_file(entry::AbstractString)::Bool = !isdir(entry) && endswith(entry, ".jl")
+
 """The Julia files under `directories` of `repository`; hidden directories and its `skipped_directories` are left out."""
-repository_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String} =
-    sort!([file for directory in directories for file in julia_files(joinpath(repository.root, directory), repository.skipped_directories)])
+repository_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String} = sort!(
+    reduce(vcat, julia_files.(joinpath.(repository.root, directories), (repository.skipped_directories,)); init = String[]),
+)
 
 """The baseline entry left after `found` sites against `entry`: a note stays while its offender has a site, a count falls to `found`."""
 remaining(entry::AbstractString, found::Integer)::Union{String, Int} = ifelse(found == 0, 0, entry)
@@ -136,10 +144,13 @@ end
 """The `detail`s of the sites under each key, sorted and joined; a key none of whose sites has one is absent."""
 function detail_lines(sites::AbstractVector{S})::Dict{String, String} where {S <: Site}
     described = [site for site in sites if !isempty(site.detail)]
-    return Dict{String, String}(
-        key => join(sort!(unique([site.detail for site in described if site.key == key])), "; ") for key in unique([site.key for site in described])
-    )
+    keys_ = unique([site.key for site in described])
+    return Dict{String, String}(keys_ .=> key_details.((described,), keys_))
 end
+
+"""The `detail`s of the `sites` under `key`, sorted and joined."""
+key_details(sites::AbstractVector{<:Site}, key::String)::String =
+    join(sort!(unique([site.detail for site in sites if site.key == key])), "; ")
 
 """The parenthesized detail that follows `key` in the log, empty when `key` has none."""
 function detail_suffix(details::AbstractDict{String, String}, key::String)::String
@@ -149,13 +160,17 @@ function detail_suffix(details::AbstractDict{String, String}, key::String)::Stri
     return ""
 end
 
+"""The log line of offender `key`: its count in `measured` and its `details`."""
+over_line(measured::AbstractDict{String, Int}, details::AbstractDict{String, String}, key::String)::String =
+    "$key = $(measured[key])" * detail_suffix(details, key)
+
 """Log `over`, the keys of `measured` past what `allowance` names allows, each with its `details`, and with `fix` (how to repair one) when given; return `over`."""
 function logged_over(
         rule::String, measured::AbstractDict{String, Int}, details::AbstractDict{String, String}, over::AbstractVector{String}, allowance::String, fix::String,
     )::Vector{String}
     if !isempty(over)
         advice = ifelse(isempty(fix), "", "\nFix: $fix")
-        lines = ["$key = $(measured[key])" * detail_suffix(details, key) for key in over]
+        lines = over_line.((measured,), (details,), over)
         @error "$rule: offenders past $allowance:\n" * join(lines, "\n") * advice
     end
     return over
@@ -186,12 +201,24 @@ function tally(sites::AbstractVector{S})::Dict{String, Int} where {S <: Site}
 end
 
 """The keys of `measured` that baseline table `entries` does not allow: absent from it, or past their count."""
-exceeding(entries::AbstractDict, measured::AbstractDict{String, Int})::Vector{String} =
-    sort!([key for (key, found) in measured if !haskey(entries, key) || exceeds(found, entries[key])])
+function exceeding(entries::AbstractDict, measured::AbstractDict{String, Int})::Vector{String}
+    names = collect(String, keys(measured))
+    return sort!(names[exceeded.((entries,), (measured,), names)])
+end
+
+"""Whether baseline table `entries` does not allow the `measured` count of `key`: absent, or past its count."""
+exceeded(entries::AbstractDict, measured::AbstractDict{String, Int}, key::String)::Bool =
+    !haskey(entries, key) || exceeds(measured[key], entries[key])
 
 """The keys of `entries` under one of `scopes` that `measured` undercuts, so their entry can be lowered."""
-falling(entries::AbstractDict, measured::AbstractDict{String, Int}, scopes::Tuple{Vararg{String}})::Vector{String} =
-    sort!([key for (key, entry) in entries if any(startswith(key, scope) for scope in scopes) && remaining(entry, get(measured, key, 0)) != entry])
+function falling(entries::AbstractDict, measured::AbstractDict{String, Int}, scopes::Tuple{Vararg{String}})::Vector{String}
+    names = collect(String, keys(entries))
+    return sort!(names[falls.((entries,), (measured,), (scopes,), names)])
+end
+
+"""Whether `key` of `entries` is under one of `scopes` and `measured` undercuts its entry."""
+falls(entries::AbstractDict, measured::AbstractDict{String, Int}, scopes::Tuple{Vararg{String}}, key::String)::Bool =
+    any(startswith.(key, scopes)) && remaining(entries[key], get(measured, key, 0)) != entries[key]
 
 """
     offenders!(repository, rule, sites; scopes = ("",), fix = "")

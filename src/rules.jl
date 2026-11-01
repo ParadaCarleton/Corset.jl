@@ -63,19 +63,18 @@ missed; `Base.visit` over the method table finds those but misses closure call m
 on Julia 1.13 and needs a mutating callback.
 """
 function defined_methods(mod::Module)::Vector{Method} # lint: abstract-local  reflects on values of unknown type
-    values = [
-        getfield(mod, name)
-            for name in names(mod; all = true)
-            if isdefined(mod, name)
-    ]
+    values = module_bindings(mod)
     world = Base.get_world_counter()
     found = reduce(
         vcat,
         vcat(binding_methods.(values, Function), call_methods.(values, world), binding_methods.(values, Type));
         init = Method[],
     )
-    return unique(method for method in found if method.module === mod)
+    return unique(found[[method.module for method in found] .=== (mod,)])
 end
+
+"""The values bound to the names of `mod`, unexported and compiler-made names included."""
+module_bindings(mod::Module)::AbstractVector = getfield.((mod,), filter(Base.Fix1(isdefined, mod), names(mod; all = true)))
 
 # The helpers below take each binding as a call argument: a closure capturing a type or function
 # specializes on it, and one compile per binding of the checked package dominated a run.
@@ -103,14 +102,14 @@ callee_name(callee::DataType)::Core.TypeName = callee.name
 callee_name(::Any)::Nothing = nothing
 
 """The closure types of `mod` that lowered statements `code` name, by type name."""
-named_closures(code::Core.CodeInfo, mod::Module)::Vector{Core.TypeName} = Core.TypeName[
-    Base.unwrap_unionall(called_type(getfield(mod, read.name))).name
-        for statement in code.code
-        for read in global_reads(statement)
-        if read.mod === mod &&
-        isdefined(mod, read.name) &&
-        is_unnamed_function_type(called_type(getfield(mod, read.name)))
-]
+function named_closures(code::Core.CodeInfo, mod::Module)::Vector{Core.TypeName}
+    reads = filter(Base.Fix2(names_closure, mod), reduce(vcat, global_reads.(code.code); init = GlobalRef[]))
+    return Core.TypeName[Base.unwrap_unionall(called_type(value)).name for value in getfield.((mod,), [read.name for read in reads])]
+end
+
+"""Whether global `read` names an `is_unnamed_function_type` of `mod`."""
+names_closure(read::GlobalRef, mod::Module)::Bool =
+    read.mod === mod && isdefined(mod, read.name) && is_unnamed_function_type(called_type(getfield(mod, read.name)))
 
 """The type a lowered statement names through binding `value`: the type itself, or a function instance's type (a keyword body)."""
 called_type(value::Type)::Type = value
@@ -132,9 +131,7 @@ end
 
 """The names of every `is_unnamed_function_type` bound in `mod`, live or left over."""
 closure_type_names(mod::Module)::Set{Core.TypeName} = Set{Core.TypeName}(
-    Base.unwrap_unionall(getfield(mod, name)).name
-        for name in names(mod; all = true)
-        if isdefined(mod, name) && is_unnamed_function_type(getfield(mod, name))
+    Base.unwrap_unionall(value).name for value in module_bindings(mod) if is_unnamed_function_type(value)
 )
 
 """
@@ -171,7 +168,7 @@ end
 
 """`live` closed under `created`: every closure a member's own code creates, repeated until none is new."""
 function fixed_reach(live::Set{T}, created::AbstractDict{T, Set{T}})::Set{T} where {T}
-    grown = union(live, (get(created, name, Set{T}()) for name in live)...)
+    grown = union(live, get.((created,), collect(live), (Set{T}(),))...)
     if grown == live
         return live
     end
@@ -187,13 +184,12 @@ is not `live_closures`.
 function module_methods(mod::Module)::Vector{Method}
     methods = defined_methods(mod)
     live = live_closures(mod, methods)
-    closure_names = closure_type_names(mod)
-    return [
-        method
-            for method in methods
-            if !(callee_name(method) in closure_names) || callee_name(method) in live
-    ]
+    return methods[reached.(methods, (closure_type_names(mod),), (live,))]
 end
+
+"""Whether current code reaches `method`: it is no closure's (`closure_names`), or its closure is `live`."""
+reached(method::Method, closure_names::AbstractSet{Core.TypeName}, live::AbstractSet{Core.TypeName})::Bool =
+    !(callee_name(method) in closure_names) || callee_name(method) in live
 
 """Lowered code of `method`, or `nothing` for a generated or builtin method."""
 function lowered(method::Method)::Union{Core.CodeInfo, Nothing}
@@ -210,7 +206,8 @@ The line of `method`'s source that lowered statement `index` of `code` comes fro
 method itself for a statement from another file (a macro's).
 """
 function statement_line(code::Core.CodeInfo, method::Method, index::Integer)::Int
-    own_lines = [node.line for node in Base.IRShow.buildLineInfoNode(code.debuginfo, method, index) if node.file === method.file]
+    file = method.file
+    own_lines = [node.line for node in Base.IRShow.buildLineInfoNode(code.debuginfo, method, index) if node.file === file]
     return get(own_lines, 1, method.line)
 end
 
@@ -220,16 +217,24 @@ end
 Each read of a global that some method of `mod` takes besides its arguments and immutable
 constants, keyed by the global and placed at the statement that reads it.
 """
-function hidden_inputs(mod::Module)::Vector{Site}
-    return [
-        Site(string(read.name), string(method.file), statement_line(code, method, index), "")
-            for method in module_methods(mod)
-            for code in (lowered(method),)
-            if code isa Core.CodeInfo
-            for (index, statement) in pairs(code.code)
-            for read in global_reads(statement)
-            if is_hidden_input(read)
-    ]
+hidden_inputs(mod::Module)::Vector{Site} = reduce(vcat, method_hidden_inputs.(module_methods(mod)); init = Site[])
+
+"""The `hidden_inputs` sites of `method`'s lowered code; none for a method without one."""
+function method_hidden_inputs(method::Method)::Vector{Site}
+    code = lowered(method)
+    if isnothing(code)
+        return Site[]
+    end
+    return reduce(vcat, statement_hidden_inputs.((code,), (method,), collect(pairs(code.code))); init = Site[])
+end
+
+"""The `hidden_inputs` sites of the lowered statement `entry` (index => statement) of `method`'s `code`."""
+function statement_hidden_inputs(code::Core.CodeInfo, method::Method, entry::Pair)::Vector{Site}
+    reads = filter(is_hidden_input, global_reads(last(entry)))
+    if isempty(reads)
+        return Site[]
+    end
+    return Site.(string.([read.name for read in reads]), string(method.file), statement_line(code, method, first(entry)), "")
 end
 
 """
@@ -249,15 +254,18 @@ with no code, for one it cannot type (a generated method); that has no locals to
 """
 function inferred_methods(mod::Module, signatures::AbstractVector{<:Type})::Vector{Inferred}
     methods = Set{Method}(module_methods(mod))
-    return [
-        Inferred(code.parent.def, code, Core.Compiler.widenconst(result) === Nothing)
-            for signature in unique(signatures)
-            for (code, result) in Base.code_typed_by_type(signature; optimize = false)
-            if code isa Core.CodeInfo &&
-            code.parent isa Core.MethodInstance &&
-            code.parent.def in methods
-    ]
+    return reduce(vcat, signature_inferred.(unique(signatures), (methods,)); init = Inferred[])
 end
+
+"""The `Inferred` of each method in `methods` that `signature` selects, typed over it."""
+function signature_inferred(signature::Type, methods::AbstractSet{Method})::Vector{Inferred}
+    typed = filter(Base.Fix2(typed_method_in, methods), Base.code_typed_by_type(signature; optimize = false))
+    return Inferred[Inferred(code.parent.def, code, Core.Compiler.widenconst(result) === Nothing) for (code, result) in typed]
+end
+
+"""Whether `entry`, a `code_typed_by_type` result, has code for one of `methods`."""
+typed_method_in(entry::Pair, methods::AbstractSet{Method})::Bool =
+    first(entry) isa Core.CodeInfo && first(entry).parent isa Core.MethodInstance && first(entry).parent.def in methods
 
 """The slots of `code` that a `catch` binds, which Julia always types `Any`."""
 function caught_slots(code::Core.CodeInfo)::Set{Int} # lint: abstract-local  lowered IR statements are untyped
@@ -350,10 +358,13 @@ so neither the specialization order nor a second variable on the line changes wh
 """
 function one_per_line(sites::AbstractVector{Site})::Vector{Site}
     places = unique([(site.key, site.file, site.line, site.last_line) for site in sites])
-    return [
-        Site(place..., join(sort!(unique([site.detail for site in sites if (site.key, site.file, site.line, site.last_line) == place])), "; "))
-            for place in places
-    ]
+    return place_site.((sites,), places)
+end
+
+"""The one site of `sites` at `place` (key, file and lines), its detail theirs sorted and joined."""
+function place_site(sites::AbstractVector{Site}, place::Tuple{String, String, Int, Int})::Site
+    placed = sites[[(site.key, site.file, site.line, site.last_line) for site in sites] .== (place,)]
+    return Site(place..., join(sort!(unique([site.detail for site in placed])), "; "))
 end
 
 """
@@ -365,26 +376,22 @@ function abstract_locals(
         repository::Repository,
         inferred::AbstractVector{Inferred},
     )::Vector{Site}
-    return one_per_line(
-        [
-            Site(method_key(item.method), string(item.method.file), slot_line(item, index), "local `$name`::$type")
-                for item in inferred
-                if startswith(string(item.method.file), repository.root)
-                for (index, (name, type)) in enumerate(
-                    zip(
-                        item.code.slotnames,
-                        item.code.slottypes,
-                    )
-                )
-                if index > item.method.nargs &&
-                !isempty(string(name)) &&
-                !startswith(string(name), "#") &&
-                type != LOGGER_TYPE &&
-                !(index in caught_slots(item.code)) &&
-                abstract_local_type(type)
-        ]
-    )
+    own = inferred[startswith.([string(item.method.file) for item in inferred], repository.root)]
+    return one_per_line(reduce(vcat, abstract_local_sites.(own); init = Site[]))
 end
+
+"""The `abstract_locals` sites of `item`, one per abstract named local."""
+function abstract_local_sites(item::Inferred)::Vector{Site}
+    slots = collect(eachindex(item.code.slotnames))
+    flagged = abstract_slot.((item,), (caught_slots(item.code),), slots, item.code.slotnames, item.code.slottypes)
+    details = "local `" .* string.(item.code.slotnames[flagged]) .* "`::" .* string.(item.code.slottypes[flagged])
+    return Site.(method_key(item.method), string(item.method.file), slot_line.((item,), slots[flagged]), details)
+end
+
+"""Whether slot `index` of `item`, named `name` and inferred `type`, is a named local (not an argument nor `caught`) of `abstract_local_type`."""
+abstract_slot(item::Inferred, caught::AbstractSet{Int}, index::Integer, name::Symbol, type::Any)::Bool =
+    index > item.method.nargs && !isempty(string(name)) && !startswith(string(name), "#") &&
+    type != LOGGER_TYPE && !(index in caught) && abstract_local_type(type)
 
 """Whether statement `statement` calls one of the arguments `arguments` (slot numbers) of its method."""
 calls_argument(statement::Expr, arguments::AbstractUnitRange)::Bool =
@@ -400,12 +407,13 @@ function returns_argument_call(method::Method)::Bool
     if isnothing(code)
         return false
     end
-    return any(
-        statement isa Core.ReturnNode && isdefined(statement, :val) && statement.val isa Core.SSAValue &&
-            calls_argument(code.code[statement.val.id], 2:method.nargs)
-            for statement in code.code
-    )
+    return any(returns_call.((code,), (2:method.nargs,), code.code))
 end
+
+"""Whether lowered `statement` of `code` returns a call to one of the `arguments` (slot numbers)."""
+returns_call(code::Core.CodeInfo, arguments::AbstractUnitRange, statement::Any)::Bool =
+    statement isa Core.ReturnNode && isdefined(statement, :val) && statement.val isa Core.SSAValue &&
+    calls_argument(code.code[statement.val.id], arguments)
 
 """
 Whether `item` is a named function of `repository`, not a closure or another package's function
@@ -442,24 +450,17 @@ function unmarked_effects( # lint: abstract-local  lowered IR statements are unt
             for item in inferred
             if !item.returns_nothing
     )
-    return unique(
-        [
-            Site(method_key(item.method), string(item.method.file), item.method.line, "")
-                for item in inferred
-                if is_unmarked_effect(repository, item) &&
-                !((item.method.module, item.method.name) in valued)
-        ]
-    )
+    effects = inferred[is_unmarked_effect.((repository,), inferred) .& .!in.([(item.method.module, item.method.name) for item in inferred], (valued,))]
+    return unique([Site(method_key(item.method), string(item.method.file), item.method.line, "") for item in effects])
 end
 
 """Each closure type that the lowered code of `methods` names, with a method that names it."""
 closure_namers(mod::Module, methods::AbstractVector{Method})::Dict{Core.TypeName, Method} = Dict{Core.TypeName, Method}(
-    created => method
-        for method in methods
-        for code in (lowered(method),)
-        if code isa Core.CodeInfo
-        for created in named_closures(code, mod)
+    reduce(vcat, method_namings.(methods, (mod,)); init = Pair{Core.TypeName, Method}[]),
 )
+
+"""Each closure type `method`'s lowered code names (`created_closures`), paired with `method`."""
+method_namings(method::Method, mod::Module)::Vector{Pair{Core.TypeName, Method}} = created_closures(method, mod) .=> (method,)
 
 """
 The method that creates closure type `name`: its namer in `namers` (`closure_namers`), followed out of
@@ -513,12 +514,12 @@ end
 
 """The closure types `Base.specializations` records for the call methods of closure `type`: one per instance the package compiled."""
 closure_instances(type::DataType, world::Integer)::Vector{Type} = unique(
-    Type[
-        first(Base.unwrap_unionall(instance.specTypes).parameters)
-            for match in Base._methods_by_ftype(Tuple{type, Vararg}, -1, world)
-            for instance in Base.specializations(match.method)
-    ]
+    reduce(vcat, instance_callees.(Base._methods_by_ftype(Tuple{type, Vararg}, -1, world)); init = Type[]),
 )
+
+"""The function type each specialization of `match`'s method was compiled for."""
+instance_callees(match::Core.MethodMatch)::Vector{Type} =
+    Type[first(Base.unwrap_unionall(instance.specTypes).parameters) for instance in Base.specializations(match.method)]
 
 """Why closure instance `instance` captures more than `plain_capture` data; empty when it does not."""
 function capture_fault(@nospecialize(instance::Any))::String
@@ -555,13 +556,8 @@ end
 """The closure types the current code of `mod` can create (`live_closures`), unwrapped."""
 function live_closure_types(mod::Module)::Vector{DataType}
     live = live_closures(mod, defined_methods(mod))
-    return DataType[
-        Base.unwrap_unionall(getfield(mod, name))
-            for name in names(mod; all = true)
-            if isdefined(mod, name) &&
-            is_closure_type(getfield(mod, name)) &&
-            Base.unwrap_unionall(getfield(mod, name)).name in live
-    ]
+    closures = DataType[Base.unwrap_unionall(value) for value in module_bindings(mod) if is_closure_type(value)]
+    return closures[in.([type.name for type in closures], (live,))]
 end
 
 """
@@ -573,26 +569,20 @@ function impure_closures(mod::Module)::Vector{Site}
     namers = closure_namers(mod, defined_methods(mod))
     types = live_closure_types(mod)
     faults = closure_fault.(types, world)
-    return [
-        closure_site(type, closure_definer(type.name, namers), world, fault)
-            for (type, fault) in zip(types, faults)
-            if !isempty(fault)
-    ]
+    faulty = .!isempty.(faults)
+    definers = closure_definer.([type.name for type in types[faulty]], (namers,))
+    return closure_site.(types[faulty], definers, world, faults[faulty])
 end
 
 """Struct types `mod` defines, closures excluded; a type bound to two names counts once."""
-module_structs(mod::Module)::Vector{DataType} = unique(
-    DataType[
-        Base.unwrap_unionall(getfield(mod, name))
-            for name in names(mod; all = true)
-            if isdefined(mod, name) &&
-            getfield(mod, name) isa Type &&
-            !is_closure_type(getfield(mod, name)) &&
-            Base.unwrap_unionall(getfield(mod, name)) isa DataType &&
-            isstructtype(Base.unwrap_unionall(getfield(mod, name))) &&
-            parentmodule(Base.unwrap_unionall(getfield(mod, name))) === mod
-    ]
-)
+function module_structs(mod::Module)::Vector{DataType}
+    structs = DataType[Base.unwrap_unionall(value) for value in module_bindings(mod) if is_struct_binding(value)]
+    return unique(structs[parentmodule.(structs) .=== (mod,)])
+end
+
+"""Whether binding `value` is a struct type, closures excluded."""
+is_struct_binding(@nospecialize(value::Any))::Bool = value isa Type && !is_closure_type(value) &&
+    Base.unwrap_unionall(value) isa DataType && isstructtype(Base.unwrap_unionall(value))
 
 """The `module_structs` of `mod` declared mutable."""
 mutable_structs(mod::Module)::Vector{DataType} = filter(ismutabletype, module_structs(mod))
@@ -654,11 +644,8 @@ function repeated_prefix(type::DataType)::Union{String, Nothing} # lint: abstrac
         return own
     end
     fields = fieldcount(type)
-    shared = [
-        word
-            for word in unique(words)
-            if count(==(word), words) * 2 > fields
-    ]
+    candidates = unique(words)
+    shared = candidates[count.(isequal.(candidates), (words,)) .* 2 .> fields]
     if fields >= 3 && !isempty(shared)
         return only(shared)
     end
@@ -1148,15 +1135,13 @@ function concrete_returns(
         located::AbstractVector{Located},
         scope::Module,
     )::Vector{Site}
-    return [
-        definition_site(path, item)
-            for item in located
-            if !isnothing(signature_call(item.node)) &&
-            length(item.node.args) >= 2 &&
-            names_concrete_type(return_annotation(item.node), scope, where_variables(item.node)) &&
-            !constructs_own_type(item.node)
-    ]
+    return definition_site.(path, filter(Base.Fix2(returns_concrete, scope), located))
 end
+
+"""Whether the definition `item` declares a return type naming a concrete type of `scope`, and is no constructor of its own type."""
+returns_concrete(item::Located, scope::Module)::Bool =
+    !isnothing(signature_call(item.node)) && length(item.node.args) >= 2 &&
+    names_concrete_type(return_annotation(item.node), scope, where_variables(item.node)) && !constructs_own_type(item.node)
 
 const FLOAT_KIND = SYNTAX.@K_str "Float"
 const IDENTIFIER_KIND = SYNTAX.@K_str "Identifier"
@@ -1346,7 +1331,7 @@ function one_letter_names(node::Expr, exempt::Tuple{Vararg{Symbol}})::Vector{Sym
     elseif node.head === :try && length(node.args) >= 3
         names = bound_names(node.args[2])
     end
-    return [name for name in names if is_one_letter(name, exempt)]
+    return filter(Base.Fix2(is_one_letter, exempt), names)
 end
 
 """One site per one-letter variable name in the Julia file `path`, keyed by file and enclosing function (or testset); `repository.one_letter_exempt` names the allowed ones."""
@@ -1355,18 +1340,16 @@ function one_letter_sites(
         path::AbstractString,
         located::AbstractVector{Located} = located_source(path),
     )::Vector{Site}
-    return [
-        Site(
-            "$(basename(path)) $(item.enclosing)",
-            path,
-            isnothing(signature_call(item.node)) ?
-                item.line :
-                definition_line(item.node, item.line),
-            "",
-        )
-            for item in located
-            for _ in one_letter_names(item.node, repository.one_letter_exempt)
-    ]
+    return reduce(vcat, one_letter_item_sites.(path, located, (repository.one_letter_exempt,)); init = Site[])
+end
+
+"""One site per `one_letter_names` name `item` of the file `path` binds, at the item's line or its definition's."""
+function one_letter_item_sites(path::AbstractString, item::Located, exempt::Tuple{Vararg{Symbol}})::Vector{Site}
+    line = item.line
+    if !isnothing(signature_call(item.node))
+        line = definition_line(item.node, item.line)
+    end
+    return fill(Site("$(basename(path)) $(item.enclosing)", path, line, ""), length(one_letter_names(item.node, exempt)))
 end
 
 # One line of `fatou lint --output concise`: file, line, column, severity, rule and message.
@@ -1375,13 +1358,8 @@ const FATOU_FINDING = r"^(.+?):(\d+):\d+: \w+\[([a-z0-9-]+)\] "
 const FATOU_SUMMARY = r"^checked \d+ file\(s\)"
 
 """The `directories` that exist in `repository` (a job's copy holds only `src`, `ext`, `test` and links)."""
-present_directories(repository::Repository, directories::Tuple{Vararg{String}})::Tuple{
-    Vararg{String},
-} = Tuple(
-    directory
-        for directory in directories
-        if isdir(joinpath(repository.root, directory))
-)
+present_directories(repository::Repository, directories::Tuple{Vararg{String}})::Tuple{Vararg{String}} =
+    filter(isdir ∘ Base.Fix1(joinpath, repository.root), directories)
 
 """
 One site per finding of `fatou lint` over `directories` of `repository`, keyed by file and Fatou
@@ -1407,8 +1385,11 @@ function fatou_sites(repository::Repository, directories::Tuple{Vararg{String}})
     if !isempty(unread)
         error("fatou lint printed lines that are no finding:\n" * join(unread, "\n"))
     end
-    return [Site("$(found[1]) $(found[3])", joinpath(repository.root, found[1]), parse(Int, found[2]), "") for found in findings if !isnothing(found)]
+    return fatou_site.(repository.root, filter(!isnothing, findings))
 end
+
+"""The site of `found`, a `FATOU_FINDING` match, in the repository at `root`."""
+fatou_site(root::AbstractString, found::RegexMatch)::Site = Site("$(found[1]) $(found[3])", joinpath(root, found[1]), parse(Int, found[2]), "")
 
 """A `Site` keyed `name` at the declaration of struct `name`."""
 function struct_site(name::Symbol, locations::Dict{Symbol, Tuple{String, Int}})::Site

@@ -49,11 +49,7 @@ function judge(
     name::String = rule_name(rule)
     kept, _ = unopted(sites, name)
     over = disallowed_keys(repository, name, sites, kept, update)
-    return [
-        Finding(name, level, site)
-            for site in kept
-            if site.key in over
-    ]
+    return Finding.(name, level, kept[in.(getfield.(kept, :key), (over,))])
 end
 
 """Whether `rule` reads the types inference gives `signatures` (`inferred_methods`)."""
@@ -70,12 +66,11 @@ module_rule_names(rules::Tuple)::Vector{String} = [
         if rule isa ModuleRule
 ]
 
+"""Whether `config` leaves `rule` on."""
+is_on(config::Config, rule::Rule)::Bool = level(config, rule) !== :allow
+
 """The rules `config` leaves on."""
-enabled_rules(config::Config)::Tuple = Tuple(
-    rule
-        for rule in RULES
-        if level(config, rule) !== :allow
-)
+enabled_rules(config::Config)::Tuple = filter(Base.Fix1(is_on, config), RULES)
 
 """Run the fixer of every fixable rule in `rules` over the files `context` names."""
 apply_fixes!(::Tuple{}, ::Context)::Nothing = nothing
@@ -125,10 +120,7 @@ function fix_diff(config::Config, root::AbstractString)::String
         Context(repository(config, copies), directories, nothing, Inferred[]),
     )
     labels = relpath.(repository_sources(original, directories), original.root)
-    return join(
-        file_diff(label, joinpath(original.root, label), joinpath(copies, label))
-            for label in labels
-    )
+    return join(file_diff.(labels, joinpath.(original.root, labels), joinpath.(copies, labels)))
 end
 
 """
@@ -151,7 +143,7 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
     repository_ = repository(config, root)
     directories = present_directories(repository_, config.directories)
     enabled = enabled_rules(config)
-    runnable = Tuple(rule for rule in enabled if can_run(rule, mod, signatures))
+    runnable = enabled[collect(can_run.(enabled, (mod,), (signatures,)))]
     skipped = setdiff(module_rule_names(enabled), module_rule_names(runnable))
     if fix
         apply_fixes!(runnable, Context(repository_, directories, mod, Inferred[]))

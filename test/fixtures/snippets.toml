@@ -80,6 +80,24 @@ pid()::Int = Int(ccall(:getpid, Cint, (Ref{Cint},), C_NULL))
 generic(box::Ref{Int})::Int = box[]
 '''
 
+[jscpd]
+source = '''
+function first_copy(alpha::Int, beta::Int)::Int
+    scaled = alpha * 3 + beta
+    shifted = scaled - alpha * beta
+    folded = shifted * shifted + scaled
+    bounded = min(folded, alpha + beta * 7)
+    return bounded + scaled * shifted
+end
+function second_copy(alpha::Int, beta::Int)::Int
+    scaled = alpha * 3 + beta
+    shifted = scaled - alpha * beta
+    folded = shifted * shifted + scaled
+    bounded = min(folded, alpha + beta * 7)
+    return bounded + scaled * shifted
+end
+'''
+
 [fatou]
 source = '''
 function unused_local(value::Integer)::Integer

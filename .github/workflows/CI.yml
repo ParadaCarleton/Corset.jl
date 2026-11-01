@@ -20,7 +20,7 @@ jobs:
         os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
-      # The fatou tests run the real fatou that mise.toml pins, from temp directories mise's shims cannot resolve.
+      # The fatou and jscpd tests run the real tools mise.toml pins, from temp directories mise's shims cannot resolve.
       - uses: jdx/mise-action@v2
       - run: mise bin-paths >> "$GITHUB_PATH"
       - uses: julia-actions/setup-julia@v2

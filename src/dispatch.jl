@@ -36,8 +36,8 @@ fixed-length tuple whose members each compile concretely.
 function compiled_concretely(return_type::Any)::Bool # lint: abstract-local  reflects on types of unknown kind
     if return_type === Union{} || isconcretetype(return_type)
         return true
-    elseif return_type isa DataType && return_type.name === Base.typename(Type)
-        return !(only(return_type.parameters) isa TypeVar)
+    elseif return_type <: Type && !(return_type isa Union || return_type isa UnionAll)
+        return true # `Type{X}`: a `DataType` before Julia 1.14, a `TypeEq` after
     elseif return_type isa DataType && return_type <: Tuple && !Base.isvatuple(return_type)
         return all(compiled_concretely, return_type.parameters)
     end
@@ -52,9 +52,11 @@ The `inferred` frames whose method is in `repository`'s own files and whose firs
 function audited_frames(repository::Repository, inferred::AbstractVector{Inferred}, rule::AbstractString)::Vector{Inferred}
     own = inferred[startswith.([string(item.method.file) for item in inferred], repository.root)]
     files = unique([string(item.method.file) for item in own])
-    skipped = Dict(files .=> opt_outs.(files, rule))
-    return own[[!(item.method.line in skipped[string(item.method.file)].lines) for item in own]]
+    return own[.!opted_out.(own, (Dict(files .=> opt_outs.(files, rule)),))]
 end
+
+"""Whether the first line of `item`'s method is among the opted-out lines `skipped` holds for its file."""
+opted_out(item::Inferred, skipped::AbstractDict{String, OptOuts})::Bool = item.method.line in skipped[string(item.method.file)].lines
 
 """
     runtime_dispatches(repository, inferred)

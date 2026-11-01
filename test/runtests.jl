@@ -731,6 +731,9 @@ end
         Tuple{typeof(Mutation.opaquecall), Function, vector}, Tuple{typeof(Mutation.viaccall), vector},
         Tuple{typeof(Mutation.opaqueglobal), Function},
         Tuple{typeof(Mutation.describe), IOBuffer, Mutation.Box}, Tuple{typeof(Mutation.log_to), IOStream, Mutation.Box},
+        Tuple{typeof(Mutation.render), IOBuffer, Mutation.Box}, Tuple{typeof(Mutation.render_into), IOBuffer, Mutation.Box},
+        Tuple{typeof(Mutation.log_context), IOContext{IOStream}, Mutation.Box},
+        Tuple{typeof(Mutation.buffer_context), IOContext{IOBuffer}, Mutation.Box},
         Tuple{typeof(Mutation.guarded), ReentrantLock}, Tuple{typeof(Mutation.zero_first), vector},
     ]
     sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred_methods(Mutation, entry_frames(seeds, Mutation)))
@@ -749,6 +752,14 @@ end
         @test !Corset.writable(IOStream) && !Corset.writable(Base.PipeEndpoint) && !Corset.writable(Base.DevNull)
         @test Corset.writable(IOBuffer) && Corset.writable(Base.BufferStream) && Corset.writable(Base.LibuvStream)
         @test Corset.writable(IO) && Corset.writable(IOContext{IOBuffer}) && Corset.writable(ReentrantLock)
+        @test !Corset.writable(IOContext{IOStream}) && Corset.writable(IOContext)
+    end
+    @testset "a method declaring an abstract IO writes its caller's stream; a concrete in-memory declaration flags" begin
+        @test !haskey(details, "render") && !haskey(details, "render_into") && !haskey(details, "log_context")
+        @test details["buffer_context"] == "writes argument `io` but its name has no `!`"
+        render = only(Corset.typed_frames(Tuple{typeof(Mutation.render), IOBuffer, Mutation.Box}))
+        @test Corset.argument_writes(render, Dict{Core.MethodInstance, Corset.Inferred}(), ()).written == [2]
+        @test Corset.declared_io(render.method, 2) && !Corset.declared_io(render.method, 3) && !Corset.declared_io(render.method, 9)
     end
     @testset "fresh memory, reads, a rebound local and a `!` function are not reported" begin
         for name in ("rebound", "viahelper", "fresh", "readonly", "addup", "reads", "bangwrite!", "countdown", "memwrite!", "fieldread", "opaqueglobal")

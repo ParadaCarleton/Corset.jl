@@ -76,7 +76,11 @@ const OS_HANDLES = Union{
 }
 
 """Whether every value of type `type` is an OS-backed handle: an `OS_HANDLES` type or a libuv stream other than the in-memory `BufferStream`."""
-os_handle(type::Type)::Bool = type <: OS_HANDLES || (type <: Base.LibuvStream && !(Base.BufferStream <: type))
+os_handle(type::Type)::Bool = type <: OS_HANDLES || (type <: Base.LibuvStream && !(Base.BufferStream <: type)) || os_context(type)
+
+"""Whether `type` is an `IOContext` around an `os_handle`."""
+os_context(type::DataType)::Bool = type <: IOContext && os_handle(only(type.parameters))
+os_context(::Type)::Bool = false
 
 """
 Whether a write through a value of type `type` changes a Julia object: not `plain_capture` data, a
@@ -188,10 +192,24 @@ end
 function mutation_sites(item::Inferred, frames::AbstractDict{Core.MethodInstance, Inferred})::Vector{Site}
     writes = argument_writes(item, frames, (item.code.parent,))
     names = "`" .* string.(item.code.slotnames) .* "`"
+    reported = Base.Fix1(filter, !Base.Fix1(declared_io, item.method))
     details = vcat(
-        "writes argument " .* names[writes.written] .* " but its name has no `!`",
-        "argument " .* names[writes.dispatched] .* " reaches a runtime dispatch (`runtime-dispatch`) and may be written",
-        "argument " .* names[writes.foreign] .* " reaches a `ccall` and may be written",
+        "writes argument " .* names[reported(writes.written)] .* " but its name has no `!`",
+        "argument " .* names[reported(writes.dispatched)] .* " reaches a runtime dispatch (`runtime-dispatch`) and may be written",
+        "argument " .* names[reported(writes.foreign)] .* " reaches a `ccall` and may be written",
     )
     return Site.(method_key(item.method), string(item.method.file), item.method.line, details)
+end
+
+"""
+Whether `method` declares argument `index` as an abstract `IO` (`io::IO`, `io::T where T <: IO`): it
+writes whatever stream its caller passes, an OS handle included, so a specialization's `IOBuffer` does not count.
+"""
+function declared_io(method::Method, index::Integer)::Bool # lint: abstract-local  signature parameters are any type
+    parameters = collect(Any, Base.unwrap_unionall(method.sig).parameters) # lint: abstract-local  signature parameters are any type
+    declared = get(parameters, index, Any)
+    if declared isa TypeVar
+        declared = declared.ub
+    end
+    return declared isa Type && declared <: IO && !isconcretetype(declared)
 end

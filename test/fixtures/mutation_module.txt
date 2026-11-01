@@ -28,6 +28,10 @@ bangwrite!(v) = (v[1] = 1; v)
 
 describe(io::IOBuffer, box) = (write(io, UInt8(box.a)); nothing)
 log_to(io::IOStream, box) = (write(io, UInt8(box.a)); nothing)
+render(io::IO, box) = (write(io, UInt8(box.a)); nothing)
+render_into(io::T, box) where {T <: IO} = (write(io, UInt8(box.a)); nothing)
+log_context(io::IOContext{IOStream}, box) = (write(io, UInt8(box.a)); nothing)
+buffer_context(io::IOContext{IOBuffer}, box) = (write(io, UInt8(box.a)); nothing)
 guarded(gate::ReentrantLock) = (lock(gate); unlock(gate); nothing)
 zero_first(values::Vector{Int}) = (values[1] = 0; nothing)
 

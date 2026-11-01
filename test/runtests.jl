@@ -9,7 +9,7 @@ using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call
     inferred_methods, jscpd_sites, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
-    where_return_sites, entry_signatures, entry_frames, frame_callees, mentions_module, builtin_callee, invoked_instance, logging_call
+    where_return_sites, entry_frames, frame_callees, mentions_module, builtin_callee, invoked_instance, logging_call
 
 const FIXTURES = joinpath(@__DIR__, "fixtures")
 const SNIPPETS = TOML.parsefile(joinpath(FIXTURES, "snippets.toml"))
@@ -605,7 +605,7 @@ end
         method = only(methods(closure_chain.uses_macro))
         code = Corset.lowered(method)
         @test any(index -> Corset.statement_line(code, method, index) == method.line, eachindex(code.code))
-        @test Corset.slot_line(Corset.Inferred(method, code, false), 2) == method.line
+        @test Corset.slot_line(code, method, 2) == method.line
     end
     @testset "a builtin has no lowered code and returns no argument's call" begin
         @test isnothing(Corset.lowered(first(methods(Core.tuple))))
@@ -708,29 +708,35 @@ end
     end
 end
 
-@testset "entry_signatures walks :invoke edges from the seeds and reads nothing the session ran" begin
+@testset "entry_frames walks :invoke edges from the seeds and reads nothing the session ran" begin
     outer_call = Tuple{typeof(Probe.outer), Probe.Marker}
     inner_call = Tuple{typeof(Probe.inner), Probe.Marker}
     @testset "a noinline callee is followed, the seed is kept, and the answer does not depend on what ran" begin
-        cold = entry_signatures(Type[outer_call], Probe)
+        cold = collect(keys(entry_frames(Type[outer_call], Probe)))
         Probe.outer(Probe.Marker())
-        @test Set(entry_signatures(Type[outer_call], Probe)) == Set(cold)
+        @test Set(keys(entry_frames(Type[outer_call], Probe))) == Set(cold)
         @test outer_call in cold && inner_call in cold
-        @test length(cold) == length(unique(cold))
     end
-    @testset "entry_frames holds each signature's optimized frame, empty where inference yields none" begin
+    @testset "entry_frames holds each signature's frames, empty where inference yields none" begin
         nothing_typed = Tuple{typeof(Probe.inner), String}
         frames = entry_frames(Type[outer_call, nothing_typed], Probe)
         @test Set(keys(frames)) == Set([outer_call, inner_call, nothing_typed])
         @test length(frames[outer_call]) == 1 && isempty(frames[nothing_typed])
     end
+    @testset "inferred_methods reads the walk's frames and matches inferring the signatures anew" begin
+        frames = entry_frames(Type[outer_call], Probe)
+        walked = inferred_methods(Probe, frames)
+        fresh = inferred_methods(Probe, collect(keys(frames)))
+        @test Set(item.method for item in walked) == Set(item.method for item in fresh) == Set([only(methods(Probe.outer)), only(methods(Probe.inner))])
+        @test all(item -> item.ir isa Base.Compiler.IRCode && !isempty(item.code.slottypes), walked)
+    end
     @testset "a seed with no callee in the module is its own walk" begin
-        @test entry_signatures(Type[inner_call], Probe) == Type[inner_call]
+        @test collect(keys(entry_frames(Type[inner_call], Probe))) == Type[inner_call]
     end
     @testset "frame_callees keeps the callees naming the target and drops the others" begin
-        code = only(Base.code_typed_by_type(outer_call; optimize = true)).first
-        @test frame_callees(code, Probe) == Type[inner_call]
-        @test isempty(frame_callees(code, Base))
+        ir = only(Corset.typed_frames(outer_call)).ir
+        @test frame_callees(ir, Probe) == Type[inner_call]
+        @test isempty(frame_callees(ir, Base))
     end
     @testset "mentions_module reads unions, where-types and nested parameters, to a depth limit" begin
         @test mentions_module(Probe.Marker, Probe, 0)

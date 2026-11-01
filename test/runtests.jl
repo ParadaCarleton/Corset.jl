@@ -489,6 +489,10 @@ end
     end
     @testset "a missing binding hides no input" begin
         @test !Corset.is_hidden_input(GlobalRef(Main, :no_such_binding_anywhere))
+        @test isempty(Corset.method_hidden_inputs(first(methods(Core.tuple))))
+    end
+    @testset "an anonymous function's own method is keyed by its file alone" begin
+        @test Corset.method_key(only(methods(values -> values))) == "runtests.jl anonymous function"
     end
     @testset "abstract local types: unions, containers, tuples and Type" begin
         concrete = (Union{}, Union{Int, String}, Type{Int}, Vector{Int}, Dict{String, Int}, Tuple{Int, Float64}, Tuple{Vararg{Int}})

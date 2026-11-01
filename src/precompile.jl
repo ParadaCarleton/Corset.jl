@@ -24,7 +24,7 @@ end
             joinpath(root, "src", "WorkloadPackage.jl"),
             "module WorkloadPackage\nconst COUNTER = Ref(0)\nbump(x) = x + COUNTER[]\nstruct Holder\n    held::Any\nend\nend\n",
         )
-        config = with_overrides(load_config(root), true, ["fatou" => :allow])
+        config = with_overrides(load_config(root), true, ["fatou" => :allow, "jscpd" => :allow])
         findings, _ = run_rules(config, root; mod = WorkloadPackage)
         for format in ("human", "concise")
             print_findings(devnull, root, findings, format)
@@ -34,7 +34,7 @@ end
         redirect_stderr(devnull) do
             redirect_stdout(devnull) do
                 main(["rules", root])
-                main(["check", root, "--no-load", "--pedantic", "--allow", "fatou"])
+                main(["check", root, "--no-load", "--pedantic", "--allow", "fatou", "--allow", "jscpd"])
             end
         end
     finally

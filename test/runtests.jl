@@ -6,7 +6,7 @@ using TOML: TOML
 using Corset: Corset
 using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, abstract_locals,
     c_type_sites, impure_anonymous_functions, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
-    inferred_methods, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
+    inferred_methods, jscpd_sites, located_source, misplaced_imports, missing_annotations, module_structs, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
     where_return_sites, entry_signatures, entry_frames, frame_callees, mentions_module, builtin_callee, invoked_instance, logging_call
@@ -308,6 +308,29 @@ end
             @test_throws ErrorException fatou_sites(Repository(tree), (".",))
         finally
             ENV["PATH"] = path
+        end
+    end
+
+    @testset "jscpd: findings of the real `jscpd` (from mise.toml)" begin
+        copies = SNIPPETS["jscpd"]["source"]
+        tree = write_tree(mktempdir(), ["copies.jl" => copies, "single.jl" => "one() = 1\n", "vendor/copies.jl" => copies])
+        inner = Site("copies.jl copies.jl", joinpath(tree, "copies.jl"), 8, 14, "")
+        vendored = Site("vendor/copies.jl copies.jl", joinpath(tree, "vendor", "copies.jl"), 1, 14, "")
+        @test Set(jscpd_sites(Repository(tree), (".",))) == Set([inner, vendored])
+        @test jscpd_sites(Repository(tree; skipped_directories = ("vendor",)), (".",)) == [inner]
+        @test isempty(jscpd_sites(Repository(tree), ("nonexistent",)))
+        @testset "a jscpd that writes no report, or none on PATH, is an error" begin
+            path = ENV["PATH"]
+            broken = write_tree(mktempdir(), ["jscpd" => "#!/bin/sh\nexit 1\n"])
+            chmod(joinpath(broken, "jscpd"), 0o755)
+            try
+                ENV["PATH"] = "$broken:$path"
+                @test_throws ErrorException jscpd_sites(Repository(tree), (".",))
+                ENV["PATH"] = mktempdir()
+                @test_throws ErrorException jscpd_sites(Repository(tree), (".",))
+            finally
+                ENV["PATH"] = path
+            end
         end
     end
 

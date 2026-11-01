@@ -57,14 +57,11 @@ end
     defined_methods(mod)
 
 The methods `mod` defines on its own functions and types, closures included: each
-function's methods, and each type's constructors and call methods.
-
-ponytail: methods `mod` adds to another module's function (`Base.show`, AD rules) are
-missed; `Base.visit` over the method table finds those but misses closure call methods
-on Julia 1.13 and needs a mutating callback.
+function's methods, and each type's constructors and call methods. Methods `mod` adds to
+a function of a loaded module (`Base.show`, AD rules) count too.
 """
 function defined_methods(mod::Module)::Vector{Method} # lint: abstract-local  reflects on values of unknown type
-    values = module_bindings(mod)
+    values = vcat(module_bindings(mod), loaded_functions())
     world = Base.get_world_counter()
     found = reduce(
         vcat,
@@ -73,6 +70,13 @@ function defined_methods(mod::Module)::Vector{Method} # lint: abstract-local  re
     )
     return unique(found[[method.module for method in found] .=== (mod,)])
 end
+
+"""Every function bound in `Base`, `Core` or a loaded module: where `mod` may add methods."""
+loaded_functions()::AbstractVector = reduce(
+    vcat,
+    filter(Base.Fix2(isa, Function), module_bindings(loaded)) for loaded in unique([Base; Core; collect(values(Base.loaded_modules))]);
+    init = [],
+)
 
 """The values bound to the names of `mod`, unexported and compiler-made names included."""
 module_bindings(mod::Module)::AbstractVector = getfield.((mod,), filter(Base.Fix1(isdefined, mod), names(mod; all = true)))

@@ -1,0 +1,349 @@
+[abstract-field]
+
+[annotation]
+"precompile.jl bump" = 1
+"ratchet.jl Site" = 1
+"undefined_names.jl assigned_names!" = 1
+"undefined_names.jl bound_names!" = 1
+"undefined_names.jl declared_name" = 1
+"undefined_names.jl enum_names!" = 1
+"undefined_names.jl follow_includes!" = 1
+"undefined_names.jl import_names!" = 1
+"undefined_names.jl included_path" = 1
+"undefined_names.jl is_testset_macro" = 1
+"undefined_names.jl macro_name" = 1
+"undefined_names.jl module_globals!" = 1
+"undefined_names.jl path_pieces" = 1
+"undefined_names.jl testset_nodes" = 1
+"undefined_names.jl undefined_names" = 1
+"undefined_names.jl without_imports" = 1
+
+[c-type]
+
+[concrete-arg]
+"config.jl" = 2
+"rules.jl" = 1
+
+[concrete-return]
+"check.jl allowances" = 1
+"check.jl disallowed_keys" = 1
+"check.jl file_diff" = 1
+"check.jl fix_diff" = 1
+"check.jl judge" = 1
+"check.jl module_rule_names" = 1
+"cli.jl @main" = 1
+"cli.jl argument_settings" = 1
+"cli.jl command_options" = 1
+"cli.jl detail_note" = 1
+"cli.jl display_path" = 1
+"cli.jl error_message" = 3
+"cli.jl exit_code" = 1
+"cli.jl level_overrides" = 1
+"cli.jl load_package" = 1
+"cli.jl print_fix_diff" = 1
+"cli.jl project_root" = 1
+"cli.jl relaunch" = 1
+"cli.jl rule_line" = 1
+"cli.jl run_command" = 1
+"cli.jl run_options" = 2
+"cli.jl with_overrides" = 1
+"config.jl level" = 1
+"config.jl load_config" = 1
+"config.jl merged" = 1
+"config.jl overlay" = 1
+"config.jl read_preferences" = 1
+"config.jl repository" = 1
+"dispatch.jl audited_frames" = 1
+"dispatch.jl dispatch_sites" = 1
+"dispatch.jl runtime_dispatches" = 1
+"dispatch.jl widened_returns" = 1
+"entry_walk.jl entry_frames" = 1
+"entry_walk.jl frame_callees" = 1
+"entry_walk.jl new_callees" = 1
+"entry_walk.jl signature_callees" = 1
+"float64_scan.jl float64_ops" = 1
+"imports.jl addition_edit" = 1
+"imports.jl expression_names" = 3
+"imports.jl file_moves" = 1
+"imports.jl import_file" = 1
+"imports.jl import_files" = 1
+"imports.jl import_moves" = 1
+"imports.jl import_nodes" = 1
+"imports.jl import_sites" = 1
+"imports.jl import_statement" = 1
+"imports.jl include_paths" = 1
+"imports.jl interpolated_names" = 1
+"imports.jl item_name" = 1
+"imports.jl line_end" = 1
+"imports.jl line_start" = 1
+"imports.jl literal_pieces" = 1
+"imports.jl misplaced_imports" = 1
+"imports.jl module_nodes" = 1
+"imports.jl move_targets" = 1
+"imports.jl moved_items" = 1
+"imports.jl name_tokens" = 1
+"imports.jl place_imports!" = 1
+"imports.jl placed_text" = 1
+"imports.jl prefix_statement" = 1
+"imports.jl removal_edit" = 1
+"imports.jl splice_text" = 1
+"imports.jl statement_moves" = 1
+"imports.jl unit_count" = 1
+"imports.jl unit_files" = 1
+"imports.jl unit_moves" = 1
+"jet.jl jet_assertion" = 1
+"jet.jl jet_site" = 1
+"jet.jl jet_sites" = 1
+"jet.jl loaded_jet" = 1
+"mutation.jl alias_indices" = 1
+"mutation.jl argument_writes" = 1
+"mutation.jl effect_arguments" = 1
+"mutation.jl invoked_writes" = 1
+"mutation.jl mutation_sites" = 1
+"mutation.jl operand_index" = 1
+"mutation.jl operand_indices" = 1
+"mutation.jl reached_arguments" = 1
+"mutation.jl statement_writes" = 2
+"mutation.jl unmarked_mutations" = 1
+"mutation.jl view_sources" = 1
+"mutation.jl writable_operands" = 1
+"mutation.jl written_detail" = 1
+"non_public_access.jl entry_file" = 1
+"non_public_access.jl non_public_accesses" = 1
+"non_public_access.jl non_public_site" = 1
+"non_public_access.jl qualified_uses" = 1
+"ratchet.jl detail_lines" = 1
+"ratchet.jl detail_suffix" = 1
+"ratchet.jl exceeding" = 1
+"ratchet.jl falling" = 1
+"ratchet.jl julia_files" = 1
+"ratchet.jl key_details" = 1
+"ratchet.jl logged_over" = 1
+"ratchet.jl offenders!" = 1
+"ratchet.jl opt_outs" = 1
+"ratchet.jl over_line" = 1
+"ratchet.jl ratchet!" = 1
+"ratchet.jl read_baseline" = 1
+"ratchet.jl remaining" = 2
+"ratchet.jl repository_sources" = 1
+"ratchet.jl tally" = 1
+"ratchet.jl write_baseline!" = 1
+"registry.jl check" = 1
+"registry.jl declared" = 1
+"registry.jl rule_group" = 1
+"registry.jl rule_name" = 1
+"registry.jl rule_summary" = 1
+"registry.jl scope" = 1
+"registry.jl struct_sites" = 1
+"rules.jl abstract_fields" = 1
+"rules.jl abstract_local_sites" = 1
+"rules.jl abstract_locals" = 1
+"rules.jl annotated_arguments" = 2
+"rules.jl anonymous_function_sites" = 1
+"rules.jl binding_methods" = 1
+"rules.jl bound_name" = 2
+"rules.jl bound_names" = 3
+"rules.jl c_type_sites" = 1
+"rules.jl call_methods" = 1
+"rules.jl capture_detail" = 1
+"rules.jl capture_kind" = 1
+"rules.jl caught_slots" = 1
+"rules.jl closure_definer" = 1
+"rules.jl closure_faults" = 1
+"rules.jl closure_instances" = 1
+"rules.jl closure_namers" = 1
+"rules.jl closure_site" = 1
+"rules.jl closure_type_names" = 1
+"rules.jl concrete_arguments" = 1
+"rules.jl concrete_returns" = 1
+"rules.jl created_closures" = 1
+"rules.jl defined_methods" = 1
+"rules.jl defined_name" = 1
+"rules.jl definition_line" = 1
+"rules.jl definition_lines" = 1
+"rules.jl definition_site" = 1
+"rules.jl fatou_site" = 1
+"rules.jl fatou_sites" = 1
+"rules.jl field_types" = 1
+"rules.jl first_word" = 1
+"rules.jl fixed_reach" = 1
+"rules.jl float64_sites" = 1
+"rules.jl function_owner" = 1
+"rules.jl global_reads" = 3
+"rules.jl hidden_inputs" = 1
+"rules.jl impure_anonymous_functions" = 1
+"rules.jl inferred_methods" = 2
+"rules.jl instance_callees" = 1
+"rules.jl instance_faults" = 1
+"rules.jl jscpd_command" = 1
+"rules.jl jscpd_site" = 1
+"rules.jl jscpd_sites" = 1
+"rules.jl kind_detail" = 1
+"rules.jl live_closure_types" = 1
+"rules.jl live_closures" = 1
+"rules.jl locate!" = 1
+"rules.jl located_source" = 1
+"rules.jl method_hidden_inputs" = 1
+"rules.jl method_key" = 1
+"rules.jl method_namings" = 1
+"rules.jl missing_annotations" = 1
+"rules.jl module_frames" = 1
+"rules.jl module_methods" = 1
+"rules.jl module_structs" = 1
+"rules.jl mutable_structs" = 1
+"rules.jl name_sites" = 1
+"rules.jl named_closures" = 1
+"rules.jl nothing_returns" = 1
+"rules.jl one_letter_item_sites" = 1
+"rules.jl one_letter_names" = 1
+"rules.jl one_letter_sites" = 1
+"rules.jl one_per_line" = 1
+"rules.jl overspecialized_anonymous_functions" = 1
+"rules.jl place_site" = 1
+"rules.jl range_guards" = 1
+"rules.jl ref_sites" = 1
+"rules.jl repeated_prefix" = 1
+"rules.jl repeated_statements" = 1
+"rules.jl return_type_calls" = 1
+"rules.jl signature_call" = 1
+"rules.jl slot_line" = 1
+"rules.jl statement_hidden_inputs" = 1
+"rules.jl statement_line" = 1
+"rules.jl struct_lines" = 1
+"rules.jl struct_locations" = 1
+"rules.jl struct_name" = 1
+"rules.jl struct_site" = 1
+"rules.jl testset_name" = 1
+"rules.jl type_head" = 2
+"rules.jl typed_frame" = 1
+"rules.jl typed_frames" = 1
+"rules.jl unmarked_effects" = 1
+"rules.jl unstable_anonymous_functions" = 1
+"rules.jl where_variables" = 1
+"rules.jl without_lines" = 1
+"undefined_names.jl declared_name" = 1
+"undefined_names.jl macro_name" = 1
+"undefined_names.jl testset_nodes" = 1
+"where_return.jl fix_where_returns" = 1
+"where_return.jl fix_where_returns!" = 1
+"where_return.jl identifier_names" = 1
+"where_return.jl where_return_sites" = 1
+
+[fatou]
+
+[float64]
+
+[hidden-input]
+
+[impure-anonymous-function]
+
+[jscpd]
+
+[misplaced-import]
+
+[mutable-struct]
+
+[non-public-access]
+"Base.Compiler" = 1
+"Base.Compiler.EscapeAnalysis.EscapeState" = 12
+"Base.Compiler.EscapeAnalysis.iridx" = 1
+"Base.Compiler.IRShow.buildLineInfoNode" = 1
+"Base.CoreLogging" = 3
+"Base.CoreLogging.handle_message" = 1
+"Base.DevNull" = 1
+"Base.IOError" = 1
+"Base.IRShow" = 1
+"Base.LibuvServer" = 1
+"Base.LibuvStream" = 1
+"Base.Meta.lower" = 1
+"Base.Meta.parseall" = 3
+"Base.PkgId" = 2
+"Base.Process" = 1
+"Base.ProcessChain" = 1
+"Base.UV_EPIPE" = 1
+"Base._methods_by_ftype" = 3
+"Base.current_project" = 1
+"Base.get_world_counter" = 2
+"Base.isvarargtype" = 1
+"Base.isvatuple" = 1
+"Base.loaded_modules" = 1
+"Base.require" = 3
+"Base.shell_parse" = 1
+"Base.specializations" = 1
+"Base.uncompressed_ir" = 1
+"Base.uniontypes" = 4
+"Base.unwrap_unionall" = 18
+"Compiler.EscapeAnalysis" = 1
+"Compiler.IRCode" = 13
+"Compiler.MethodLookupResult" = 1
+"Compiler.NativeInterpreter" = 3
+"Compiler.OptimizationState" = 1
+"Compiler._findall_matches" = 1
+"Compiler.argextype" = 2
+"Compiler.get_escape_cache" = 1
+"Compiler.ignorelimited" = 1
+"Compiler.optimizer_lattice" = 1
+"Compiler.run_passes_ipo_safe" = 1
+"Compiler.singleton_type" = 1
+"Compiler.typeinf_frame" = 1
+"Compiler.widenconst" = 4
+"Core.Argument" = 1
+"Core.Box" = 2
+"Core.Builtin" = 2
+"Core.CodeInfo" = 10
+"Core.CodeInstance" = 1
+"Core.Compiler" = 1
+"Core.CoreSTDERR" = 1
+"Core.CoreSTDOUT" = 1
+"Core.IntrinsicFunction" = 2
+"Core.MethodInstance" = 9
+"Core.MethodMatch" = 2
+"Core.ReturnNode" = 1
+"Core.SSAValue" = 3
+"Core.SlotNumber" = 3
+"Core.TypeName" = 23
+"Core._apply_iterate" = 1
+"Core.eval" = 1
+"Core.kwcall" = 1
+"Core.memoryrefget" = 1
+"Core.memoryrefmodify!" = 1
+"Core.memoryrefnew" = 1
+"Core.memoryrefreplace!" = 1
+"Core.memoryrefset!" = 1
+"Core.memoryrefsetonce!" = 1
+"Core.memoryrefswap!" = 1
+
+[nothing-return]
+called_builtin = 1
+callee_name = 3
+defined_name = 1
+invoked_instance = 1
+lowered = 1
+repeated_prefix = 1
+signature_call = 1
+testset_name = 1
+type_head = 1
+typed_frame = 1
+
+[one-letter]
+"float64_scan.jl float64_ops" = 1
+"precompile.jl bump" = 1
+"rules.jl jscpd_command" = 1
+
+[overspecialized-anonymous-function]
+
+[range-guard]
+"<top level>" = 2
+
+[ref]
+"precompile.jl" = 1
+
+[repeated-prefix]
+
+[repeated-statement]
+
+[return-type]
+
+[unstable-anonymous-function]
+
+[where-return]

@@ -57,7 +57,7 @@ jobs:
           version: "1"
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
-      - run: julia --project=. -e 'using Corset; exit(Corset.main(ARGS))' -- check . --deny-warnings
+      - run: julia --project=. -e 'using Corset; exit(Corset.main(ARGS))' -- check . --pedantic --deny-warnings
   format:
     runs-on: ubuntu-latest
     steps:

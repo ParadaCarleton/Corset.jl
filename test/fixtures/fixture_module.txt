@@ -54,5 +54,6 @@ tally_up(tally::Tally)::Int = (tally.total += 1)
 broken(value::Int)::Int = value + "one"
 unstable(box::Base.RefValue{Any})::Int = box[] + 1
 make_box()::Base.RefValue{Any} = Base.RefValue{Any}(1)
+parsed(text::String) = Meta.parse(text)
 widened(value::Float32)::Float32 = Float32(sqrt(Float64(value)) * 0.1)
 narrow(value::Float32)::Float32 = value * 2.5f0

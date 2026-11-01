@@ -1,5 +1,5 @@
 # The frames an entry point compiles, found by walking optimized IR along `:invoke` edges.
-# `inferred_methods` filters them for the rules; a dispatch audit reads the same IR.
+# `inferred_methods` filters them for the rules, which read the same IR (`runtime_dispatches`).
 
 """
     mentions_module(signature, target, depth)
@@ -22,16 +22,6 @@ function mentions_module(signature::Any, target::Module, depth::Integer)::Bool
 end
 
 """
-    builtin_callee(called)
-
-Whether a `:call` statement's callee is a builtin or an intrinsic, which keep the `:call` head after
-optimization without dispatching. They appear inline or as a `GlobalRef`.
-"""
-builtin_callee(called::Any)::Bool = called isa Core.Builtin || called isa Core.IntrinsicFunction
-builtin_callee(called::GlobalRef)::Bool =
-    isdefined(called.mod, called.name) && builtin_callee(getglobal(called.mod, called.name))
-
-"""
     invoked_instance(callee)
 
 The method instance an `:invoke` statement names: a `CodeInstance` on Julia 1.12 and later.
@@ -40,16 +30,6 @@ invoked_instance(callee::Core.MethodInstance)::Core.MethodInstance = callee
 invoked_instance(callee::Core.CodeInstance)::Union{Nothing, Core.MethodInstance} = invoked_instance(callee.def)
 invoked_instance(::Any)::Nothing = nothing
 
-"""
-    logging_call(statement)
-
-Whether a `:call` statement is a logging macro's hand-off to the current logger, which is an
-`AbstractLogger` chosen at runtime and so always dispatches.
-"""
-logging_call(statement::Expr)::Bool = any(
-    argument -> argument isa GlobalRef && argument.mod === Base.CoreLogging || argument === Base.CoreLogging.handle_message,
-    statement.args,
-)
 """
     frame_callees(ir, target)
 

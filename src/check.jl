@@ -53,7 +53,7 @@ function judge(
 end
 
 """Whether `rule` reads the types inference gives `signatures` (`inferred_methods`)."""
-reads_signatures(rule::Rule)::Bool = rule isa Union{AbstractLocalRule, BangRule, UnmarkedMutationRule}
+reads_signatures(rule::Rule)::Bool = rule isa Union{AbstractLocalRule, BangRule, UnmarkedMutationRule, RuntimeDispatchRule, WidenedReturnRule}
 
 """Whether `rule` has what it reads: the loaded package `mod` for a module rule, `signatures` for a rule that reads inferred types."""
 can_run(rule::Rule, mod::Union{Module, Nothing}, signatures::Union{AbstractVector{<:Type}, Nothing})::Bool =
@@ -127,7 +127,7 @@ end
     run_rules(config, root; mod = nothing, signatures = nothing, fix = false, update_baseline = false)
 
 The findings of every rule `config` leaves on, over the project at `root`, and the names of the rules
-skipped because they read the loaded package `mod` and none was given. `abstract-local` and `bang` also
+skipped because they read the loaded package `mod` and none was given. The rules that read inferred types also
 need `signatures`, the fixed workload `inferred_methods` types `mod` over; without them they are skipped. `fix` first rewrites the files
 for the rules that have a fixer. `update_baseline` seeds and lowers the baseline file; without it the
 baseline is only read.

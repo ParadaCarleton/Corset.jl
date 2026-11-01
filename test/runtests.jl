@@ -9,7 +9,8 @@ using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call
     inferred_methods, jscpd_sites, located_source, misplaced_imports, missing_annotations, module_structs, non_public_accesses, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
-    where_return_sites, entry_frames, frame_callees, mentions_module, builtin_callee, invoked_instance, logging_call
+    where_return_sites, entry_frames, frame_callees, mentions_module, invoked_instance, logging_call, runtime_dispatches,
+    widened_returns, compiled_concretely
 
 const FIXTURES = joinpath(@__DIR__, "fixtures")
 const SNIPPETS = TOML.parsefile(joinpath(FIXTURES, "snippets.toml"))
@@ -755,6 +756,56 @@ end
     end
 end
 
+module Dispatch
+    include(joinpath(@__DIR__, "fixtures", "dispatch_module.txt"))
+end
+
+"""The sites of `sites` whose key names the function `name`."""
+sites_named(sites::AbstractVector{Site}, name::AbstractString)::Vector{Site} = [site for site in sites if last(split(site.key)) == name]
+
+@testset "runtime-dispatch and widened-return read the walked frames' optimized IR" begin
+    untyped = Array{Any, 1}
+    seeds = Type[
+        Tuple{typeof(Dispatch.invoking_control), untyped}, Tuple{typeof(Dispatch.line_exempt), untyped},
+        Tuple{typeof(Dispatch.exempt), untyped}, Tuple{typeof(Dispatch.widened_exempt), untyped},
+        Tuple{typeof(Dispatch.opted_local), untyped}, Tuple{typeof(Dispatch.small_union), Bool},
+        Tuple{typeof(Dispatch.splatted), untyped},
+    ]
+    repository = Repository(@__DIR__)
+    inferred = inferred_methods(Dispatch, entry_frames(seeds, Dispatch))
+    dispatches = runtime_dispatches(repository, inferred)
+    widened = Dict(last(split(site.key)) => site.detail for site in widened_returns(repository, inferred))
+    @testset "a noinline dynamic callee reached only through an :invoke edge is reported" begin
+        control = only(sites_named(dispatches, "dispatching_control"))
+        @test control.line == 2 && occursin("dispatches", control.detail) && occursin("+", control.detail)
+        @test isempty(sites_named(runtime_dispatches(repository, inferred_methods(Dispatch, seeds)), "dispatching_control"))
+        @test widened["invoking_control"] == "returns Any"
+    end
+    @testset "a statement's opt-out covers its line, a method's opt-out its whole body" begin
+        @test [site.line for site in sites_named(dispatches, "line_exempt")] == [7, 8]
+        @test [site.line for site in first(Corset.unopted(sites_named(dispatches, "line_exempt"), "runtime-dispatch"))] == [8]
+        @test isempty(sites_named(dispatches, "exempt")) && !haskey(widened, "widened_exempt") && haskey(widened, "exempt")
+    end
+    @testset "a splat through Core._apply_iterate dispatches; a small concrete union compiles concretely" begin
+        @test occursin("_apply_iterate", only(sites_named(dispatches, "splatted")).detail)
+        @test !haskey(widened, "small_union") && isempty(sites_named(dispatches, "small_union"))
+    end
+    @testset "an abstract-local opt-out on a method's first line covers its locals" begin
+        keys_ = [last(split(site.key)) for site in abstract_locals(repository, inferred)]
+        @test "line_exempt" in keys_ && !("opted_local" in keys_)
+    end
+    @testset "compiled_concretely judges a returned tuple member by member" begin
+        @test compiled_concretely(Tuple{Int, Union{Float32, Float16}})
+        @test compiled_concretely(Tuple{Int, Tuple{Float32, Union{Nothing, Int}}})
+        @test compiled_concretely(Union{}) && compiled_concretely(Type{Int})
+        @test !compiled_concretely(Type{T} where {T})
+        @test !compiled_concretely(Tuple{Int, Number})
+        @test !compiled_concretely(Tuple{Int, Union{Int8, Int16, Int32, Int64, Int128}})
+        @test !compiled_concretely(Tuple{Int, AbstractVector{Float32}})
+        @test !compiled_concretely(Tuple{Vararg{Int}})
+    end
+end
+
 @testset "entry_frames walks :invoke edges from the seeds and reads nothing the session ran" begin
     outer_call = Tuple{typeof(Probe.outer), Probe.Marker}
     inner_call = Tuple{typeof(Probe.inner), Probe.Marker}
@@ -800,11 +851,7 @@ end
         @test !mentions_module(Union{Int, Float32}, Probe, 0)
         @test !mentions_module(Probe.Marker, Probe, 7)
     end
-    @testset "builtin_callee, invoked_instance and logging_call read each statement shape" begin
-        @test builtin_callee(Core.tuple) && builtin_callee(Core.Intrinsics.add_int)
-        @test builtin_callee(GlobalRef(Core, :tuple))
-        @test !builtin_callee(GlobalRef(Core, :no_such_name))
-        @test !builtin_callee(Probe.inner)
+    @testset "invoked_instance and logging_call read each statement shape" begin
         instance = only(Base.specializations(only(methods(Probe.inner))))
         @test invoked_instance(instance) === instance
         @test invoked_instance(instance.cache) === instance

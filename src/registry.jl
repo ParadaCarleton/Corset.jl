@@ -102,6 +102,12 @@ unmarked_effects(context.repository, context.inferred)
 @rule ModuleRule "unmarked-mutation" :pedantic "functions without ! in the name that write through an argument" context ->
 unmarked_mutations(context.repository, context.inferred)
 
+@rule ModuleRule "runtime-dispatch" :pedantic "calls left to run-time dispatch in the frames the signatures compile" context ->
+runtime_dispatches(context.repository, context.inferred)
+
+@rule ModuleRule "widened-return" :pedantic "methods whose inferred result a caller cannot compile against concretely" context ->
+widened_returns(context.repository, context.inferred)
+
 @rule ModuleRule "impure-anonymous-function" :default "anonymous functions that capture mutable state, rebind a capture, or were never compiled" context ->
 impure_anonymous_functions(context.mod)
 

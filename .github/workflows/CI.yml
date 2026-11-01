@@ -20,8 +20,9 @@ jobs:
         os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
-      # The jscpd tests run the real jscpd that mise.toml pins.
+      # The fatou and jscpd tests run the real tools mise.toml pins, from temp directories mise's shims cannot resolve.
       - uses: jdx/mise-action@v2
+      - run: mise bin-paths >> "$GITHUB_PATH"
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}

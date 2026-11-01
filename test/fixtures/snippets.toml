@@ -98,6 +98,14 @@ function second_copy(alpha::Int, beta::Int)::Int
 end
 '''
 
+[fatou]
+source = '''
+function unused_local(value::Integer)::Integer
+    unused = value + 1
+    return value
+end
+'''
+
 [annotation]
 source = '''
 untyped(value) = value

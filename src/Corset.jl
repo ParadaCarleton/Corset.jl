@@ -17,6 +17,7 @@ export Repository,
     undefined_names
 
 include("ratchet.jl")
+include("membership.jl")
 include("entries.jl")
 include("rules.jl")
 include("external_tools.jl")

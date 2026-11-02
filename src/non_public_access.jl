@@ -5,6 +5,7 @@ const MODULE_USES = ExplicitImports.filter_to_module
 const QUALIFIED_USE = ExplicitImports.process_qualified_row
 # lint: non-public-access-end
 using .Entries: defined_methods
+using .Membership: Package
 
 """
     non_public_accesses(mod, file = entry_file(mod))
@@ -48,7 +49,7 @@ end
 function entry_file(mod::Module)::String
     package_file = pathof(mod)
     if isnothing(package_file)
-        return only(filter(isfile, unique(string(method.file) for method in defined_methods(mod))))
+        return only(filter(isfile, unique(string(method.file) for method in defined_methods(Package(mod)))))
     end
     return package_file
 end

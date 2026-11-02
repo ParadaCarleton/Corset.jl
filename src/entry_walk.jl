@@ -1,24 +1,24 @@
-# The frames an entry point compiles, found by walking optimized IR along `:invoke` edges.
-# `inferred_methods` filters them for the rules, which read the same IR (`runtime_dispatches`).
+# The frames an entry point compiles, found by walking optimized IR along `:invoke` edges and the
+# callees inlined into it. The rules read the package's frames (`runtime_dispatches`).
 
 """
-    mentions_module(signature, target, depth)
+    mentions_module(signature, package, depth)
 
-Whether `signature` names a type defined in `target` anywhere in its parameters.
+Whether `signature` names a type of `package` (`belongs`) anywhere in its parameters.
 """
-function mentions_module(signature::Any, target::Module, depth::Integer)::Bool
+function mentions_module(signature::Any, package::Package, depth::Integer)::Bool
     if depth > 6
         return false
     elseif signature isa UnionAll
-        return mentions_module(signature.body, target, depth + 1)
+        return mentions_module(signature.body, package, depth + 1)
     elseif signature isa Union
-        return mentions_module(signature.a, target, depth + 1) ||
-            mentions_module(signature.b, target, depth + 1)
+        return mentions_module(signature.a, package, depth + 1) ||
+            mentions_module(signature.b, package, depth + 1)
     elseif !(signature isa DataType)
         return false
     end
-    return parentmodule(signature) === target ||
-        any(mentions_module.(collect(signature.parameters), (target,), depth + 1))
+    return belongs(parentmodule(signature), package) ||
+        any(mentions_module.(collect(signature.parameters), (package,), depth + 1))
 end
 
 """
@@ -31,46 +31,66 @@ invoked_instance(callee::Core.CodeInstance)::Union{Nothing, Core.MethodInstance}
 invoked_instance(::Any)::Nothing = nothing
 
 """
-    frame_callees(ir, target)
+    frame_callees(ir, package)
 
-The signatures `ir`, an optimized method body, calls through `:invoke` edges and a walk of `target`
-follows: callees defined in `target` or whose signature names one of its types (JET's `target_modules`
-scope).
+The method instances `ir`, an optimized method body, calls that a walk of `package` follows: the
+`:invoke` edges defined in `package` or with a signature naming one of its types (JET's
+`target_modules` scope), and the inlined callees defined in `package`. Another module's inlined
+callee needs no frame: its own calls are already in `ir`.
 """
-function frame_callees(ir::COMPILER.IRCode, target::Module)::Vector{Type}
+function frame_callees(ir::COMPILER.IRCode, package::Package)::Vector{Core.MethodInstance} # lint: unmarked-mutation  copies callees out of `ir` and writes nothing
     expressions = [statement for statement in ir.stmts.stmt if statement isa Expr]
     invoked = [invoked_instance(first(statement.args)) for statement in expressions if statement.head in (:invoke, :invoke_modify)]
-    return Type[callee.specTypes for callee in filter(Base.Fix2(followed, target), invoked)]
+    inlined = reduce(vcat, inlined_instances.(ir.debuginfo.edges); init = Core.MethodInstance[])
+    return Core.MethodInstance[filter(Base.Fix2(followed, package), invoked); filter(Base.Fix2(defined_in, package), inlined)]
 end
 
-"""Whether a walk of `target` follows `callee`, an `invoked_instance`: a method of `target`, or one whose signature names a type of it."""
-followed(callee::Any, target::Module)::Bool = callee isa Core.MethodInstance && callee.def isa Method &&
-    (callee.def.module === target || mentions_module(callee.specTypes, target, 0))
+"""Whether `callee`, a method instance, is of a method `package` defines."""
+defined_in(callee::Core.MethodInstance, package::Package)::Bool = callee.def isa Method && belongs(callee.def.module, package)
+
+"""The method instances inlined at debug info `debuginfo`: its own `def`, and those inlined below it."""
+inlined_instances(debuginfo::Core.DebugInfo)::Vector{Core.MethodInstance} = Core.MethodInstance[
+    own_instance(debuginfo.def); reduce(vcat, [inlined_instances(edge) for edge in debuginfo.edges]; init = Core.MethodInstance[])
+]
+
+"""The method instance a debug info `def` names, as a vector of one; none for a method or a symbol."""
+own_instance(def::Core.MethodInstance)::Vector{Core.MethodInstance} = [def]
+own_instance(::Any)::Vector{Core.MethodInstance} = Core.MethodInstance[]
+
+"""Whether a walk of `package` follows `callee`, an `invoked_instance`: a method of `package`, or one whose signature names a type of it."""
+followed(callee::Any, package::Package)::Bool = callee isa Core.MethodInstance && callee.def isa Method &&
+    (defined_in(callee, package) || mentions_module(callee.specTypes, package, 0))
 
 """
     entry_frames(seeds, target)
 
-The `typed_frames` of every signature reachable from `seeds` (entry-point call signatures such as
-`Tuple{typeof(f), Int}`) along `frame_callees` edges, the seeds included; empty where inference yields
-none. Pass them to `inferred_methods`, which then infers nothing again.
+The `Inferred` frame of every method instance of `target`'s package (`belongs`) reachable from `seeds`
+(entry-point call signatures such as `Tuple{typeof(f), Int}`) along `frame_callees` edges, the seeds
+included. Each instance is inferred once; frames of other modules are walked through and dropped.
 """
-function entry_frames(seeds::AbstractVector{<:Type}, target::Module)::Dict{Type, Vector{Inferred}}
-    frames = Dict{Type, Vector{Inferred}}()
-    frontier = unique(Type[seeds...])
-    while !isempty(frontier)
-        for signature in frontier
-            frames[signature] = typed_frames(signature)
-        end
-        frontier = new_callees(frames, frontier, target)
-    end
-    return frames
-end
-
-"""The signatures the `frontier` frames call that `frames` does not hold yet."""
-new_callees(frames::AbstractDict{Type}, frontier::AbstractVector{<:Type}, target::Module)::Vector{Type} = unique(
-    filter(!Base.Fix1(haskey, frames), reduce(vcat, signature_callees.((frames,), frontier, (target,)); init = Type[])),
+entry_frames(seeds::AbstractVector{<:Type}, target::Module)::Vector{Inferred} = walk_frames(
+    Package(target),
+    unique(reduce(vcat, selected_instances.(seeds); init = Core.MethodInstance[])),
+    Set{Core.MethodInstance}(),
+    Inferred[],
 )
 
-"""The signatures the `frames` of `signature` call (`frame_callees`)."""
-signature_callees(frames::AbstractDict{Type}, signature::Type, target::Module)::Vector{Type} =
-    reduce(vcat, frame_callees.(getfield.(frames[signature], :ir), (target,)); init = Type[])
+"""
+The `kept` frames, then the frames of `package` that the walk from `frontier` reaches, skipping the
+method instances in `seen`.
+"""
+function walk_frames(
+        package::Package,
+        frontier::AbstractVector{Core.MethodInstance},
+        seen::AbstractSet{Core.MethodInstance},
+        kept::AbstractVector{Inferred},
+    )::Vector{Inferred}
+    if isempty(frontier)
+        return kept
+    end
+    frames = Inferred[frame for frame in typed_frame.(frontier) if !isnothing(frame)]
+    reached = union(seen, frontier)
+    callees = unique(reduce(vcat, frame_callees.(getfield.(frames, :ir), (package,)); init = Core.MethodInstance[]))
+    owned = frames[belongs.(getfield.(getfield.(frames, :method), :module), (package,))]
+    return walk_frames(package, filter(!in(reached), callees), reached, vcat(kept, owned))
+end

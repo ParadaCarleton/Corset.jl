@@ -6,7 +6,7 @@ using TOML: TOML
 using Corset: Corset
 using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, abstract_locals,
     c_type_sites, impure_anonymous_functions, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
-    inferred_methods, jscpd_sites, located_source, misplaced_imports, missing_annotations, module_structs, non_public_accesses, nothing_returns,
+    jscpd_sites, located_source, misplaced_imports, missing_annotations, module_structs, non_public_accesses, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
     where_return_sites, entry_frames, frame_callees, mentions_module, invoked_instance, logging_call, runtime_dispatches,
@@ -87,7 +87,7 @@ end
 """Every reflection the module rules make on `mod`."""
 function reflect_all(mod::Module)::Nothing
     structs = module_structs(mod)
-    Corset.defined_methods(mod)
+    Corset.defined_methods(Corset.Package(mod))
     abstract_fields.(structs)
     repeated_prefix.(structs)
     impure_anonymous_functions(mod)
@@ -148,7 +148,7 @@ end
     root = mktempdir()
     fixture = load_fixture(root)
     repository = Repository(root)
-    inferred = inferred_methods(fixture, concrete_signatures(fixture))
+    inferred = entry_frames(concrete_signatures(fixture), fixture)
 
     @testset "hidden-input: a read of a mutable or non-constant global" begin
         @test unique(site_keys(hidden_inputs(repository, fixture))) == ["counter"]
@@ -694,18 +694,19 @@ end
 @testset "defined_methods finds methods added to another module's function" begin
     external = Module(:ExternalExtension)
     Base.eval(external, :(Base.length(::Type{Val{:corset_probe}})::Int = 1))
-    defined = Corset.defined_methods(external)
+    defined = Corset.defined_methods(Corset.Package(external))
     @test any(method -> method.name === :length && method.module === external, defined)
 end
 
 @testset "closure reflection follows nested closures and macro-made code" begin
     closure_chain = Module(:ClosureChain)
     Base.include(closure_chain, joinpath(FIXTURES, "closure_module.txt"))
-    defined = Corset.defined_methods(closure_chain)
-    namers = Corset.closure_namers(closure_chain, defined)
+    package = Corset.Package(closure_chain)
+    defined = Corset.defined_methods(package)
+    namers = Corset.closure_namers(package, defined)
     @testset "a nested closure is defined by the function that holds the outermost one" begin
         @test Set(Corset.closure_definer(name, namers).name for name in keys(namers)) == Set([:nested, :recursive, :twice])
-        @test length(Corset.live_closures(closure_chain, defined)) == length(namers)
+        @test length(Corset.live_closures(package, defined)) == length(namers)
     end
     @testset "code from a macro sits at the method's line, and a bare argument slot too" begin
         method = only(methods(closure_chain.uses_macro))
@@ -715,7 +716,7 @@ end
     end
     @testset "a builtin has no lowered code and returns no argument's call" begin
         @test isnothing(Corset.lowered(first(methods(Core.tuple))))
-        @test isempty(Corset.created_closures(first(methods(Core.tuple)), Corset))
+        @test isempty(Corset.created_closures(first(methods(Core.tuple)), Corset.Package(Corset)))
         @test !Corset.returns_argument_call(first(methods(Core.tuple)))
     end
 end
@@ -786,7 +787,7 @@ end
         Tuple{Type{Probe.Buffer}, Vector{Float32}, Int},
     ]
     repository = Repository(@__DIR__)
-    inferred = inferred_methods(Probe, signatures)
+    inferred = entry_frames(signatures, Probe)
     @testset "a generic method or constructor is typed at the signatures given, and a catch variable is skipped" begin
         @test isempty(abstract_locals(repository, inferred))
     end
@@ -803,12 +804,12 @@ end
     @testset "a method returning a call to its argument gets no verdict from what its callers passed" begin
         @test !any(contains("passing"), [site.key for site in unmarked_effects(repository, inferred)])
     end
-    @testset "inferred_methods depends on its signatures alone, not on what ran before" begin
+    @testset "entry_frames depends on its seeds alone, not on what ran before" begin
         signatures = Type[Tuple{typeof(Probe.generic), Vector{Float32}}]
-        cold = inferred_methods(Probe, signatures)
+        cold = entry_frames(signatures, Probe)
         Probe.generic(Float64[1, 2])
         Probe.generic(Int32[1, 2])
-        warm = inferred_methods(Probe, signatures)
+        warm = entry_frames(signatures, Probe)
         @test [item.method for item in cold] == [item.method for item in warm]
         @test [item.method.name for item in warm] == [:generic]
         @test [item.code.slottypes for item in cold] == [item.code.slottypes for item in warm]
@@ -840,11 +841,11 @@ end
         Tuple{typeof(Mutation.guarded), ReentrantLock}, Tuple{typeof(Mutation.zero_first), vector},
         Tuple{typeof(Mutation.negated), Mutation.Box}, Tuple{typeof(Mutation.last_zeroed), vector, vector},
     ]
-    inferred = inferred_methods(Mutation, entry_frames(seeds, Mutation))
+    inferred = entry_frames(seeds, Mutation)
     sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred)
     details = Dict(last(split(site.key)) => site.detail for site in sites)
     @testset "a write through an argument, an alias, a field, an element or a callee is reported" begin
-        for name in ("direct", "aliased", "setprop", "viafield", "outer", "far_helper", "far_outer", "viaindex", "stashed")
+        for name in ("direct", "aliased", "setprop", "viafield", "helper", "outer", "far_helper", "far_outer", "viaindex", "stashed")
             @test startswith(get(details, name, ""), "writes argument")
         end
         @test details["direct"] == "writes argument `v` but its name has no `!`"
@@ -923,13 +924,13 @@ sites_named(sites::AbstractVector{Site}, name::AbstractString)::Vector{Site} = [
         Tuple{typeof(Dispatch.splatted), untyped},
     ]
     repository = Repository(@__DIR__)
-    inferred = inferred_methods(Dispatch, entry_frames(seeds, Dispatch))
+    inferred = entry_frames(seeds, Dispatch)
     dispatches = runtime_dispatches(repository, inferred)
     widened = Dict(last(split(site.key)) => site.detail for site in widened_returns(repository, inferred))
     @testset "a noinline dynamic callee reached only through an :invoke edge is reported" begin
         control = only(sites_named(dispatches, "dispatching_control"))
         @test control.line == 2 && occursin("dispatches", control.detail) && occursin("+", control.detail)
-        @test isempty(sites_named(runtime_dispatches(repository, inferred_methods(Dispatch, seeds)), "dispatching_control"))
+        @test isempty(sites_named(runtime_dispatches(repository, reduce(vcat, Corset.typed_frames.(seeds))), "dispatching_control"))
         @test widened["invoking_control"] == "returns Any"
     end
     @testset "a statement's opt-out covers its line, a method's opt-out its whole body" begin
@@ -974,7 +975,7 @@ function dispatch_statement(inferred::AbstractVector{Corset.Inferred}, caller::F
 end
 
 @testset "call_candidates lists a runtime dispatch's methods within its budget" begin
-    inferred = inferred_methods(Candidates, entry_frames(candidate_seeds(), Candidates))
+    inferred = entry_frames(candidate_seeds(), Candidates)
     search = Corset.CandidateSearch(inferred)
     item, statement = dispatch_statement(inferred, Candidates.inspect)
     @testset "four methods within the default budget are all inferred, each once" begin
@@ -1005,7 +1006,7 @@ end
 end
 
 @testset "unmarked-mutation resolves a runtime dispatch through its candidates" begin
-    inferred = inferred_methods(Candidates, entry_frames(candidate_seeds(), Candidates))
+    inferred = entry_frames(candidate_seeds(), Candidates)
     repository = Repository(@__DIR__)
     "The details of `unmarked_mutations` at `limit`, by function name."
     details(limit::Integer)::Dict{String, String} = Dict(
@@ -1054,7 +1055,7 @@ end
         Tuple{typeof(Floats.grown), narrow, untyped}, Tuple{typeof(Floats.kept), narrow, untyped},
         Tuple{typeof(Floats.signed_only), narrow, Vector{Signed}},
     ]
-    inferred = inferred_methods(Floats, entry_frames(seeds, Floats))
+    inferred = entry_frames(seeds, Floats)
     repository = Repository(@__DIR__)
     "The `float_widenings` sites at `limit`, by function name."
     widenings(limit::Integer)::Dict{String, Site} = Dict(
@@ -1105,56 +1106,51 @@ end
     end
 end
 
-@testset "entry_frames walks :invoke edges from the seeds and reads nothing the session ran" begin
+@testset "entry_frames walks :invoke and inlined edges from the seeds and reads nothing the session ran" begin
     outer_call = Tuple{typeof(Probe.outer), Probe.Marker}
     inner_call = Tuple{typeof(Probe.inner), Probe.Marker}
+    probe = Corset.Package(Probe)
+    "The signatures `frames` were inferred over."
+    frame_signatures(frames::AbstractVector{Corset.Inferred})::Vector{Type} = Type[frame.code.parent.specTypes for frame in frames]
     @testset "a noinline callee is followed, the seed is kept, and the answer does not depend on what ran" begin
-        cold = collect(keys(entry_frames(Type[outer_call], Probe)))
+        cold = frame_signatures(entry_frames(Type[outer_call], Probe))
         Probe.outer(Probe.Marker())
-        @test Set(keys(entry_frames(Type[outer_call], Probe))) == Set(cold)
-        @test outer_call in cold && inner_call in cold
+        @test frame_signatures(entry_frames(Type[outer_call], Probe)) == cold == Type[outer_call, inner_call]
     end
-    @testset "entry_frames holds each signature's frames, empty where inference yields none" begin
-        nothing_typed = Tuple{typeof(Probe.inner), String}
-        frames = entry_frames(Type[outer_call, nothing_typed], Probe)
-        @test Set(keys(frames)) == Set([outer_call, inner_call, nothing_typed])
-        @test length(frames[outer_call]) == 1 && isempty(frames[nothing_typed])
-    end
-    @testset "inferred_methods reads the walk's frames and matches inferring the signatures anew" begin
-        frames = entry_frames(Type[outer_call], Probe)
-        walked = inferred_methods(Probe, frames)
-        fresh = inferred_methods(Probe, collect(keys(frames)))
-        @test Set(item.method for item in walked) == Set(item.method for item in fresh) == Set([only(methods(Probe.outer)), only(methods(Probe.inner))])
-        @test all(item -> item.ir isa Base.Compiler.IRCode && !isempty(item.code.slottypes), walked)
+    @testset "a seed inference cannot type has no frame, and a shared method instance is inferred once" begin
+        frames = entry_frames(Type[outer_call, Tuple{typeof(Probe.inner), String}, inner_call], Probe)
+        @test frame_signatures(frames) == Type[outer_call, inner_call]
+        @test all(item -> item.ir isa Base.Compiler.IRCode && !isempty(item.code.slottypes), frames)
     end
     @testset "a seed with no callee in the module is its own walk" begin
-        @test collect(keys(entry_frames(Type[inner_call], Probe))) == Type[inner_call]
+        @test frame_signatures(entry_frames(Type[inner_call], Probe)) == Type[inner_call]
     end
     @testset "a method inference cannot type, a generator that throws, has no frame" begin
         @test isempty(Corset.typed_frames(Tuple{typeof(Probe.failing_generator), Probe.Marker}))
     end
     @testset "frame_callees keeps the callees naming the target and drops the others" begin
         ir = only(Corset.typed_frames(outer_call)).ir
-        @test frame_callees(ir, Probe) == Type[inner_call]
-        @test isempty(frame_callees(ir, Base))
+        @test [callee.specTypes for callee in frame_callees(ir, probe)] == Type[inner_call]
+        @test isempty(frame_callees(ir, Corset.Package(Corset)))
     end
     @testset "mentions_module reads unions, where-types and nested parameters, to a depth limit" begin
-        @test mentions_module(Probe.Marker, Probe, 0)
-        @test mentions_module(Union{Probe.Marker, Int}, Probe, 0)
-        @test mentions_module(Union{Int, Probe.Marker}, Probe, 0)
-        @test mentions_module(Probe.Wrapped{Probe.Marker}, Probe, 0)
-        @test mentions_module(Tuple{Vector{Probe.Marker}}, Probe, 0)
-        @test mentions_module(Probe.Wrapped{M} where {M}, Probe, 0)
-        @test !mentions_module(Vector{Int}, Probe, 0)
-        @test !mentions_module(1, Probe, 0)
-        @test !mentions_module(Union{Int, Float32}, Probe, 0)
-        @test !mentions_module(Probe.Marker, Probe, 7)
+        @test mentions_module(Probe.Marker, probe, 0)
+        @test mentions_module(Union{Probe.Marker, Int}, probe, 0)
+        @test mentions_module(Union{Int, Probe.Marker}, probe, 0)
+        @test mentions_module(Probe.Wrapped{Probe.Marker}, probe, 0)
+        @test mentions_module(Tuple{Vector{Probe.Marker}}, probe, 0)
+        @test mentions_module(Probe.Wrapped{M} where {M}, probe, 0)
+        @test !mentions_module(Vector{Int}, probe, 0)
+        @test !mentions_module(1, probe, 0)
+        @test !mentions_module(Union{Int, Float32}, probe, 0)
+        @test !mentions_module(Probe.Marker, probe, 7)
     end
     @testset "invoked_instance and logging_call read each statement shape" begin
         instance = only(Base.specializations(only(methods(Probe.inner))))
         @test invoked_instance(instance) === instance
         @test invoked_instance(instance.cache) === instance
         @test invoked_instance("neither") === nothing
+        @test Corset.own_instance(instance) == [instance] && isempty(Corset.own_instance(:toplevel))
         @test logging_call(Expr(:call, GlobalRef(Base.CoreLogging, :handle_message)))
         @test logging_call(Expr(:call, Base.CoreLogging.handle_message))
         @test !logging_call(Expr(:call, :plain))
@@ -1168,6 +1164,7 @@ end
 end
 
 include("entries.jl")
+include("membership.jl")
 include("cli.jl")
 
 @testset "undefined_names: a name nothing defines is reported, and so is an unlowered testset" begin

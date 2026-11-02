@@ -72,7 +72,7 @@ end
 function candidate_frame(search::CandidateSearch, match::Core.MethodMatch)::Union{Nothing, Inferred} # lint: unmarked-mutation  memoizes frames in the search
     instance = COMPILER.specialize_method(match)
     if !haskey(search.frames, instance)
-        search.frames[instance] = typed_frame(COMPILER.NativeInterpreter(), match)
+        search.frames[instance] = typed_frame(instance)
     end
     return search.frames[instance]
 end

@@ -134,10 +134,10 @@ end
     @test first.(sources) == ["compiled", "declared"]
     @test Tuple{typeof(mod.bump), Int} in last(first(sources))
     frames = Corset.seeded_frames(sources, mod)
-    @test haskey(frames, Tuple{typeof(mod.bump), Int})
+    @test Tuple{typeof(mod.bump), Int} in [frame.code.parent.specTypes for frame in frames]
     compiled = length(last(first(sources)))
     @test Corset.seed_summary(sources, frames, 3 * 2^20 + 1) ==
-        "entry signatures: compiled $compiled, declared 0; $compiled seeds, $(length(frames)) signatures inferred; peak RSS 3 MiB"
+        "entry signatures: compiled $compiled, declared 0; $compiled seeds, $(length(frames)) frames kept; peak RSS 3 MiB"
     @test sprint(Corset.warn_tests!, [:compiled, :tests]) ==
         "warning: --entries tests runs the package's whole test suite, and every process it starts, beside this one\n"
     @test isempty(sprint(Corset.warn_tests!, [:compiled, :declared]))
@@ -265,11 +265,17 @@ end
     end
 
     @testset "module rules run on a loaded package" begin
+        # Corset's baseline allows the workload's finding; check without it.
+        config = with_overrides(load_config(pkgdir(Corset)), false, ["hidden-input" => :deny], nothing)
+        unbaselined = Corset.Config(
+            config.directories, nothing, config.one_letter_exempt, config.skipped_directories, config.pedantic,
+            config.levels, config.candidate_limit, config.entry_points, config.file_line_limit,
+        )
         findings, skipped = run_rules(
-            with_overrides(load_config(pkgdir(Corset)), false, ["hidden-input" => :deny], nothing),
+            unbaselined,
             pkgdir(Corset);
             mod = Corset.WorkloadPackage,
-            signatures = concrete_signatures(Corset.WorkloadPackage),
+            frames = entry_frames(concrete_signatures(Corset.WorkloadPackage), Corset.WorkloadPackage),
         )
         @test ("hidden-input", :deny) in
             [(finding.rule, finding.level) for finding in findings]
@@ -355,7 +361,7 @@ end
     write(joinpath(root, "src", "smells.jl"), smells)
     write(joinpath(root, "Project.toml"), "name = \"Demo\"\n")
     config = with_overrides(load_config(root), true, Pair{String, Symbol}[], nothing)
-    findings, skipped = run_rules(config, root; mod = fixture, signatures = concrete_signatures(fixture))
+    findings, skipped = run_rules(config, root; mod = fixture, frames = entry_frames(concrete_signatures(fixture), fixture))
     @test isempty(skipped)
     pedantic = [rule_name(rule) for rule in RULES if rule_group(rule) === :pedantic]
     @test setdiff(pedantic, Set(finding.rule for finding in findings)) == String[]

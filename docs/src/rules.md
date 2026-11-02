@@ -123,7 +123,7 @@ non-function `isbits` values, `String`s, `Symbol`s, and immutable structs, tuple
 ### `abstract-field`: `abstract_fields(type)`, `repeated-prefix`: `repeated_prefix(type)`
 
 Both take a struct type. Apply them to every struct a module defines with `module_structs(mod)` and
-place each site with `struct_site(name, struct_locations(Corset.Source.(files)))`.
+place each site with `struct_site(T, struct_locations(Corset.Source.(files)))`.
 
 - `abstract_fields` finds fields declared with an abstract type, or with a concrete container of one:
   `Vector{Any}`, `Base.RefValue{Any}` and `Dict{Tuple, Any}` are concrete, but every read from them is

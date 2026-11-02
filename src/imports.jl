@@ -43,15 +43,17 @@ struct ImportStatement
 end
 
 """
-A parsed Julia file: the names it uses outside imports, its import statements, and the paths it
-includes (`""` for an include no literal names), each with the `module` block it sits in
-(`include_blocks`, as `ImportStatement`'s `block`). An `editable` file is one the rule checks. A file
-that `opens_module` holds only `module` blocks at its top level, so its names are another module's.
+A parsed Julia file: the names it uses outside imports, the names its relative imports take from
+other modules of the package (`relayed_names`), its import statements, and the paths it includes
+(`""` for an include no literal names), each with the `module` block it sits in (`include_blocks`, as
+`ImportStatement`'s `block`). An `editable` file is one the rule checks. A file that `opens_module`
+holds only `module` blocks at its top level, so its names are another module's.
 """
 struct ImportFile
     path::String
     text::String
     used::Set{String}
+    relayed::Set{String}
     statements::Vector{ImportStatement}
     includes::Vector{String}
     include_blocks::Vector{Int}
@@ -145,11 +147,43 @@ function item_name(node::SYNTAX.SyntaxNode)::String
     if SYNTAX.kind(node) === AS_KIND
         return String(SYNTAX.sourcetext(last(SYNTAX.children(node))))
     end
+    return path_name(node)
+end
+
+"""The last part of parsed import path `node` (`f` of `..Parent.f`, `@m` of `A.@m`)."""
+function path_name(node::SYNTAX.SyntaxNode)::String
     tail = last(SYNTAX.children(node))
     if SYNTAX.kind(tail) === MACRO_NAME_KIND
         return "@" * SYNTAX.sourcetext(only(SYNTAX.children(tail)))
     end
     return String(SYNTAX.sourcetext(tail))
+end
+
+"""The import path of parsed import item `node`: the path before `as`, or `node` itself."""
+function item_path(node::SYNTAX.SyntaxNode)::SYNTAX.SyntaxNode
+    if SYNTAX.kind(node) === AS_KIND
+        return first(SYNTAX.children(node))
+    end
+    return node
+end
+
+"""Whether parsed import path `node` starts with a `.`, naming a module relative to its own (`..Parent`, `.Sub`)."""
+relative_path(node::SYNTAX.SyntaxNode)::Bool = SYNTAX.kind(first(SYNTAX.children(node))) === FIELD_KIND
+
+"""
+The names `using` or `import` `node` takes from a module of its own package by a relative path:
+`f` of `using ..Parent: f as g` or of `import .Sub.f`. The module that supplies each needs its own import of it.
+"""
+function relayed_names(node::SYNTAX.SyntaxNode)::Vector{String}
+    children = SYNTAX.children(node)
+    if length(children) == 1 && SYNTAX.kind(only(children)) === COLON_KIND
+        parts = SYNTAX.children(only(children))
+        if relative_path(first(parts))
+            return path_name.(item_path.(parts[2:end]))
+        end
+        return String[]
+    end
+    return path_name.(filter(relative_path, item_path.(children)))
 end
 
 """Whether `skipped` opts out any of `lines`."""
@@ -239,7 +273,8 @@ function import_file(source::Source, editable::Bool)::ImportFile
     statements = ImportStatement[import_statement.(nodes, text, (lines,), module_block.(nodes, (modules,)), (skipped,))...]
     includes = include_nodes(tree)
     return ImportFile(
-        normpath(path), text, Set(name_tokens(tree)), statements, include_path.(includes, dirname(path)),
+        normpath(path), text, Set(name_tokens(tree)), Set{String}(reduce(vcat, relayed_names.(nodes); init = String[])),
+        statements, include_path.(includes, dirname(path)),
         module_block.(includes, (modules,)), editable, opens_module(tree),
     )
 end
@@ -259,7 +294,7 @@ function unit_files(path::AbstractString, known::AbstractDict{String, ImportFile
     if path in seen
         return UnitFile[]
     elseif !haskey(known, path) && (path == "" || !isfile(path))
-        return [UnitFile(ImportFile("", "", Set{String}(), ImportStatement[], String[], Int[], false, false), scope)]
+        return [UnitFile(ImportFile("", "", Set{String}(), Set{String}(), ImportStatement[], String[], Int[], false, false), scope)]
     end
     file::ImportFile = if haskey(known, path)
         known[path]
@@ -281,27 +316,34 @@ split_scope(unit::AbstractVector{UnitFile})::Bool = length(unique([(entry.file.p
 The moves in one module's `unit`; none when it holds an include the rule cannot follow, or a file in
 two scopes. A bare `using M` anywhere in the unit may supply any name, so a file that uses a name
 without importing it is no target then. Files outside the checked directories (a vendored package's
-tests) bring their own imports, so they count as no user.
+tests) bring their own imports, so they count as no user. A name a relative import in the unit takes
+from another of its modules (`using ..Parent: f`) stays wherever the unit imports it.
 """
 function unit_moves(unit::AbstractVector{UnitFile})::Vector{ImportMove}
     if any(entry -> entry.file.path == "", unit) || split_scope(unit)
         return ImportMove[]
     end
     supplied = any(has_bare_using, getfield.(unit, :file))
+    relayed = Set{String}(name for entry in unit for name in entry.file.relayed)
     editable = filter(entry -> entry.file.editable, unit)
-    return reduce(vcat, file_moves.((unit,), supplied, editable); init = ImportMove[])
+    return reduce(vcat, file_moves.((unit,), supplied, (relayed,), editable); init = ImportMove[])
 end
 
-"""The moves of the unpinned statements of `entry`, one of `unit`; `supplied` when a bare `using` is in the unit."""
-file_moves(unit::AbstractVector{UnitFile}, supplied::Bool, entry::UnitFile)::Vector{ImportMove} = reduce(
-    vcat, statement_moves.((unit,), supplied, (entry,), filter(statement -> !statement.pinned, entry.file.statements)); init = ImportMove[],
+"""The moves of the unpinned statements of `entry`, one of `unit`; `supplied` when a bare `using` is in the unit, `relayed` the unit's `relayed_names`."""
+file_moves(unit::AbstractVector{UnitFile}, supplied::Bool, relayed::AbstractSet{String}, entry::UnitFile)::Vector{ImportMove} = reduce(
+    vcat, statement_moves.((unit,), supplied, (relayed,), (entry,), filter(statement -> !statement.pinned, entry.file.statements)); init = ImportMove[],
 )
 
-"""The moves of the items of `statement` in `entry` that its file does not use."""
-function statement_moves(unit::AbstractVector{UnitFile}, supplied::Bool, entry::UnitFile, statement::ImportStatement)::Vector{ImportMove}
-    items = filter(Base.Fix1(placeable, entry.file), statement.items)
+"""The moves of the items of `statement` in `entry` that its file does not use and no relative import in the unit takes (`relayed`)."""
+function statement_moves(
+        unit::AbstractVector{UnitFile}, supplied::Bool, relayed::AbstractSet{String}, entry::UnitFile, statement::ImportStatement,
+    )::Vector{ImportMove}
+    items = filter(!Base.Fix1(names_item, relayed), filter(Base.Fix1(placeable, entry.file), statement.items))
     return ImportMove.(entry.file.path, (statement,), items, move_targets.((unit,), supplied, (entry,), (statement,), items))
 end
+
+"""Whether `names` holds the name `item` binds."""
+names_item(names::AbstractSet{String}, item::ImportItem)::Bool = item.name in names
 
 """Whether `item` is a name the rule places and `file` does not use."""
 placeable(file::ImportFile, item::ImportItem)::Bool = occursin(PLACED_NAME, item.name) && !(item.name in file.used)

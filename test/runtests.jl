@@ -373,19 +373,32 @@ end
     end
 
     @testset "nothing-return: a declared Union{Nothing, …} result" begin
-        @test site_keys(found_in(nothing_returns, "nothing-return")) == ["maybe"]
+        @test site_keys(found_in(nothing_returns, "nothing-return")) == ["source.jl maybe"]
     end
 
     @testset "range-guard: floatmin, floatmax, exp's range edge, isfinite of exp" begin
-        @test site_keys(found_in(range_guards, "range-guard")) == ["guard", "edge", "finite"]
+        @test site_keys(found_in(range_guards, "range-guard")) == ["source.jl guard", "source.jl edge", "source.jl finite"]
     end
 
     @testset "repeated-statement: a statement repeated in one block" begin
         sites = found_in(repeated_statements, "repeated-statement")
         @test length(sites) == 1
-        @test startswith(only(sites).key, "twice: ")
-        @test length(only(sites).key) > length("twice: ")
+        @test startswith(only(sites).key, "source.jl twice: ")
+        @test length(only(sites).key) > length("source.jl twice: ")
         @test only(sites).line == 3
+    end
+
+    @testset "nothing-return, range-guard, repeated-statement: same-named functions in two files keep apart" begin
+        text = SNIPPETS["nothing-return"]["source"] * "\n" * SNIPPETS["range-guard"]["source"] * "\n" * SNIPPETS["repeated-statement"]["source"]
+        root = write_tree(mktempdir(), ["src/a.jl" => text, "src/b/a.jl" => text])
+        repository = Repository(root)
+        for finder in (nothing_returns, range_guards, repeated_statements)
+            first_keys, second_keys = (site_keys(finder(Source(repository, joinpath(root, file)))) for file in ("src/a.jl", "src/b/a.jl"))
+            @test !isempty(first_keys)
+            @test all(startswith("src/a.jl "), first_keys)
+            @test all(startswith("src/b/a.jl "), second_keys)
+            @test isdisjoint(first_keys, second_keys)
+        end
     end
 
     @testset "return-type: Core.Compiler.return_type" begin
@@ -658,6 +671,17 @@ end
         @test siblings == Dict("main.jl" => "module M\ninclude(\"x.jl\")\ninclude(\"y.jl\")\nend\n", "x.jl" => "", "y.jl" => "using A: a\n$child")
         twice = ["main.jl" => "include(\"c.jl\")\nmodule M\ninclude(\"c.jl\")\nend\n", "c.jl" => "using A: a\n"]
         @test isempty(misplaced_imports(Repository(write_tree(mktempdir(), twice)), (".",)))
+    end
+    @testset "a name a relative import takes from another module of the package keeps that module's import" begin
+        parent = "module Parent\nusing A: f\ninclude(\"sub.jl\")\nend\n"
+        sub = "module Sub\nusing ..Parent: f\ng() = f()\nend\n"
+        @test placed(["parent.jl" => parent, "sub.jl" => sub]) == Dict("parent.jl" => parent, "sub.jl" => sub)
+        nested = "module Parent\nusing A: f, b\nmodule Sub\nimport ..Parent: f as h\ng() = h()\nend\nend\n"
+        @test placed(["nested.jl" => nested])["nested.jl"] == "module Parent\nusing A: f\nmodule Sub\nimport ..Parent: f as h\ng() = h()\nend\nend\n"
+        child = "module Sub\nusing A: k\nend\n"
+        main = "module P\ninclude(\"child.jl\")\nimport .Sub.k\nq() = k\nend\n"
+        @test placed(["main.jl" => main, "child.jl" => child]) == Dict("main.jl" => main, "child.jl" => child)
+        @test Corset.relayed_names(only(Corset.import_nodes(Corset.SYNTAX.parseall(Corset.SYNTAX.SyntaxNode, "using A: f")))) == String[]
     end
     @testset "a moved import lands after the file's last top-level import, outside its module blocks" begin
         inner = "module Inner\nusing B: b\nh() = b\nend\n"
@@ -961,6 +985,7 @@ end
         Tuple{typeof(Mutation.negated), Mutation.Box}, Tuple{typeof(Mutation.last_zeroed), vector, vector},
         Tuple{typeof(Mutation.viapointer), vector}, Tuple{typeof(Mutation.copied), Vector{String}},
         Tuple{typeof(Mutation.joined), Vector{String}, Vector{String}}, Tuple{typeof(Mutation.copied_into), Vector{String}, Vector{String}},
+        Tuple{typeof(Mutation.missing_paths), String, Vector{String}},
     ]
     inferred = entry_frames(seeds, Mutation)
     sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred)
@@ -1026,6 +1051,9 @@ end
         @test !haskey(details, "copied") && !haskey(details, "joined")
         @test details["copied_into"] == "argument `names` reaches a `ccall` and may be written"
         @test Corset.foreign_positions(Expr(:call, :pointer), 2) == [1, 2]
+    end
+    @testset "a logical-mask copy of the paths isdir reads writes none of them" begin
+        @test !haskey(details, "missing_paths")
     end
     @testset "Base.sort and Base.replace copy before they write" begin
         for signature in (Tuple{typeof(sort), vector}, Tuple{typeof(replace), vector, Pair{Int, Int}})

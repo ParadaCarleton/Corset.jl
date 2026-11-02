@@ -111,7 +111,7 @@ throws; one inside another listed one is dropped, so no file is read twice.
 """
 configured_directories(::AbstractString, ::Nothing)::Vector{String} = ["src"]
 
-function configured_directories(root::AbstractString, directories::AbstractVector{String})::Vector{String} # lint: unmarked-mutation  isdir's ccall reads each path
+function configured_directories(root::AbstractString, directories::AbstractVector{String})::Vector{String}
     absent = directories[.!isdir.(joinpath.(root, directories))]
     if !isempty(absent)
         throw(UsageError("[preferences.Corset] directories names $(join(repr.(absent), ", ")), missing under $root"))

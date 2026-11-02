@@ -179,14 +179,11 @@ struct OptOuts
 end
 
 """
-    opt_outs(path, rule)
     opt_outs(comments, rule)
 
-The lines that the `# lint:` comments of `path` (`opt_out_comments`), or `comments`, take out of `rule`:
-each comment's own line, and every line from a `-begin` to the `-end` that closes it.
+The lines that the `# lint:` `comments` of one file take out of `rule`: each comment's own line, and
+every line from a `-begin` to the `-end` that closes it.
 """
-opt_outs(path::AbstractString, rule::AbstractString)::OptOuts = opt_outs(opt_out_comments(path), rule)
-
 function opt_outs(comments::AbstractVector{OptOutComment}, rule::AbstractString)::OptOuts
     named = [comment for comment in comments if comment.rule == rule]
     spans = span_lines.((named,), filter(is_begin, named))
@@ -302,10 +299,17 @@ The sites of `sites` that no `# lint:` comment naming `rule` opts out, and how m
 function unopted(
         sites::AbstractVector{S}, rule::AbstractString, comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
     )::Tuple{Vector{Site}, Int} where {S <: Site}
+    kept = sites[unopted_mask(sites, rule, comments)]
+    return kept, length(sites) - length(kept)
+end
+
+"""Whether no `# lint:` comment naming `rule` opts out each of `sites`; `comments` as `unopted` takes it."""
+function unopted_mask(
+        sites::AbstractVector{S}, rule::AbstractString, comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
+    )::BitVector where {S <: Site}
     files = unique(String[site.file for site in sites])
     skips = Dict{String, OptOuts}(files .=> opt_outs.(file_comments.((comments,), files), rule))
-    kept = filter(Base.Fix1(kept_by, skips), sites)
-    return kept, length(sites) - length(kept)
+    return BitVector(kept_by.((skips,), sites))
 end
 
 """Whether no opt-out of `skips` (each file's `OptOuts`) covers `site`."""

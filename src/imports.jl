@@ -6,13 +6,10 @@ const IMPORT_KIND = SYNTAX.@K_str "import"
 const COLON_KIND = SYNTAX.@K_str ":"
 const AS_KIND = SYNTAX.@K_str "as"
 const CALL_KIND = SYNTAX.@K_str "call"
-const DOC_KIND = SYNTAX.@K_str "doc"
 const MACRO_NAME_KIND = SYNTAX.@K_str "macro_name"
 const MODULE_KIND = SYNTAX.@K_str "module"
 const STRING_MACRO_NAME_KIND = SYNTAX.@K_str "StrMacroName"
 const COMMAND_TEXT_KIND = SYNTAX.@K_str "CmdString"
-# The rule's name in opt-out comments, as `registry.jl` registers it.
-const MISPLACED_IMPORT_RULE = "misplaced-import"
 # Fatou's own opt-out, on an import's line or the line above, also pins it.
 const FATOU_OPT_OUT = r"fatou-ignore\s+unused-import"
 # What goes with a statement cut out of its line: the blanks after it, and a `;` with the blanks after that.
@@ -28,8 +25,8 @@ end
 
 """
 An import statement: `prefix` (`using M: ` or `import `) before its `items`, at bytes
-`first_byte:last_byte`, starting on `line`. A `pinned` one (a bare `using M`, or opted out on any of
-its lines) stays. `block` is the first byte of the innermost `module` block of its file that holds it,
+`first_byte:last_byte`, on lines `line:last_line`. A `pinned` one (a bare `using M`, or one Fatou's
+`unused-import` opt-out names) stays. `block` is the first byte of the innermost `module` block of its file that holds it,
 0 at the file's top level: a nested statement serves only that block and the files it includes.
 """
 struct ImportStatement
@@ -38,27 +35,27 @@ struct ImportStatement
     first_byte::Int
     last_byte::Int
     line::Int
+    last_line::Int
     pinned::Bool
     block::Int
 end
 
 """
-A parsed Julia file: the names it uses outside imports, the names its relative imports take from
-other modules of the package (`relayed_names`), its import statements, and the paths it includes
-(`""` for an include no literal names), each with the `module` block it sits in (`include_blocks`, as
-`ImportStatement`'s `block`). An `editable` file is one the rule checks. A file that `opens_module`
-holds only `module` blocks at its top level, so its names are another module's.
+A parsed Julia file: the names it uses outside imports, each with the `module` block using it (as
+`ImportStatement`'s `block`), the names its relative imports take from other modules of the package
+(`relayed_names`), its import statements, and the paths it includes (`""` for an include no literal
+names), each with the `module` block it sits in (`include_blocks`). An `editable` file is one the rule
+checks.
 """
 struct ImportFile
     path::String
     text::String
-    used::Set{String}
+    used::Set{Tuple{Int, String}}
     relayed::Set{String}
     statements::Vector{ImportStatement}
     includes::Vector{String}
     include_blocks::Vector{Int}
     editable::Bool
-    opens_module::Bool
 end
 
 """
@@ -96,27 +93,32 @@ expression_names(name::Symbol)::Vector{String} = [String(name)]
 expression_names(expression::Expr)::Vector{String} = String[name for argument in expression.args for name in expression_names(argument)]
 expression_names(::Any)::Vector{String} = String[]
 
-"""The names syntax `node` uses: identifiers, macros and string macros, without field names and import statements."""
-function name_tokens(node::SYNTAX.SyntaxNode)::Vector{String}
+"""
+The names syntax `node` uses, inside the `module` block starting at byte `block` (0 at the top level):
+identifiers, macros and string macros, without field names and import statements. Each name comes with
+the innermost block that uses it, since a module sees only its own imports.
+"""
+function name_tokens(node::SYNTAX.SyntaxNode, block::Integer)::Vector{Tuple{Int, String}}
     kind = SYNTAX.kind(node)
     if kind === USING_KIND || kind === IMPORT_KIND
-        return String[]
+        return Tuple{Int, String}[]
     elseif kind === IDENTIFIER_KIND
-        return [String(SYNTAX.sourcetext(node))]
+        return [(Int(block), String(SYNTAX.sourcetext(node)))]
     elseif kind === STRING_MACRO_NAME_KIND
-        return ["@" * SYNTAX.sourcetext(node) * "_str"]
+        return [(Int(block), "@" * SYNTAX.sourcetext(node) * "_str")]
     elseif kind === COMMAND_TEXT_KIND
-        return interpolated_names(SYNTAX.sourcetext(node))
+        return tuple.(Int(block), interpolated_names(SYNTAX.sourcetext(node)))
     elseif SYNTAX.is_leaf(node)
-        return String[]
+        return Tuple{Int, String}[]
     elseif kind === MACRO_NAME_KIND
-        return ["@" * SYNTAX.sourcetext(only(SYNTAX.children(node)))]
+        return [(Int(block), "@" * SYNTAX.sourcetext(only(SYNTAX.children(node))))]
     end
     children = SYNTAX.children(node)
     if kind === FIELD_KIND
-        return name_tokens(first(children))
+        return name_tokens(first(children), block)
     end
-    return String[name for child in children for name in name_tokens(child)]
+    inner = ifelse(kind === MODULE_KIND, Int(first(SYNTAX.byte_range(node))), Int(block))
+    return Tuple{Int, String}[token for child in children for token in name_tokens(child, inner)]
 end
 
 """Every `using` and `import` statement below `node`, outside quotes."""
@@ -186,16 +188,11 @@ function relayed_names(node::SYNTAX.SyntaxNode)::Vector{String}
     return path_name.(filter(relative_path, item_path.(children)))
 end
 
-"""Whether `skipped` opts out any of `lines`."""
-covers(skipped::OptOuts, lines::Union{Integer, AbstractUnitRange{<:Integer}})::Bool = skipped.whole_file || !isdisjoint(skipped.lines, lines)
-
 """
 The statement a `using` or `import` `node` of `text` (split into `lines`) declares, in the `module`
-block starting at byte `block` (0 at the top level). The `# lint: misplaced-import` comments `skipped` holds may pin it.
+block starting at byte `block` (0 at the top level).
 """
-function import_statement(
-        node::SYNTAX.SyntaxNode, text::AbstractString, lines::AbstractVector{<:AbstractString}, block::Integer, skipped::OptOuts,
-    )::ImportStatement
+function import_statement(node::SYNTAX.SyntaxNode, text::AbstractString, lines::AbstractVector{<:AbstractString}, block::Integer)::ImportStatement
     keyword = "import"
     if SYNTAX.kind(node) === USING_KIND
         keyword = "using"
@@ -213,8 +210,8 @@ function import_statement(
     line = first(SYNTAX.source_location(node))
     bytes = SYNTAX.byte_range(node)
     last_line = line + count(==('\n'), text[bytes])
-    opted_out = occursin(FATOU_OPT_OUT, join(lines[max(1, line - 1):line], "\n")) || covers(skipped, line:last_line)
-    return ImportStatement(prefix, items, first(bytes), last(bytes), line, opted_out || (keyword == "using" && !colon), block)
+    opted_out = occursin(FATOU_OPT_OUT, join(lines[max(1, line - 1):line], "\n"))
+    return ImportStatement(prefix, items, first(bytes), last(bytes), line, last_line, opted_out || (keyword == "using" && !colon), block)
 end
 
 """Every `include` call below `node`, outside quotes."""
@@ -246,20 +243,6 @@ end
 module_block(node::SYNTAX.SyntaxNode, modules::AbstractVector{<:UnitRange})::Int =
     maximum(first.(modules[in.(first(SYNTAX.byte_range(node)), modules)]); init = 0)
 
-"""The kind of top-level `statement`, or of the statement its docstring documents."""
-function documented_kind(statement::SYNTAX.SyntaxNode)::SYNTAX.Kind
-    if SYNTAX.kind(statement) === DOC_KIND
-        return SYNTAX.kind(last(SYNTAX.children(statement)))
-    end
-    return SYNTAX.kind(statement)
-end
-
-"""Whether parsed file `tree` holds only `module` blocks, documented or not, at its top level."""
-function opens_module(tree::SYNTAX.SyntaxNode)::Bool
-    kinds::Vector{SYNTAX.Kind} = [documented_kind(statement) for statement in SYNTAX.children(tree)]
-    return !isempty(kinds) && all(==(MODULE_KIND), kinds)
-end
-
 """
 The parsed Julia file `source` read for import placement; `editable` marks a file the rule checks and
 rewrites.
@@ -269,21 +252,24 @@ function import_file(source::Source, editable::Bool)::ImportFile
     lines = split(text, '\n')
     modules = [SYNTAX.byte_range(node) for node in module_nodes(tree)]
     nodes = import_nodes(tree)
-    skipped = opt_outs(source.comments, MISPLACED_IMPORT_RULE)
-    statements = ImportStatement[import_statement.(nodes, text, (lines,), module_block.(nodes, (modules,)), (skipped,))...]
+    statements = ImportStatement[import_statement.(nodes, text, (lines,), module_block.(nodes, (modules,)))...]
     includes = include_nodes(tree)
     return ImportFile(
-        normpath(path), text, Set(name_tokens(tree)), Set{String}(collect(String, Iterators.flatten(relayed_names.(nodes)))),
+        normpath(path), text, Set(name_tokens(tree, 0)), Set{String}(collect(String, Iterators.flatten(relayed_names.(nodes)))),
         statements, include_path.(includes, dirname(path)),
-        module_block.(includes, (modules,)), editable, opens_module(tree),
+        module_block.(includes, (modules,)), editable,
     )
 end
 
 """Whether `statement` imports `name`."""
 statement_imports(statement::ImportStatement, name::AbstractString)::Bool = any(==(name), [item.name for item in statement.items])
 
-"""Whether `file` imports `name`."""
-imports_name(file::ImportFile, name::AbstractString)::Bool = any(Base.Fix2(statement_imports, name), file.statements)
+"""Whether `unit` imports `name` in `scope` (`block_scope`); an import in another `module` block of its file serves only that block."""
+function imports_name(unit::UnitFile, name::AbstractString, scope::AbstractString)::Bool
+    statements = unit.file.statements
+    in_scope = block_scope.((unit,), [statement.block for statement in statements]) .== scope
+    return any(statement_imports.(statements[in_scope], name))
+end
 
 """
 The files of the module rooted at `path`, reached in `scope`: it and every file it includes,
@@ -294,7 +280,7 @@ function unit_files(path::AbstractString, known::AbstractDict{String, ImportFile
     if path in seen
         return UnitFile[]
     elseif !haskey(known, path) && (path == "" || !isfile(path))
-        return [UnitFile(ImportFile("", "", Set{String}(), Set{String}(), ImportStatement[], String[], Int[], false, false), scope)]
+        return [UnitFile(ImportFile("", "", Set{Tuple{Int, String}}(), Set{String}(), ImportStatement[], String[], Int[], false), scope)]
     end
     file::ImportFile = if haskey(known, path)
         known[path]
@@ -338,15 +324,16 @@ file_moves(unit::AbstractVector{UnitFile}, supplied::Bool, relayed::AbstractSet{
 function statement_moves(
         unit::AbstractVector{UnitFile}, supplied::Bool, relayed::AbstractSet{String}, entry::UnitFile, statement::ImportStatement,
     )::Vector{ImportMove}
-    items = filter(!Base.Fix1(names_item, relayed), filter(Base.Fix1(placeable, entry.file), statement.items))
+    items = filter(!Base.Fix1(names_item, relayed), statement.items[placeable.((entry.file,), (statement,), statement.items)])
     return ImportMove.(entry.file.path, (statement,), items, move_targets.((unit,), supplied, (entry,), (statement,), items))
 end
 
 """Whether `names` holds the name `item` binds."""
 names_item(names::AbstractSet{String}, item::ImportItem)::Bool = item.name in names
 
-"""Whether `item` is a name the rule places and `file` does not use."""
-placeable(file::ImportFile, item::ImportItem)::Bool = occursin(PLACED_NAME, item.name) && !(item.name in file.used)
+"""Whether `item` of `statement` is a name the rule places and the `module` block of `file` holding `statement` does not use."""
+placeable(file::ImportFile, statement::ImportStatement, item::ImportItem)::Bool =
+    occursin(PLACED_NAME, item.name) && !((statement.block, item.name) in file.used)
 
 """The files of `unit` that use `item` of `statement` in `entry` without importing it, where the item can move."""
 function move_targets(unit::AbstractVector{UnitFile}, supplied::Bool, entry::UnitFile, statement::ImportStatement, item::ImportItem)::Vector{String}
@@ -355,14 +342,15 @@ function move_targets(unit::AbstractVector{UnitFile}, supplied::Bool, entry::Uni
 end
 
 """
-Whether `item` of `statement` in `entry` can move to `other`: its file uses the name, does not import
-it, does not open a module of its own, and sits in the statement's scope (`block_scope`), so a file
-included inside a `module` block takes only that block's imports.
+Whether `item` of `statement` in `entry` can move to `other`: its file uses the name at its top level,
+outside its `module` blocks, and sits in the statement's scope (`block_scope`), so a file included
+inside a `module` block takes only that block's imports. An import of the name at the file's top level
+serves it already; one inside a `module` block of the file serves only that block.
 """
 function move_target(other::UnitFile, supplied::Bool, entry::UnitFile, statement::ImportStatement, item::ImportItem)::Bool
     target = other.file
-    return target.editable && !target.opens_module && !supplied && target.path != entry.file.path && item.name in target.used &&
-        !imports_name(target, item.name) && other.scope == block_scope(entry, statement.block)
+    return target.editable && !supplied && target.path != entry.file.path && (0, item.name) in target.used &&
+        other.scope == block_scope(entry, statement.block) && !imports_name(other, item.name, other.scope)
 end
 
 """Every import move in `files` (the rule's own), module by module; a file in two modules is left alone."""
@@ -386,11 +374,12 @@ unit_holds(unit::AbstractVector{UnitFile}, path::String)::Bool = path in [entry.
 single_unit(membership::AbstractDict{String, Int}, move::ImportMove)::Bool =
     membership[move.file] == 1 && all(==(1), get.((membership,), move.targets, 0))
 
-"""One site per move, keyed by file and name, at the import's line."""
+"""One site per move, keyed by file and name, at the import's lines."""
 import_sites(repository::Repository, moves::AbstractVector{ImportMove})::Vector{Site} = map(Base.Fix1(import_site, repository), moves)
 
-"""The site of `move` in `repository`, keyed by file and name, at the import's line."""
-import_site(repository::Repository, move::ImportMove)::Site = Site("$(file_key(repository, move.file)) $(move.item.name)", move.file, move.statement.line, "")
+"""The site of `move` in `repository`, keyed by file and name, at the import's lines."""
+import_site(repository::Repository, move::ImportMove)::Site =
+    Site("$(file_key(repository, move.file)) $(move.item.name)", move.file, move.statement.line, move.statement.last_line, "")
 
 """The parsed Julia files of `directories` in `repository`."""
 directory_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Source} =
@@ -401,7 +390,7 @@ directory_sources(repository::Repository, directories::Tuple{Vararg{String}})::V
     misplaced_imports(repository, sources)
 
 One site per import item in `directories` (or the parsed files `sources`) that its file does not use:
-one that no file of its module uses, or that other files of the module use. `place_imports!` fixes them.
+one that no file of its module uses, or that other files of the module use. `import_plan` fixes them.
 """
 misplaced_imports(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site} =
     misplaced_imports(repository, directory_sources(repository, directories))
@@ -497,35 +486,25 @@ function splice_text(text::T, range::UnitRange{Int}, replacement::AbstractString
     return String(vcat(source[1:(first(range) - 1)], codeunits(replacement), source[(last(range) + 1):end]))
 end
 
-"""
-    place_imports!(repository, directories)
+"""The new text of `files` (`placed_text`) after import moves, as path => text for each file the moves touch."""
+struct PlacedTexts
+    files::Vector{ImportFile}
+end
 
-Rewrite the Julia files of `directories` so every import sits in the files that use it: each
-`misplaced_imports` site is deleted, or moved into the module's files that use it. Returns the sites.
-"""
-function place_imports!(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site}
-    files = import_file.(directory_sources(repository, directories), true)
-    moves = import_moves(files)
+function (placed::PlacedTexts)(moves::AbstractVector{ImportMove})::Vector{Pair{String, String}}
     touched = Set(collect(String, Iterators.flatten([vcat([move.file], move.targets) for move in moves])))
-    rewritten = files[in.([file.path for file in files], (touched,))]
-    texts::Vector{String} = placed_text.(rewritten, (moves,))
-    write_all!([file.path for file in rewritten], texts)
-    return import_sites(repository, moves)
+    rewritten = placed.files[in.([file.path for file in placed.files], (touched,))]
+    return Pair.([file.path for file in rewritten], placed_text.(rewritten, (moves,)))
 end
 
 """
-Write each of `texts` to the file of `paths` at its index, keeping the file's mode. Every text is
-staged beside its file first, so a failure leaves all of `paths` as they were.
+    import_plan(repository, directories)
+
+The `FixPlan` that puts every import of `directories` in the files that use it: one repair per
+`misplaced_imports` site, which deletes the item, or moves it into the module's files that use it.
 """
-function write_all!(paths::AbstractVector{String}, texts::AbstractVector{String})::Nothing
-    staged::Vector{String} = tempname.(dirname.(paths); cleanup = false)
-    try
-        write.(staged, texts)
-        chmod.(staged, filemode.(paths) .& 0o7777)
-    catch
-        rm.(filter(isfile, staged))
-        rethrow()
-    end
-    mv.(staged, paths; force = true)
-    return nothing
+function import_plan(repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ImportMove, PlacedTexts}
+    files = import_file.(directory_sources(repository, directories), true)
+    moves = import_moves(files)
+    return FixPlan(Repair{ImportMove}[Repair(import_site(repository, move), move) for move in moves], PlacedTexts(files))
 end

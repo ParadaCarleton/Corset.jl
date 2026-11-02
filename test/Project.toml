@@ -1,9 +1,11 @@
 [deps]
 JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
+Supposition = "5a0628fe-1738-4658-9b6d-0b7605a9755b"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
 JET = "0.12, 0.13"
+Supposition = "0.3"
 TOML = "1"
 Test = "1"

@@ -61,15 +61,24 @@ The `Site`s `rule` finds: in the whole `context` for a `ModuleRule` or `TreeRule
 function check end
 
 """
+    fix_plan(rule, repository, directories)
+
+The `FixPlan` that rewrites the Julia files under `directories` of `repository` so `rule` finds nothing.
+Only a fixable rule has a method. A plan writes nothing; `fix!` applies it.
+"""
+function fix_plan end
+
+"""Whether `rule` has a `fix_plan`."""
+fixable(rule::Rule)::Bool = hasmethod(fix_plan, Tuple{typeof(rule), Repository, Tuple{Vararg{String}}})
+
+"""
     fix!(rule, repository, directories)
 
-Rewrite the Julia files under `directories` of `repository` so `rule` finds nothing. Only a `fixable`
-rule has a method.
+Apply the `fix_plan` of `rule` (`apply_plan!`): every repair except those a `# lint:` comment naming
+`rule` opts out. Returns the sites repaired.
 """
-function fix! end
-
-"""Whether `rule` has a `fix!`."""
-fixable(::Rule)::Bool = false
+fix!(rule::Rule, repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site} =
+    apply_plan!(fix_plan(rule, repository, directories), rule_name(rule))
 
 # The parameters a rule's body names, by what the rule reads.
 const RULE_PARAMETERS = (;
@@ -230,11 +239,11 @@ fatou_sites(context.repository, context.directories)
 @rule TreeRule "jscpd" :pedantic "findings of jscpd duplicate code checks (jscpd on PATH)" context ->
 jscpd_sites(context.repository, context.directories)
 
-fixable(::MisplacedImportRule)::Bool = true
-fix!(::MisplacedImportRule, repository::Repository, directories::Tuple{Vararg{String}})::Nothing = (place_imports!(repository, directories); nothing)
+fix_plan(::MisplacedImportRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ImportMove, PlacedTexts} =
+    import_plan(repository, directories)
 
-fixable(::WhereReturnRule)::Bool = true
-fix!(::WhereReturnRule, repository::Repository, directories::Tuple{Vararg{String}})::Nothing = (fix_where_returns!(repository, directories); nothing)
+fix_plan(::WhereReturnRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{WhereParentheses, typeof(parenthesized_texts)} =
+    where_plan(repository, directories)
 
 """Every rule, ordered by name."""
 const RULES = Tuple(sort!([type() for kind in (ModuleRule, TreeRule, FileRule) for type in subtypes(kind)]; by = rule_name))

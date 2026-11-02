@@ -198,18 +198,19 @@ Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 
 ## Rules with fixers
 
-Two rules come with a function that repairs what they find. A fixer leaves every site a `# lint:`
-comment opts out, in the line, block and file forms.
+Two rules come with a fixer. `Corset.fix!(rule, repo, directories)` applies one: the rule's
+`fix_plan` proposes one repair per site, and `fix!` drops every repair a `# lint:` comment opts out
+(line, block and file forms) before it writes. It computes every file before it writes any, and
+returns the sites it repaired.
 
 ### `misplaced-import`: `misplaced_imports(repo, directories)`
 
 Imports that their file does not use, or that only other files of the module use. An import item
-belongs in the files that use its name. `place_imports!(repo, directories)` deletes the unused ones
-and moves the rest, and returns the sites it handled. A file that holds only `module` blocks belongs
-to another module, so no import moves into it. A file included inside a `module` block belongs to
-that block's module: it takes only the block's imports. A name that a relative import
+belongs in the files that use its name. Its fixer deletes the unused ones and moves the rest.
+A name counts as used only in the innermost `module` block that uses it, since a module sees only its
+own imports; so no import moves into a file that holds only `module` blocks. A file included inside a
+`module` block belongs to that block's module: it takes only the block's imports. A name that a relative import
 (`using ..Parent: f`, `import .Sub.g`) takes from another module of the package keeps its imports.
-The fixer computes every file before it writes any.
 
 ### `where-return`: `where_return_sites(file)`
 
@@ -220,7 +221,7 @@ f(x::T)::T where {T} = x      # parses as f(x::T)::(T where {T}); T is not the m
 (f(x::T)::T) where {T} = x    # what was meant
 ```
 
-`fix_where_returns!` parenthesizes them.
+Its fixer parenthesizes those whose `where` binds a variable of the arguments.
 
 ## Rules that call other tools
 

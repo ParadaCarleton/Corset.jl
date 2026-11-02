@@ -143,7 +143,7 @@ end
     inferred = inferred_methods(fixture, concrete_signatures(fixture))
 
     @testset "hidden-input: a read of a mutable or non-constant global" begin
-        @test unique(site_keys(hidden_inputs(fixture))) == ["counter"]
+        @test unique(site_keys(hidden_inputs(repository, fixture))) == ["counter"]
     end
 
     @testset "non-public-access: a qualified access or explicit import of a non-public name" begin

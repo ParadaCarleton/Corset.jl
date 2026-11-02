@@ -88,4 +88,5 @@ Keys:
 
 - `0`: Clean run (no deny-level findings, or no findings when `--deny-warnings` is set).
 - `1`: One or more findings failed the run, or `--diff` detected rewrites.
-- `2`: Usage error, invalid configuration, or execution failure.
+- `2`: Usage error or invalid configuration, such as an unknown rule, a bad flag, or a configured directory that does not exist.
+- `3`: Internal error: Corset itself failed. The error and its backtrace go to standard error.

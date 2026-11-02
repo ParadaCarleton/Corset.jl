@@ -232,6 +232,23 @@ end
         @test captured_main(["check", previewed, "--diff", "--fix"])[2] == 2
     end
 
+    @testset "--diff copies a nested directory, and a directory inside another once" begin
+        extension = package_tree(
+            "name = \"Demo\"\n[preferences.Corset]\ndirectories = [\"ext/Foo\"]\n",
+            ["ext/Foo/Foo.jl" => "module Foo\nf(x::T)::T where {T} = x\nend\n"],
+        )
+        output, code = captured_main(["check", extension, "--diff"])
+        @test code == 1 && occursin("--- a/ext/Foo/Foo.jl", output)
+        overlapping = package_tree(
+            "name = \"Demo\"\n[preferences.Corset]\ndirectories = [\"src\", \"src/sub/\", \"./src\"]\n",
+            ["src/sub/inner.jl" => "f(x::T)::T where {T} = x\n"],
+        )
+        @test load_config(overlapping).directories == ("src",)
+        output, code = captured_main(["check", overlapping, "--diff"])
+        @test code == 1 && count("--- a/src/sub/inner.jl", output) == 1
+        @test length(first(run_rules(load_config(overlapping), overlapping))) == 1
+    end
+
     @testset "where-return handles unbraced where T and unbound arguments" begin
         unbraced = package_tree(
             "name = \"Demo\"\n",
@@ -349,7 +366,10 @@ Base.write(stream::FailingStream, ::String)::Nothing = throw(stream.failure)
 @testset "corset: a write failure ends the run" begin
     root = package_tree("name = \"Demo\"\n", SOURCE_TREE)
     @test Corset.run_command(["rules", root], FailingStream(Base.IOError("write", Base.UV_EPIPE)), devnull) == 0
-    @test_throws DomainError Corset.run_command(["rules", root], FailingStream(DomainError(1)), devnull)
+    report = IOBuffer()
+    @test Corset.run_command(["rules", root], FailingStream(DomainError(1)), report) == 3
+    @test startswith(String(take!(report)), "corset: internal error: DomainError")
+    @test_throws InterruptException Corset.run_command(["rules", root], FailingStream(InterruptException()), devnull)
 end
 
 @testset "corset: a closed output pipe ends the run quietly" begin

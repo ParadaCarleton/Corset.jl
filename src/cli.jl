@@ -436,7 +436,8 @@ error_message(error_::TOML.ParserError)::String = sprint(showerror, error_)
     run_command(args, out, err)
 
 The `corset` command on the streams `out` and `err`. Returns the exit code: 0 when clean, 1 when a
-finding fails the run, 2 on a usage or configuration error.
+finding fails the run, 2 on a usage or configuration error, 3 when Corset itself fails (its error and
+backtrace go to `err`). An interrupt is rethrown.
 """
 function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Int
     try
@@ -444,12 +445,14 @@ function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::
     catch error_
         if broken_pipe(error_)
             return 0
-        end
-        if error_ isa Union{ErrorException, ArgParseError, TOML.ParserError}
+        elseif error_ isa Union{ErrorException, ArgParseError, TOML.ParserError}
             println(err, "corset: ", error_message(error_))
             return 2
+        elseif error_ isa InterruptException
+            rethrow()
         end
-        rethrow()
+        println(err, "corset: internal error: ", sprint(showerror, error_, catch_backtrace()))
+        return 3
     end
 end
 

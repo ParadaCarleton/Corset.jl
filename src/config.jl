@@ -109,7 +109,10 @@ function load_config(root::AbstractString)::Config
     )
 end
 
-"""The `directories` setting: `src` when unset, which may be absent. A set directory missing under `root` throws."""
+"""
+The `directories` setting: `src` when unset, which may be absent. A set directory missing under `root`
+throws; one inside another listed one is dropped, so no file is read twice.
+"""
 configured_directories(::AbstractString, ::Nothing)::Tuple{String} = ("src",)
 
 function configured_directories(root::AbstractString, directories::AbstractVector{String})::Tuple{Vararg{String}}
@@ -117,7 +120,17 @@ function configured_directories(root::AbstractString, directories::AbstractVecto
     if !isempty(absent)
         error("[preferences.Corset] directories names $(join(repr.(absent), ", ")), missing under $root")
     end
-    return Tuple(directories)
+    paths = unique(directory_path.(directories))
+    return Tuple(path for path in paths if !any(Base.Fix2(holds, path), paths))
+end
+
+"""Relative directory path `directory` normalized: no `.` part and no trailing separator."""
+directory_path(directory::AbstractString)::String = joinpath(splitpath(normpath(directory))...)
+
+"""Whether directory path `outer` strictly holds directory path `inner`; both are normalized and relative."""
+function holds(outer::AbstractString, inner::AbstractString)::Bool
+    outer_parts, inner_parts = splitpath(outer), splitpath(inner)
+    return length(inner_parts) > length(outer_parts) && inner_parts[eachindex(outer_parts)] == outer_parts
 end
 
 """The `file => function` of an `entry_points` setting `\"file.jl:function\"`; `nothing` when unset. Any other shape throws."""

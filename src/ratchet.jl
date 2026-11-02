@@ -266,10 +266,17 @@ The sites of `sites` that no `# lint:` comment naming `rule` opts out, and how m
 function unopted(
         sites::AbstractVector{S}, rule::AbstractString, comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
     )::Tuple{Vector{Site}, Int} where {S <: Site}
+    kept = sites[unopted_mask(sites, rule, comments)]
+    return kept, length(sites) - length(kept)
+end
+
+"""Whether no `# lint:` comment naming `rule` opts out each of `sites`; `comments` as `unopted` takes it."""
+function unopted_mask(
+        sites::AbstractVector{S}, rule::AbstractString, comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
+    )::BitVector where {S <: Site}
     files = unique(String[site.file for site in sites])
     skips = Dict{String, OptOuts}(files .=> opt_outs.(file_comments.((comments,), files), rule))
-    kept = filter(Base.Fix1(kept_by, skips), sites)
-    return kept, length(sites) - length(kept)
+    return BitVector(kept_by.((skips,), sites))
 end
 
 """Whether no opt-out of `skips` (each file's `OptOuts`) covers `site`."""

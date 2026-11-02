@@ -11,8 +11,6 @@ const MACRO_NAME_KIND = SYNTAX.@K_str "macro_name"
 const MODULE_KIND = SYNTAX.@K_str "module"
 const STRING_MACRO_NAME_KIND = SYNTAX.@K_str "StrMacroName"
 const COMMAND_TEXT_KIND = SYNTAX.@K_str "CmdString"
-# The rule's name in opt-out comments, as `registry.jl` registers it.
-const MISPLACED_IMPORT_RULE = "misplaced-import"
 # Fatou's own opt-out, on an import's line or the line above, also pins it.
 const FATOU_OPT_OUT = r"fatou-ignore\s+unused-import"
 # What goes with a statement cut out of its line: the blanks after it, and a `;` with the blanks after that.
@@ -28,8 +26,8 @@ end
 
 """
 An import statement: `prefix` (`using M: ` or `import `) before its `items`, at bytes
-`first_byte:last_byte`, starting on `line`. A `pinned` one (a bare `using M`, or opted out on any of
-its lines) stays. `block` is the first byte of the innermost `module` block of its file that holds it,
+`first_byte:last_byte`, on lines `line:last_line`. A `pinned` one (a bare `using M`, or one Fatou's
+`unused-import` opt-out names) stays. `block` is the first byte of the innermost `module` block of its file that holds it,
 0 at the file's top level: a nested statement serves only that block and the files it includes.
 """
 struct ImportStatement
@@ -38,6 +36,7 @@ struct ImportStatement
     first_byte::Int
     last_byte::Int
     line::Int
+    last_line::Int
     pinned::Bool
     block::Int
 end
@@ -186,16 +185,11 @@ function relayed_names(node::SYNTAX.SyntaxNode)::Vector{String}
     return path_name.(filter(relative_path, item_path.(children)))
 end
 
-"""Whether `skipped` opts out any of `lines`."""
-covers(skipped::OptOuts, lines::Union{Integer, AbstractUnitRange{<:Integer}})::Bool = skipped.whole_file || !isdisjoint(skipped.lines, lines)
-
 """
 The statement a `using` or `import` `node` of `text` (split into `lines`) declares, in the `module`
-block starting at byte `block` (0 at the top level). The `# lint: misplaced-import` comments `skipped` holds may pin it.
+block starting at byte `block` (0 at the top level).
 """
-function import_statement(
-        node::SYNTAX.SyntaxNode, text::AbstractString, lines::AbstractVector{<:AbstractString}, block::Integer, skipped::OptOuts,
-    )::ImportStatement
+function import_statement(node::SYNTAX.SyntaxNode, text::AbstractString, lines::AbstractVector{<:AbstractString}, block::Integer)::ImportStatement
     keyword = "import"
     if SYNTAX.kind(node) === USING_KIND
         keyword = "using"
@@ -213,8 +207,8 @@ function import_statement(
     line = first(SYNTAX.source_location(node))
     bytes = SYNTAX.byte_range(node)
     last_line = line + count(==('\n'), text[bytes])
-    opted_out = occursin(FATOU_OPT_OUT, join(lines[max(1, line - 1):line], "\n")) || covers(skipped, line:last_line)
-    return ImportStatement(prefix, items, first(bytes), last(bytes), line, opted_out || (keyword == "using" && !colon), block)
+    opted_out = occursin(FATOU_OPT_OUT, join(lines[max(1, line - 1):line], "\n"))
+    return ImportStatement(prefix, items, first(bytes), last(bytes), line, last_line, opted_out || (keyword == "using" && !colon), block)
 end
 
 """Every `include` call below `node`, outside quotes."""
@@ -269,8 +263,7 @@ function import_file(source::Source, editable::Bool)::ImportFile
     lines = split(text, '\n')
     modules = [SYNTAX.byte_range(node) for node in module_nodes(tree)]
     nodes = import_nodes(tree)
-    skipped = opt_outs(source.comments, MISPLACED_IMPORT_RULE)
-    statements = ImportStatement[import_statement.(nodes, text, (lines,), module_block.(nodes, (modules,)), (skipped,))...]
+    statements = ImportStatement[import_statement.(nodes, text, (lines,), module_block.(nodes, (modules,)))...]
     includes = include_nodes(tree)
     return ImportFile(
         normpath(path), text, Set(name_tokens(tree)), Set{String}(reduce(vcat, relayed_names.(nodes); init = String[])),
@@ -386,11 +379,12 @@ unit_holds(unit::AbstractVector{UnitFile}, path::String)::Bool = path in [entry.
 single_unit(membership::AbstractDict{String, Int}, move::ImportMove)::Bool =
     membership[move.file] == 1 && all(==(1), get.((membership,), move.targets, 0))
 
-"""One site per move, keyed by file and name, at the import's line."""
+"""One site per move, keyed by file and name, at the import's lines."""
 import_sites(repository::Repository, moves::AbstractVector{ImportMove})::Vector{Site} = map(Base.Fix1(import_site, repository), moves)
 
-"""The site of `move` in `repository`, keyed by file and name, at the import's line."""
-import_site(repository::Repository, move::ImportMove)::Site = Site("$(file_key(repository, move.file)) $(move.item.name)", move.file, move.statement.line, "")
+"""The site of `move` in `repository`, keyed by file and name, at the import's lines."""
+import_site(repository::Repository, move::ImportMove)::Site =
+    Site("$(file_key(repository, move.file)) $(move.item.name)", move.file, move.statement.line, move.statement.last_line, "")
 
 """The parsed Julia files of `directories` in `repository`."""
 directory_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Source} =
@@ -401,7 +395,7 @@ directory_sources(repository::Repository, directories::Tuple{Vararg{String}})::V
     misplaced_imports(repository, sources)
 
 One site per import item in `directories` (or the parsed files `sources`) that its file does not use:
-one that no file of its module uses, or that other files of the module use. `place_imports!` fixes them.
+one that no file of its module uses, or that other files of the module use. `import_plan` fixes them.
 """
 misplaced_imports(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site} =
     misplaced_imports(repository, directory_sources(repository, directories))
@@ -497,35 +491,24 @@ function splice_text(text::T, range::UnitRange{Int}, replacement::AbstractString
     return String(vcat(source[1:(first(range) - 1)], codeunits(replacement), source[(last(range) + 1):end]))
 end
 
-"""
-    place_imports!(repository, directories)
+"""The new text of `files` (`placed_text`) after import moves, as path => text for each file the moves touch."""
+struct PlacedTexts
+    files::Vector{ImportFile}
+end
 
-Rewrite the Julia files of `directories` so every import sits in the files that use it: each
-`misplaced_imports` site is deleted, or moved into the module's files that use it. Returns the sites.
-"""
-function place_imports!(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site}
-    files = import_file.(directory_sources(repository, directories), true)
-    moves = import_moves(files)
+function (placed::PlacedTexts)(moves::AbstractVector{ImportMove})::Vector{Pair{String, String}}
     touched = Set(reduce(vcat, [vcat([move.file], move.targets) for move in moves]; init = String[]))
-    rewritten = files[in.([file.path for file in files], (touched,))]
-    texts::Vector{String} = placed_text.(rewritten, (moves,))
-    write_all!([file.path for file in rewritten], texts)
-    return import_sites(repository, moves)
+    return [file.path => placed_text(file, moves) for file in placed.files if file.path in touched]
 end
 
 """
-Write each of `texts` to the file of `paths` at its index, keeping the file's mode. Every text is
-staged beside its file first, so a failure leaves all of `paths` as they were.
+    import_plan(repository, directories)
+
+The `FixPlan` that puts every import of `directories` in the files that use it: one repair per
+`misplaced_imports` site, which deletes the item, or moves it into the module's files that use it.
 """
-function write_all!(paths::AbstractVector{String}, texts::AbstractVector{String})::Nothing
-    staged::Vector{String} = tempname.(dirname.(paths); cleanup = false)
-    try
-        write.(staged, texts)
-        chmod.(staged, filemode.(paths) .& 0o7777)
-    catch
-        rm.(filter(isfile, staged))
-        rethrow()
-    end
-    mv.(staged, paths; force = true)
-    return nothing
+function import_plan(repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ImportMove, PlacedTexts}
+    files = import_file.(directory_sources(repository, directories), true)
+    moves = import_moves(files)
+    return FixPlan(Repair{ImportMove}[Repair(import_site(repository, move), move) for move in moves], PlacedTexts(files))
 end

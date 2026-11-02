@@ -18,6 +18,7 @@ export Repository,
 
 include("usage_error.jl")
 include("ratchet.jl")
+include("fix_plan.jl")
 include("membership.jl")
 include("entries.jl")
 include("rules.jl")

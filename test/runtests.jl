@@ -7,8 +7,8 @@ using Corset: Corset
 using Corset: CONCRETE_RETURN_FIX, Repository, Site, Source, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, abstract_locals,
     c_type_sites, impure_anonymous_functions, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
     jscpd_sites, misplaced_imports, missing_annotations, module_structs, non_public_accesses, nothing_returns,
-    one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
-    repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
+    one_letter_sites, present_directories, range_guards, repeated_prefix, repeated_statements,
+    repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects,
     where_return_sites, entry_frames, frame_callees, mentions_module, invoked_instance, logging_call, runtime_dispatches,
     widened_returns, compiled_concretely
 
@@ -56,11 +56,18 @@ concrete_signatures(mod::Module)::Vector{Type} = Type[method.sig for method in C
 """The files `repository_sources` finds under `src` of `repository`, relative to `root`."""
 relative_sources(repository::Repository, root::AbstractString)::Vector{String} = [relpath(file, root) for file in repository_sources(repository, ("src",))]
 
+"""Apply the misplaced-import fixer to the files under `directories` of `repository`."""
+place_imports!(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site} = Corset.fix!(Corset.MisplacedImportRule(), repository, directories)
+
+"""The `misplaced_imports` sites of `directories` in `repository` that no `# lint:` comment opts out."""
+kept_imports(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site} =
+    first(Corset.unopted(misplaced_imports(repository, directories), "misplaced-import"))
+
 """The text `place_imports!` leaves in `files` (name => text) written into a fresh tree, which then has no misplaced import."""
 function placed(files::AbstractVector{<:Pair})::Dict{String, String}
     repository = Repository(write_tree(mktempdir(), files))
     place_imports!(repository, (".",))
-    @test isempty(misplaced_imports(repository, (".",)))
+    @test isempty(kept_imports(repository, (".",)))
     return Dict(name => read(joinpath(repository.root, name), String) for (name, _) in files)
 end
 
@@ -68,8 +75,12 @@ end
 tree_texts(root::AbstractString)::Dict{String, String} =
     Dict(relpath(joinpath(directory, name), root) => read(joinpath(directory, name), String) for (directory, _, names) in walkdir(root) for name in names)
 
-"""`fix_where_returns` of `text` written to a fresh file."""
-where_fixed(text::AbstractString)::String = fix_where_returns(joinpath(write_tree(mktempdir(), ["source.jl" => text]), "source.jl"))
+"""The text the where-return fixer leaves of `text`, written to a fresh file."""
+function where_fixed(text::AbstractString)::String
+    tree = write_tree(mktempdir(), ["source.jl" => text])
+    Corset.fix!(Corset.WhereReturnRule(), Repository(tree), (".",))
+    return read(joinpath(tree, "source.jl"), String)
+end
 
 """A module of `count` structs, each one field wider than the last, and `count` functions returning a capturing closure."""
 function generated_module(count::Integer)::Module
@@ -549,9 +560,8 @@ end
         opted_block = "# lint: where-return-begin  deliberate\n$(broken)# lint: where-return-end\n"
         opted_file = "# lint: where-return-file  deliberate\n$broken"
         files = ["line.jl" => opted_line * broken, "block.jl" => opted_block * broken, "file.jl" => opted_file, "plain.jl" => broken]
-        @test Corset.rule_name(Corset.WhereReturnRule()) == Corset.WHERE_RETURN_RULE
         tree = write_tree(mktempdir(), files)
-        fixed_sites = Corset.fix_where_returns!(Repository(tree), (".",))
+        fixed_sites = Corset.fix!(Corset.WhereReturnRule(), Repository(tree), (".",))
         @test sort!([(basename(site.file), site.line) for site in fixed_sites]) == [("block.jl", 4), ("line.jl", 2), ("plain.jl", 1)]
         @test tree_texts(tree) == Dict(
             "line.jl" => opted_line * fixed, "block.jl" => opted_block * fixed, "file.jl" => opted_file, "plain.jl" => fixed,
@@ -715,9 +725,8 @@ end
             "block.jl" => "# lint: misplaced-import-begin  kept\nusing A: a\n# lint: misplaced-import-end\nusing B: b\n",
             "multiline.jl" => "using C:\n    c # lint: misplaced-import  kept\n",
         ]
-        @test Corset.rule_name(Corset.MisplacedImportRule()) == Corset.MISPLACED_IMPORT_RULE
         tree = write_tree(mktempdir(), files)
-        @test site_keys(misplaced_imports(Repository(tree), (".",))) == ["block.jl b"]
+        @test site_keys(kept_imports(Repository(tree), (".",))) == ["block.jl b"]
         place_imports!(Repository(tree), (".",))
         @test tree_texts(tree) == Dict(files[1], "block.jl" => "# lint: misplaced-import-begin  kept\nusing A: a\n# lint: misplaced-import-end\n", files[3])
     end

@@ -1,9 +1,6 @@
 # Short-form definitions `f(x)::R where {E} = body`, which parse as `f(x)::(R where {E})`: the
 # `where` binds the return annotation, so a variable of the arguments is unbound there.
 
-# The rule's name in opt-out comments, as `registry.jl` registers it.
-const WHERE_RETURN_RULE = "where-return"
-
 """Whether syntax `node` is a short-form method definition `call::(R where …) = body`."""
 function is_where_return(node::SYNTAX.SyntaxNode)::Bool
     if SYNTAX.kind(node) !== SYNTAX.@K_str("function") || !SYNTAX.has_flags(node, SYNTAX.SHORT_FORM_FUNCTION_FLAG)
@@ -40,82 +37,66 @@ function binds_an_argument(signature::SYNTAX.SyntaxNode)::Bool
     return !isdisjoint(introduced_names(SYNTAX.children(annotation)[2]), identifier_names(call))
 end
 
-"""
-    where_return_sites!(sites, source, node)
-
-Push a `Site` for each short-form definition under `node` whose `where` binds the return annotation.
-"""
-function where_return_sites!(sites::AbstractVector{Site}, source::Source, node::SYNTAX.SyntaxNode)::Nothing
+"""Every short-form definition under syntax `node` whose `where` binds the return annotation, in source order."""
+function where_return_nodes(node::SYNTAX.SyntaxNode)::Vector{SYNTAX.SyntaxNode}
+    if SYNTAX.is_leaf(node)
+        return SYNTAX.SyntaxNode[]
+    end
+    below = SYNTAX.SyntaxNode[found for child in SYNTAX.children(node) for found in where_return_nodes(child)]
     if is_where_return(node)
-        push!(sites, Site(source.name, source.path, first(SYNTAX.source_location(node)), ""))
+        return vcat([node], below)
     end
-    if !SYNTAX.is_leaf(node)
-        for child in SYNTAX.children(node)
-            where_return_sites!(sites, source, child)
-        end
-    end
-    return nothing
+    return below
 end
+
+"""The site of where-return definition `node` in `source`, at its first line."""
+where_site(source::Source, node::SYNTAX.SyntaxNode)::Site = Site(source.name, source.path, first(SYNTAX.source_location(node)), "")
 
 """The short-form definitions of the Julia file `source` whose `where` binds the return annotation, keyed by file."""
-function where_return_sites(source::Source)::Vector{Site}
-    sites = Site[]
-    where_return_sites!(sites, source, source.tree)
-    return sites
+where_return_sites(source::Source)::Vector{Site} = where_site.((source,), where_return_nodes(source.tree))
+
+"""The parentheses that make a short-form definition of the file `path` read `(call::R) where {…}`: bytes `opening` and `closing` get one each."""
+struct WhereParentheses
+    path::String
+    opening::Int
+    closing::Int
 end
 
-"""
-The byte insertions (position => text) that parenthesize the signatures under `node` as `(call::R) where {…}`,
-except at a definition whose first line `skipped` opts out.
-"""
-function where_return_insertions!(insertions::AbstractVector{Pair{Int, String}}, node::SYNTAX.SyntaxNode, skipped::OptOuts)::Nothing
-    if is_where_return(node) && !covers(skipped, first(SYNTAX.source_location(node)))
-        signature = first(SYNTAX.children(node))
-        if binds_an_argument(signature)
-            annotation = last(SYNTAX.children(signature))
-            push!(insertions, first(SYNTAX.byte_range(signature)) => "(", last(SYNTAX.byte_range(first(SYNTAX.children(annotation)))) + 1 => ")")
-        end
-    end
-    if !SYNTAX.is_leaf(node)
-        for child in SYNTAX.children(node)
-            where_return_insertions!(insertions, child, skipped)
-        end
-    end
-    return nothing
+"""The repair of where-return definition `node` in `source`: a `(` before its signature and a `)` after its return annotation."""
+function where_repair(source::Source, node::SYNTAX.SyntaxNode)::Repair{WhereParentheses}
+    signature = first(SYNTAX.children(node))
+    annotation = first(SYNTAX.children(last(SYNTAX.children(signature))))
+    return Repair(where_site(source, node), WhereParentheses(source.path, first(SYNTAX.byte_range(signature)), last(SYNTAX.byte_range(annotation)) + 1))
 end
 
-"""
-    fix_where_returns(path)
+"""Whether the `where` of where-return definition `node` binds a variable of its arguments, so the method needs it."""
+binds_its_arguments(node::SYNTAX.SyntaxNode)::Bool = binds_an_argument(first(SYNTAX.children(node)))
 
-The text of the Julia file `path` with every short-form `f(x)::R where {E} = …` that uses `E` in its
-arguments written `(f(x)::R) where {E} = …`, the reading the long form `function f(x)::R where {E}`
-already has. A definition a `# lint: where-return` comment opts out stays.
-"""
-function fix_where_returns(path::AbstractString)::String
-    text = read(path, String)
-    insertions = Pair{Int, String}[]
-    where_return_insertions!(insertions, SYNTAX.parseall(SYNTAX.SyntaxNode, text), opt_outs(path, WHERE_RETURN_RULE))
-    bytes::Vector{UInt8} = Vector{UInt8}(codeunits(text))
+"""The repairs of the Julia file `source`: one per where-return definition whose `where` binds an argument."""
+where_repairs(source::Source)::Vector{Repair{WhereParentheses}} = where_repair.((source,), filter(binds_its_arguments, where_return_nodes(source.tree)))
+
+"""The text `text` with a `(` at byte `opening` and a `)` at byte `closing` of each of `edits`."""
+function parenthesized(text::AbstractString, edits::AbstractVector{WhereParentheses})::String
+    insertions = vcat([edit.opening => "(" for edit in edits], [edit.closing => ")" for edit in edits])
+    rewritten = String(text)
     for (position, inserted) in sort(insertions; by = first, rev = true)
-        bytes = vcat(bytes[1:(position - 1)], codeunits(inserted), bytes[position:end])
+        rewritten = splice_text(rewritten, position:(position - 1), inserted)
     end
-    return String(bytes)
+    return rewritten
+end
+
+"""The new text of each file `edits` touch, as path => text."""
+function parenthesized_texts(edits::AbstractVector{WhereParentheses})::Vector{Pair{String, String}}
+    paths = unique(String[edit.path for edit in edits])
+    owners = String[edit.path for edit in edits]
+    return [path => parenthesized(read(path, String), edits[owners .== path]) for path in paths]
 end
 
 """
-    fix_where_returns!(repository, directories)
+    where_plan(repository, directories)
 
-Rewrite the Julia files of `directories` with `fix_where_returns`. Returns the sites it fixed: those
-no `# lint: where-return` comment opts out.
+The `FixPlan` that writes every short-form `f(x)::R where {E} = …` of `directories` that uses `E` in its
+arguments as `(f(x)::R) where {E} = …`, the reading the long form `function f(x)::R where {E}` already has.
 """
-function fix_where_returns!(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site}
-    sites = Site[]
-    for path in repository_sources(repository, directories)
-        found, _ = unopted(where_return_sites(Source(repository, path)), WHERE_RETURN_RULE)
-        if !isempty(found)
-            write(path, fix_where_returns(path))
-            append!(sites, found)
-        end
-    end
-    return sites
-end
+where_plan(repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{WhereParentheses, typeof(parenthesized_texts)} =
+    FixPlan(reduce(vcat, where_repairs.(directory_sources(repository, directories)); init = Repair{WhereParentheses}[]), parenthesized_texts)

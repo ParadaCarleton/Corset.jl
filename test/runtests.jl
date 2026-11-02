@@ -770,7 +770,8 @@ end
         Tuple{typeof(Mutation.guarded), ReentrantLock}, Tuple{typeof(Mutation.zero_first), vector},
         Tuple{typeof(Mutation.negated), Mutation.Box}, Tuple{typeof(Mutation.last_zeroed), vector, vector},
     ]
-    sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred_methods(Mutation, entry_frames(seeds, Mutation)))
+    inferred = inferred_methods(Mutation, entry_frames(seeds, Mutation))
+    sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred)
     details = Dict(last(split(site.key)) => site.detail for site in sites)
     @testset "a write through an argument, an alias, a field, an element or a callee is reported" begin
         for name in ("direct", "aliased", "setprop", "viafield", "outer", "far_helper", "far_outer", "viaindex", "stashed")
@@ -797,13 +798,26 @@ end
         @test details["iterate"] == "adds a writing method to `Base.iterate`, which callers expect not to write: it writes argument `box`"
         @test !haskey(details, "show")
         render = only(Corset.typed_frames(Tuple{typeof(Mutation.render), IOBuffer, Mutation.Box}))
-        @test Corset.argument_writes(render, Dict{Core.MethodInstance, Corset.Inferred}(), (), Corset.CandidateSearch(Corset.Inferred[])).written == [2]
+        @test Corset.argument_writes(render, Corset.WriteWalk(Dict{Core.MethodInstance, Corset.Inferred}()), (), Corset.CandidateSearch(Corset.Inferred[])).written == [2]
         @test Corset.declared_io(render.method, 2) && !Corset.declared_io(render.method, 3) && !Corset.declared_io(render.method, 9)
     end
     @testset "fresh memory, reads, a rebound local and a `!` function are not reported" begin
         for name in ("rebound", "viahelper", "fresh", "readonly", "addup", "reads", "bangwrite!", "countdown", "memwrite!", "fieldread", "opaqueglobal")
             @test !haskey(details, name)
         end
+    end
+    @testset "a summary is made once per instance and limit; one cut short by recursion is not kept" begin
+        walk = Corset.WriteWalk(Dict{Core.MethodInstance, Corset.Inferred}(item.code.parent => item for item in inferred))
+        search = Corset.CandidateSearch(inferred)
+        far = only(item for item in inferred if item.method.name === :far_outer)
+        summary = Corset.argument_writes(far, walk, (far.code.parent,), search)
+        @test summary.written == [2] && !summary.cut
+        @test haskey(walk.summaries, (far.code.parent, search.limit)) && length(walk.summaries) == 2
+        @test Corset.argument_writes(far, walk, (), search) === summary
+        @test !haskey(walk.summaries, (far.code.parent, 0))
+        countdown = only(item for item in inferred if item.method.name === :countdown)
+        @test Corset.argument_writes(countdown, walk, (countdown.code.parent,), search).cut
+        @test !haskey(walk.summaries, (countdown.code.parent, search.limit))
     end
     @testset "Base.:! is no `!` name; a varargs callee writes every operand it gathers" begin
         @test !haskey(details, "negated")
@@ -815,7 +829,7 @@ end
     end
     @testset "Base.sort and Base.replace copy before they write" begin
         for signature in (Tuple{typeof(sort), vector}, Tuple{typeof(replace), vector, Pair{Int, Int}})
-            writes = Corset.argument_writes(only(Corset.typed_frames(signature)), Dict{Core.MethodInstance, Corset.Inferred}(), (), Corset.CandidateSearch(Corset.Inferred[]))
+            writes = Corset.argument_writes(only(Corset.typed_frames(signature)), Corset.WriteWalk(Dict{Core.MethodInstance, Corset.Inferred}()), (), Corset.CandidateSearch(Corset.Inferred[]))
             @test isempty(writes.written) && isempty(writes.dispatched) && isempty(writes.foreign)
         end
     end

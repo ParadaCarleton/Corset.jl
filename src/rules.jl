@@ -183,7 +183,6 @@ hidden_inputs(repository::Repository, mod::Module)::Vector{Site} =
 
 """Whether `method` is defined in a file under the repository's root."""
 in_repository(repository::Repository, method::Method)::Bool = startswith(string(method.file), joinpath(repository.root, ""))
-
 """The `hidden_inputs` sites of `method`'s lowered code; none for a method without one."""
 function method_hidden_inputs(method::Method)::Vector{Site}
     code = lowered(method)

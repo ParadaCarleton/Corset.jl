@@ -12,7 +12,7 @@ These see inferred types, bindings and closures. They need `using MyPackage`. Th
 inferred types take their signatures from the caller: `inferred_methods(MyPackage, signatures)` infers the
 methods those signatures reach, so the result is the same on every run. `inferred_methods(MyPackage,
 entry_frames(seeds, MyPackage))` reads the frames an entry-point walk already inferred. The `corset`
-command line has no signatures, so it skips these rules. An opt-out on a method's first line covers
+command line seeds that walk from `Corset.Entries` (see `--entries` in the CLI page). An opt-out on a method's first line covers
 every site these rules find in that method.
 
 ### `hidden-input`: `hidden_inputs(mod)`

@@ -56,7 +56,7 @@ end
 reads_signatures(rule::Rule)::Bool = rule isa Union{AbstractLocalRule, BangRule, UnmarkedMutationRule, RuntimeDispatchRule, WidenedReturnRule, FloatWideningRule}
 
 """Whether `rule` has what it reads: the loaded package `mod` for a module rule, `signatures` for a rule that reads inferred types."""
-can_run(rule::Rule, mod::Union{Module, Nothing}, signatures::Union{AbstractVector{<:Type}, Nothing})::Bool =
+can_run(rule::Rule, mod::Union{Module, Nothing}, signatures::Union{AbstractVector{<:Type}, AbstractDict{Type, Vector{Inferred}}, Nothing})::Bool =
     (!(rule isa ModuleRule) || !isnothing(mod)) && (!reads_signatures(rule) || !isnothing(signatures))
 
 """The names of the rules in `rules` that read the loaded package."""
@@ -128,7 +128,8 @@ end
 
 The findings of every rule `config` leaves on, over the project at `root`, and the names of the rules
 skipped because they read the loaded package `mod` and none was given. The rules that read inferred types also
-need `signatures`, the fixed workload `inferred_methods` types `mod` over; without them they are skipped. `fix` first rewrites the files
+need `signatures`: the fixed workload `inferred_methods` types `mod` over, or the frames `entry_frames` already
+inferred; without them they are skipped. `fix` first rewrites the files
 for the rules that have a fixer. `update_baseline` seeds and lowers the baseline file; without it the
 baseline is only read.
 """
@@ -136,7 +137,7 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
         config::Config,
         root::AbstractString;
         mod::Union{Module, Nothing} = nothing,
-        signatures::Union{AbstractVector{<:Type}, Nothing} = nothing,
+        signatures::Union{AbstractVector{<:Type}, AbstractDict{Type, Vector{Inferred}}, Nothing} = nothing,
         fix::Bool = false,
         update_baseline::Bool = false,
     )::Tuple{Vector{Finding}, Vector{String}}

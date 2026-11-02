@@ -17,6 +17,7 @@ export Repository,
     undefined_names
 
 include("ratchet.jl")
+include("entries.jl")
 include("rules.jl")
 include("entry_walk.jl")
 include("candidates.jl")

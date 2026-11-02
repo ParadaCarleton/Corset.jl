@@ -95,6 +95,40 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
     @test_throws ErrorException project_root(mktempdir())
 end
 
+@testset "corset: entry signatures for the typed rules" begin
+    @test Corset.entry_sources(nothing) == [:compiled, :declared]
+    @test Corset.entry_sources("workload,tests,workload") == [:compiled, :declared, :tests]
+    @test isempty(Corset.entry_sources("none"))
+    @test_throws ErrorException Corset.entry_sources("nowhere")
+    @test_throws ErrorException Corset.entry_sources("none,tests")
+    @test Corset.command_options(Corset.parse_args(["check", "--entries", "tests"], Corset.argument_settings())).entries == "tests"
+
+    @test Corset.entry_point("test/entries.jl:signatures") == ("test/entries.jl" => :signatures)
+    @test_throws ErrorException Corset.entry_point("entries.jl")
+    @test_throws ErrorException Corset.entry_point("entries.jl:")
+
+    mod = Corset.WorkloadPackage
+    mod.bump(1)
+    plain = package_tree("name = \"WorkloadPackage\"\n", Pair[])
+    sources = Corset.seed_sources(load_config(plain), plain, nothing, mod, devnull)
+    @test first.(sources) == ["compiled", "declared"]
+    @test Tuple{typeof(mod.bump), Int} in last(first(sources))
+    summary = IOBuffer()
+    frames = Corset.seeded_frames(sources, mod, summary)
+    @test haskey(frames, Tuple{typeof(mod.bump), Int})
+    compiled = length(last(first(sources)))
+    @test String(take!(summary)) == "entry signatures: compiled $compiled, declared 0; $compiled seeds, $(length(frames)) signatures inferred\n"
+
+    configured = package_tree(
+        "name = \"WorkloadPackage\"\n[preferences.Corset]\nentry_points = \"entries.jl:signatures\"\n",
+        ["entries.jl" => "signatures() = Type[Tuple{typeof(identity), Symbol}]\n"],
+    )
+    config = load_config(configured)
+    @test config.entry_points == ("entries.jl" => :signatures)
+    @test Corset.seed_sources(config, configured, nothing, mod, devnull) == ["entry_points" => Type[Tuple{typeof(identity), Symbol}]]
+    @test_throws ErrorException Corset.seed_sources(config, configured, "workload", mod, devnull)
+end
+
 @testset "corset: every rule has a unique name and a known group" begin
     names = rule_name.(RULES)
     @test allunique(names)

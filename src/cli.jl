@@ -4,6 +4,7 @@
 
 # JSON loads on first use of `--format json`, so the other formats do not pay for it.
 using ArgParse: ArgParseSettings, ArgParseError, add_arg_table!, parse_args
+using .Entries: Entries
 
 const INNER_VARIABLE = "CORSET_INNER"
 
@@ -90,6 +91,11 @@ function argument_settings()::ArgParseSettings
         help = "the most methods one runtime-dispatch site lists; 0 lists none (default: the config's, else $DEFAULT_CANDIDATE_LIMIT)",
         arg_type = Int,
     )
+    option!(
+        check,
+        "--entries";
+        help = "where the typed rules' entry signatures come from, comma-separated: workload (compiled specializations and concrete declarations), tests (run the tests under --trace-compile) or none (default: workload)",
+    )
     option!(check, "--allow"; help = "turn a rule off (repeatable)", action = :append_arg)
     option!(check, "--warn"; help = "set a rule to warn (repeatable)", action = :append_arg)
     option!(check, "--deny"; help = "set a rule to deny (repeatable)", action = :append_arg)
@@ -130,6 +136,7 @@ function with_overrides(
         config.pedantic || pedantic,
         levels,
         checked_limit(something(candidate_limit, config.candidate_limit), "--candidate-limit"),
+        config.entry_points,
     )
 end
 
@@ -151,6 +158,7 @@ struct CheckOptions
     no_load::Bool
     overrides::Vector{Pair{String, Symbol}}
     candidate_limit::Union{Nothing, Int}
+    entries::Union{Nothing, String}
 end
 
 function CheckOptions(arguments::AbstractDict)::CheckOptions
@@ -165,6 +173,7 @@ function CheckOptions(arguments::AbstractDict)::CheckOptions
         arguments["no-load"],
         vcat(level_overrides.((arguments,), ("allow", "warn", "deny"))...),
         arguments["candidate-limit"],
+        arguments["entries"],
     )
 end
 
@@ -225,6 +234,62 @@ function relaunch(root::AbstractString, args::AbstractVector{<:AbstractString}):
     end
     error("execv failed: $(Libc.strerror(Libc.errno()))")
     # COV_EXCL_STOP
+end
+
+"""The `Entries` sources each `--entries` name stands for."""
+const ENTRY_SOURCES = (; workload = (:compiled, :declared), tests = (:tests,), none = ())
+
+"""
+The `Entries` sources the `--entries` list `entries` (`workload,tests`) names, `workload` when it is
+`nothing`. An unknown name, or `none` beside another, throws.
+"""
+function entry_sources(entries::Union{Nothing, AbstractString})::Vector{Symbol}
+    names = Symbol.(split(something(entries, "workload"), ','))
+    unknown = setdiff(names, keys(ENTRY_SOURCES))
+    if !isempty(unknown)
+        error("--entries names no source $(join(unknown, ", ")); the sources are $(join(keys(ENTRY_SOURCES), ", "))")
+    end
+    if :none in names && length(names) > 1
+        error("--entries none seeds nothing; it cannot join $(join(setdiff(names, (:none,)), ", "))")
+    end
+    return unique(Symbol[source for name in names for source in ENTRY_SOURCES[name]])
+end
+
+"""
+The entry signatures of the loaded package `mod` at `root`, by source name: the `entry_points` of
+`config` alone when it sets them, else the `entries` sources. Test output goes to `output`; the
+tests run without this command's own environment variables.
+"""
+function seed_sources(
+        config::Config,
+        root::AbstractString,
+        entries::Union{Nothing, AbstractString},
+        mod::Module,
+        output::IO,
+    )::Vector{Pair{String, Vector{Type}}}
+    if !isnothing(config.entry_points)
+        if !isnothing(entries)
+            error("entry_points in the configuration replaces --entries; drop one")
+        end
+        file, name = config.entry_points
+        return ["entry_points" => Entries.configured_signatures(abspath(root, file), name)]
+    end
+    sources = entry_sources(entries)
+    return Pair{String, Vector{Type}}.(string.(sources), Entries.source_signatures.((mod,), sources; root, output, unset = (INNER_VARIABLE, "JULIA_LOAD_PATH")))
+end
+
+"""The line that says how many signatures each of `sources` gave, how many seeds their union holds, and how many signatures the walk `frames` inferred."""
+function seed_summary(sources::AbstractVector{Pair{String, Vector{Type}}}, frames::AbstractDict{Type})::String
+    counts = join(["$name $(length(signatures))" for (name, signatures) in sources], ", ")
+    seeds = length(unique(reduce(vcat, last.(sources); init = Type[])))
+    return "entry signatures: $counts; $seeds seeds, $(length(frames)) signatures inferred"
+end
+
+"""The `entry_frames` of `mod` the typed rules read, walked once from the union of `sources`, with `seed_summary` printed to `output`."""
+function seeded_frames(sources::AbstractVector{Pair{String, Vector{Type}}}, mod::Module, output::IO)::Dict{Type, Vector{Inferred}}
+    frames = entry_frames(unique(reduce(vcat, last.(sources); init = Type[])), mod)
+    println(output, seed_summary(sources, frames))
+    return frames
 end
 
 """The path of `site` relative to `root`; empty for a site with no file."""
@@ -320,13 +385,21 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
         return relaunch(root, args) # COV_EXCL_LINE
     end
     mod = nothing
+    frames = nothing
     if loads
         mod = load_package(root)
+        sources = Pair{String, Vector{Type}}[]
+        if any(reads_signatures, enabled_rules(config))
+            sources = seed_sources(config, root, options.entries, mod, err)
+        end
+        if !isempty(sources)
+            frames = seeded_frames(sources, mod, err)
+        end
     end
-    findings, skipped = run_rules(config, root; mod, fix = options.fix, update_baseline = options.update_baseline)
+    findings, skipped = run_rules(config, root; mod, signatures = frames, fix = options.fix, update_baseline = options.update_baseline)
     print_findings(out, root, findings, options.format)
     if !isempty(skipped)
-        println(err, "skipped (they read the loaded package or need signatures): ", join(skipped, ", "))
+        println(err, "skipped (they read the loaded package or need entry signatures): ", join(skipped, ", "))
     end
     return exit_code(findings, options.deny_warnings)
 end

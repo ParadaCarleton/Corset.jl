@@ -1,6 +1,8 @@
 # Code rules checked on a loaded module and on its repository's Julia source: lowered code,
 # bindings, types and parsed text. Each rule reports its sites through `ratchet!`.
 
+using .Entries: defined_methods, module_bindings
+
 const COMPILER = Base.Compiler
 const SYNTAX = Base.JuliaSyntax # lint: non-public-access  the registered JuliaSyntax lags the parser Julia 1.13 ships
 
@@ -51,48 +53,6 @@ function is_closure_type(value::Any)::Bool # lint: abstract-local  reflects on v
     return unwrapped isa DataType &&
         unwrapped <: Function &&
         startswith(string(unwrapped.name.name), "#")
-end
-
-"""
-    defined_methods(mod)
-
-The methods `mod` defines on its own functions and types, closures included: each
-function's methods, and each type's constructors and call methods.
-
-ponytail: methods `mod` adds to another module's function (`Base.show`, AD rules) are
-missed; `Base.visit` over the method table finds those but misses closure call methods
-on Julia 1.13 and needs a mutating callback.
-"""
-function defined_methods(mod::Module)::Vector{Method} # lint: abstract-local  reflects on values of unknown type
-    values = module_bindings(mod)
-    world = Base.get_world_counter()
-    found = reduce(
-        vcat,
-        vcat(binding_methods.(values, Function), call_methods.(values, world), binding_methods.(values, Type));
-        init = Method[],
-    )
-    return unique(found[[method.module for method in found] .=== (mod,)])
-end
-
-"""The values bound to the names of `mod`, unexported and compiler-made names included."""
-module_bindings(mod::Module)::AbstractVector = getfield.((mod,), filter(Base.Fix1(isdefined, mod), names(mod; all = true)))
-
-# The helpers below take each binding as a call argument: a closure capturing a type or function
-# specializes on it, and one compile per binding of the checked package dominated a run.
-"""The methods of binding `value` when it is a `kind`: a function's methods, or a type's constructors."""
-function binding_methods(@nospecialize(value::Any), kind::Type)::Vector{Method}
-    if !(value isa kind)
-        return Method[]
-    end
-    return collect(Method, methods(value))
-end
-
-"""The methods that call an instance of binding `value` when it is a struct type; none otherwise."""
-function call_methods(@nospecialize(value::Any), world::Integer)::Vector{Method}
-    if !(value isa Type && Base.unwrap_unionall(value) isa DataType)
-        return Method[]
-    end
-    return Method[match.method for match in Base._methods_by_ftype(Tuple{Base.unwrap_unionall(value), Vararg}, -1, world)]
 end
 
 """The name of the type whose instances `method` is called on (its function's type), or `nothing`."""

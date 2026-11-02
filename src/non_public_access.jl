@@ -4,6 +4,7 @@ const USES = ExplicitImports.get_names_used
 const MODULE_USES = ExplicitImports.filter_to_module
 const QUALIFIED_USE = ExplicitImports.process_qualified_row
 # lint: non-public-access-end
+using .Entries: defined_methods
 
 """
     non_public_accesses(mod, file = entry_file(mod))

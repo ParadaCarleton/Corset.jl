@@ -61,6 +61,13 @@ function placed(files::AbstractVector{<:Pair})::Dict{String, String}
     return Dict(name => read(joinpath(repository.root, name), String) for (name, _) in files)
 end
 
+"""Every file under `root`, by path relative to it, with its text."""
+tree_texts(root::AbstractString)::Dict{String, String} =
+    Dict(relpath(joinpath(directory, name), root) => read(joinpath(directory, name), String) for (directory, _, names) in walkdir(root) for name in names)
+
+"""`fix_where_returns` of `text` written to a fresh file."""
+where_fixed(text::AbstractString)::String = fix_where_returns(joinpath(write_tree(mktempdir(), ["source.jl" => text]), "source.jl"))
+
 """A module of `count` structs, each one field wider than the last, and `count` functions returning a capturing closure."""
 function generated_module(count::Integer)::Module
     generated = Module(:Generated)
@@ -400,13 +407,34 @@ end
 end
 
 @testset "short-form `where` binds the method, not the return annotation" begin
-    @test fix_where_returns("f(x::V{E})::Vector{E} where {E<:Real} = x\n") ==
+    @test where_fixed("f(x::V{E})::Vector{E} where {E<:Real} = x\n") ==
         "(f(x::V{E})::Vector{E}) where {E<:Real} = x\n"
-    @test fix_where_returns("f(x::V{E}, 1)::Vector{E} where {E} = x\n") ==
+    @test where_fixed("f(x::V{E}, 1)::Vector{E} where {E} = x\n") ==
         "(f(x::V{E}, 1)::Vector{E}) where {E} = x\n"
     @testset "no argument uses the variable, so the annotation may be deliberate" begin
         kept = "g()::Vector{T} where {T} = T[]\n"
-        @test fix_where_returns(kept) == kept
+        @test where_fixed(kept) == kept
+    end
+    @testset "an unbraced `where T<:B` introduces T alone; its bound is no variable" begin
+        kept = "g(x::Real)::Union{Nothing, T} where T<:Real = x\n"
+        @test where_fixed(kept) == kept
+        @test where_fixed("f(x::T)::Vector{T} where T<:Real = [x]\n") == "(f(x::T)::Vector{T}) where T<:Real = [x]\n"
+        @test where_fixed("f(x::T)::Vector{T} where T = [x]\n") == "(f(x::T)::Vector{T}) where T = [x]\n"
+    end
+    @testset "the fixer leaves a definition a `# lint: where-return` comment opts out" begin
+        broken = "f(x::T)::Vector{T} where {T} = [x]\n"
+        fixed = "(f(x::T)::Vector{T}) where {T} = [x]\n"
+        opted_line = "f(x::T)::Vector{T} where {T} = [x] # lint: where-return  deliberate\n"
+        opted_block = "# lint: where-return-begin  deliberate\n$(broken)# lint: where-return-end\n"
+        opted_file = "# lint: where-return-file  deliberate\n$broken"
+        files = ["line.jl" => opted_line * broken, "block.jl" => opted_block * broken, "file.jl" => opted_file, "plain.jl" => broken]
+        @test Corset.rule_name(Corset.WhereReturnRule()) == Corset.WHERE_RETURN_RULE
+        tree = write_tree(mktempdir(), files)
+        fixed_sites = Corset.fix_where_returns!(Repository(tree), (".",))
+        @test sort!([(basename(site.file), site.line) for site in fixed_sites]) == [("block.jl", 4), ("line.jl", 2), ("plain.jl", 1)]
+        @test tree_texts(tree) == Dict(
+            "line.jl" => opted_line * fixed, "block.jl" => opted_block * fixed, "file.jl" => opted_file, "plain.jl" => fixed,
+        )
     end
     @testset "the long form and a method-level `where` are left alone" begin
         for kept in (
@@ -414,7 +442,7 @@ end
                 "f(x::V{E}) where {E} = x\n",
                 "(f(x::V{E})::Vector{E}) where {E} = x\n",
             )
-            @test fix_where_returns(kept) == kept
+            @test where_fixed(kept) == kept
             path = tempname()
             write(path, kept)
             @test isempty(where_return_sites(path))
@@ -507,11 +535,48 @@ end
         result = placed(["main.jl" => "module M\n    using A: a\n    include(\"child.jl\")\nend\n", "child.jl" => "    using C: c\n    g() = a + c\n"])
         @test result["child.jl"] == "    using C: c\n    using A: a\n    g() = a + c\n"
     end
-    @testset "an import has nowhere to go in a module without imports" begin
-        @test_throws ErrorException placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "module Inner\ng() = a\nend\n"])
+    @testset "a file that opens its own module is no target: its names are another module's" begin
+        inner = "module Inner\ng() = a\nend\n"
+        @test placed(["a.jl" => "using A: a\ninclude(\"z.jl\")\n", "z.jl" => inner]) == Dict("a.jl" => "include(\"z.jl\")\n", "z.jl" => inner)
+        documented = "\"\"\"Doc.\"\"\"\nbaremodule Sub\nusing B: b\ng() = a + b\nend\n"
+        result = placed(["main.jl" => "module M\nusing A: a\ninclude(\"sub.jl\")\nend\n", "sub.jl" => documented])
+        @test result == Dict("main.jl" => "module M\ninclude(\"sub.jl\")\nend\n", "sub.jl" => documented)
     end
-    @testset "an unused import sharing its line with code is cut out of the line" begin
-        @test placed(["main.jl" => "module M; using A: a; f() = 1; end\n"])["main.jl"] == "module M; ; f() = 1; end\n"
+    @testset "a moved import lands after the file's last top-level import, outside its module blocks" begin
+        inner = "module Inner\nusing B: b\nh() = b\nend\n"
+        result = placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "g() = a\n$inner"])
+        @test result["child.jl"] == "using A: a\ng() = a\n$inner"
+        result = placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "using C: c\ng() = a + c\n$inner"])
+        @test result["child.jl"] == "using C: c\nusing A: a\ng() = a + c\n$inner"
+    end
+    @testset "an unused import sharing its line with code is cut out of the line, with its `;`" begin
+        @test placed(["main.jl" => "module M; using A: a; f() = 1; end\n"])["main.jl"] == "module M; f() = 1; end\n"
+        @test placed(["main.jl" => "using A: a; const X = 1\nf() = X\n"])["main.jl"] == "const X = 1\nf() = X\n"
+        @test placed(["main.jl" => "    using A: a  # why\nf() = 1\n"])["main.jl"] == "f() = 1\n"
+        @test placed(["main.jl" => "using A: a;\nf() = 1"])["main.jl"] == "f() = 1"
+    end
+    @testset "a failed write leaves every file of the tree as it was" begin
+        files = ["a.jl" => "using A: a\ninclude(\"sub/z.jl\")\n", "sub/z.jl" => "g() = a\n"]
+        tree = write_tree(mktempdir(), files)
+        chmod(joinpath(tree, "sub"), 0o555)
+        try
+            @test_throws SystemError place_imports!(Repository(tree), (".",))
+        finally
+            chmod(joinpath(tree, "sub"), 0o755)
+        end
+        @test tree_texts(tree) == Dict(files)
+    end
+    @testset "the fixer leaves an import a `# lint: misplaced-import` comment opts out, in every form" begin
+        files = [
+            "file.jl" => "# lint: misplaced-import-file  kept\nusing A: a\n",
+            "block.jl" => "# lint: misplaced-import-begin  kept\nusing A: a\n# lint: misplaced-import-end\nusing B: b\n",
+            "multiline.jl" => "using C:\n    c # lint: misplaced-import  kept\n",
+        ]
+        @test Corset.rule_name(Corset.MisplacedImportRule()) == Corset.MISPLACED_IMPORT_RULE
+        tree = write_tree(mktempdir(), files)
+        @test site_keys(misplaced_imports(Repository(tree), (".",))) == ["block.jl b"]
+        place_imports!(Repository(tree), (".",))
+        @test tree_texts(tree) == Dict(files[1], "block.jl" => "# lint: misplaced-import-begin  kept\nusing A: a\n# lint: misplaced-import-end\n", files[3])
     end
     @testset "aliases, macros and string macros are names" begin
         @test placed(["main.jl" => "using A: a as b, @m\nf() = b\ng() = raw\"x\"\n"])["main.jl"] == "using A: a as b\nf() = b\ng() = raw\"x\"\n"
@@ -525,6 +590,11 @@ end
         end
         cyclic = placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "include(\"child.jl\")\ng() = a\n"])
         @test cyclic["main.jl"] == "include(\"child.jl\")\n"
+    end
+    @testset "include paths resolve as undefined_names resolves them: joinpath without @__DIR__ too" begin
+        files = ["main.jl" => "using A: a\ninclude(joinpath(\"sub\", \"child.jl\"))\n", "sub/child.jl" => "g() = a\n"]
+        @test placed(files)["sub/child.jl"] == "using A: a\ng() = a\n"
+        @test Corset.included_path(:(joinpath("sub", @__DIR__, "x.jl")), "/root") == "/root/x.jl"
     end
 end
 

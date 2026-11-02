@@ -113,11 +113,14 @@ end
     sources = Corset.seed_sources(load_config(plain), plain, nothing, mod, devnull)
     @test first.(sources) == ["compiled", "declared"]
     @test Tuple{typeof(mod.bump), Int} in last(first(sources))
-    summary = IOBuffer()
-    frames = Corset.seeded_frames(sources, mod, summary)
+    frames = Corset.seeded_frames(sources, mod)
     @test haskey(frames, Tuple{typeof(mod.bump), Int})
     compiled = length(last(first(sources)))
-    @test String(take!(summary)) == "entry signatures: compiled $compiled, declared 0; $compiled seeds, $(length(frames)) signatures inferred\n"
+    @test Corset.seed_summary(sources, frames, 3 * 2^20 + 1) ==
+        "entry signatures: compiled $compiled, declared 0; $compiled seeds, $(length(frames)) signatures inferred; peak RSS 3 MiB"
+    @test sprint(Corset.warn_tests!, [:compiled, :tests]) ==
+        "warning: --entries tests runs the package's whole test suite, and every process it starts, beside this one\n"
+    @test isempty(sprint(Corset.warn_tests!, [:compiled, :declared]))
 
     configured = package_tree(
         "name = \"WorkloadPackage\"\n[preferences.Corset]\nentry_points = \"entries.jl:signatures\"\n",

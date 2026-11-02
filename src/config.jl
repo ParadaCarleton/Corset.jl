@@ -31,7 +31,7 @@ const LEVELS = (:allow, :warn, :deny)
 
 """One `[[preferences.Corset.forbidden_patterns]]` entry, as written (`ForbiddenPattern` holds the compiled form)."""
 @option struct ForbiddenPatternPreference
-    name::String
+    name::String # COV_EXCL_LINE  a constructor `@option` generates, attributed to this line
     pattern::String
     message::String
     unless::Union{Nothing, String} = nothing
@@ -124,13 +124,13 @@ function load_config(root::AbstractString)::Config
 end
 
 """The `ForbiddenPattern` of entry `entry`; a pattern that does not compile throws a `UsageError`."""
-function forbidden_pattern(entry::ForbiddenPatternPreference)::ForbiddenPattern
+function forbidden_pattern(entry::ForbiddenPatternPreference)::ForbiddenPattern # lint: unmarked-mutation  builds a tuple of the vector's length
     pattern = compiled_pattern(entry.pattern, "pattern of $(repr(entry.name))")
     unless = nothing
     if !isnothing(entry.unless)
         unless = compiled_pattern(entry.unless, "unless of $(repr(entry.name))")
     end
-    return ForbiddenPattern(entry.name, pattern, entry.message, unless, Tuple(entry.skip_files))
+    return ForbiddenPattern(entry.name, pattern, entry.message, unless, Tuple(entry.skip_files)) # lint: runtime-dispatch  a tuple of the vector's length
 end
 
 """The `Regex` of `text`; one that does not compile throws a `UsageError` naming `what`."""
@@ -194,7 +194,7 @@ function repository(config::Config, root::AbstractString)::Repository
     if !isnothing(config.baseline)
         baseline = abspath(root, config.baseline)
     end
-    return Repository(
+    return Repository( # lint: runtime-dispatch  the keyword call checks the tuple settings once per run
         root;
         baseline,
         one_letter_exempt = config.one_letter_exempt,

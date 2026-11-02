@@ -97,7 +97,7 @@ function load_config(root::AbstractString)::Config
         end
     end
     return Config(
-        configured_directories(root, prefs.directories),
+        Tuple(configured_directories(root, prefs.directories)),
         prefs.baseline,
         Tuple(Symbol.(something(prefs.one_letter_exempt, String[]))),
         Tuple(something(prefs.skipped_directories, String[])),
@@ -113,19 +113,19 @@ end
 The `directories` setting: `src` when unset, which may be absent. A set directory missing under `root`
 throws; one inside another listed one is dropped, so no file is read twice.
 """
-configured_directories(::AbstractString, ::Nothing)::Tuple{String} = ("src",)
+configured_directories(::AbstractString, ::Nothing)::Vector{String} = ["src"]
 
-function configured_directories(root::AbstractString, directories::AbstractVector{String})::Tuple{Vararg{String}}
-    absent = filter(!isdir ∘ Base.Fix1(joinpath, root), directories)
+function configured_directories(root::AbstractString, directories::AbstractVector{String})::Vector{String} # lint: unmarked-mutation  isdir's ccall reads each path
+    absent = directories[.!isdir.(joinpath.(root, directories))]
     if !isempty(absent)
         error("[preferences.Corset] directories names $(join(repr.(absent), ", ")), missing under $root")
     end
     paths = unique(directory_path.(directories))
-    return Tuple(path for path in paths if !any(Base.Fix2(holds, path), paths))
+    return paths[.!vec(any(holds.(permutedims(paths), paths); dims = 2))]
 end
 
 """Relative directory path `directory` normalized: no `.` part and no trailing separator."""
-directory_path(directory::AbstractString)::String = joinpath(splitpath(normpath(directory))...)
+directory_path(directory::AbstractString)::String = dirname(joinpath(normpath(directory), ""))
 
 """Whether directory path `outer` strictly holds directory path `inner`; both are normalized and relative."""
 function holds(outer::AbstractString, inner::AbstractString)::Bool

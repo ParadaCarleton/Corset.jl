@@ -285,10 +285,10 @@ function diff_ignored(options::CheckOptions)::Vector{String}
 end
 
 """
-Throw on a combination of `options` that cannot mean what it says under `config`: `--diff` with a flag
-it ignores, `--entries` with `--no-load` (the typed rules need the package), or an unknown `--entries` source.
+`options`, checked under `config`: `--diff` with a flag it ignores, `--entries` with `--no-load` (the
+typed rules need the package), or an unknown `--entries` source throws.
 """
-function check_flags(options::CheckOptions, config::Config)::Nothing
+function checked_options(options::CheckOptions, config::Config)::CheckOptions
     ignored = diff_ignored(options)
     if !isempty(ignored)
         error("--diff only prints the fixers' rewrites and ignores $(join(ignored, ", ")); drop them")
@@ -297,7 +297,7 @@ function check_flags(options::CheckOptions, config::Config)::Nothing
         error("--no-load skips the typed rules, which read --entries; drop one")
     end
     checked_entries(config, options.entries)
-    return nothing
+    return options
 end
 
 """
@@ -428,7 +428,7 @@ end
 function run_options(options::CheckOptions, args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Int
     root = project_root(options.path)
     config = with_overrides(load_config(root), options.pedantic, options.overrides, options.candidate_limit)
-    check_flags(options, config)
+    options = checked_options(options, config)
     if options.diff
         return print_fix_diff(out, config, root, options.fix)
     end
@@ -493,7 +493,7 @@ function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::
         elseif error_ isa InterruptException
             rethrow()
         end
-        println(err, "corset: internal error: ", sprint(showerror, error_, catch_backtrace()))
+        println(err, "corset: internal error: ", sprint(showerror, error_, catch_backtrace())) # lint: runtime-dispatch  any exception
         return 3
     end
 end

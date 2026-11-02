@@ -325,7 +325,7 @@ end
         end
     end
     configured = package_tree("name = \"Demo\"\n[preferences.Corset]\nentry_points = \"entries.jl:signatures\"\n", SOURCE_TREE)
-    @test_throws ErrorException Corset.check_flags(Corset.command_options(Corset.parse_args(["check", "--entries", "workload"], Corset.argument_settings())), load_config(configured))
+    @test_throws ErrorException Corset.checked_options(Corset.command_options(Corset.parse_args(["check", "--entries", "workload"], Corset.argument_settings())), load_config(configured))
     @test_throws ErrorException Corset.load_package(
         package_tree(
             "version = \"1\"\n",

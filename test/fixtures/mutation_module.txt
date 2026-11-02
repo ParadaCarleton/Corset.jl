@@ -52,3 +52,11 @@ copied(names) = copy(names)
 joined(first_names, last_names) = [first_names; last_names]
 copied_into(names, source) = (copyto!(names.ref.mem, source.ref.mem); nothing)
 missing_paths(root, paths) = paths[.!isdir.(joinpath.(root, paths))]
+zero_filled(buffer) = (ccall(:memset, Ptr{Cvoid}, (Ptr{UInt8}, Cint, Csize_t), buffer, 0, length(buffer)); nothing)
+stored(buffer) = (GC.@preserve buffer unsafe_store!(pointer(buffer), 0x01); nothing)
+measured(buffer) = Int(ccall(:strlen, Csize_t, (Ptr{UInt8},), buffer))
+stepped(buffer, steps) = (address = pointer(buffer); for _ in 1:steps address += 1 end; unsafe_store!(address, 0x01); nothing)
+@noinline first_address(buffer) = pointer(buffer)
+stored_through(buffer) = (unsafe_store!(first_address(buffer), 0x01); nothing)
+string_cleared(name) = (ccall(:memset, Ptr{Cvoid}, (Ptr{UInt8}, Cint, Csize_t), pointer(name), 0, 0); nothing)
+passed_pointer(address) =(ccall(:memset, Ptr{Cvoid}, (Ptr{UInt8}, Cint, Csize_t), address, 0, 1); nothing)

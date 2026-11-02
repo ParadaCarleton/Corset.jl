@@ -10,6 +10,12 @@ const WRITING_BUILTINS = (
     Core.memoryrefset!, Core.memoryrefmodify!, Core.memoryrefswap!, Core.memoryrefreplace!, Core.memoryrefsetonce!,
 )
 
+# Intrinsics that write through the pointer in their first operand (`unsafe_store!` and its atomic forms).
+const POINTER_WRITES = (
+    Core.Intrinsics.pointerset, Core.Intrinsics.atomic_pointerset, Core.Intrinsics.atomic_pointerswap,
+    Core.Intrinsics.atomic_pointermodify, Core.Intrinsics.atomic_pointerreplace,
+)
+
 # Builtins whose result points into their first operand's memory. Escape analysis aliases neither.
 const MEMORY_VIEWS = (Core.memoryrefnew, Core.memoryrefget)
 
@@ -17,7 +23,10 @@ const MEMORY_VIEWS = (Core.memoryrefnew, Core.memoryrefget)
 const CALLING_BUILTINS = (Core._apply_iterate, Core.invoke)
 
 # C functions whose writes are known: the argument positions each may write. Its other arguments are read.
-const FOREIGN_WRITES = (; jl_genericmemory_copyto = (1,))
+const FOREIGN_WRITES = (;
+    jl_genericmemory_copyto = (1,), memmove = (1,), memcpy = (1,), memset = (1,),
+    strlen = (), memchr = (), memcmp = (), strcmp = (), strncmp = (),
+)
 
 """The escape analysis of `ir`, a method body of `nargs` arguments, in the current world."""
 function escape_state(ir::COMPILER.IRCode, nargs::Integer)::ESCAPE.EscapeState
@@ -185,7 +194,7 @@ function statement_writes(
     if statement.head === :invoke
         return invoked_writes(statement, estate, walk, stack, search)
     elseif statement.head === :foreigncall
-        operands = statement.args[6:(5 + length(statement.args[3]))]
+        operands = foreign_operands(statement)
         return ArgumentWrites(Int[], Int[], writable_operands(operands[foreign_positions(first(statement.args), length(operands))], ir, estate))
     elseif statement.head !== :call
         return NO_WRITES
@@ -193,6 +202,8 @@ function statement_writes(
     builtin = called_builtin(statement, ir)
     if builtin in WRITING_BUILTINS
         return ArgumentWrites(operand_indices(statement.args[2:2], estate), Int[], Int[])
+    elseif builtin in POINTER_WRITES
+        return ArgumentWrites(writable_operands(statement.args[2:2], ir, estate), Int[], Int[])
     elseif isnothing(builtin) || builtin in CALLING_BUILTINS
         return dispatch_writes(statement, ir, estate, walk, stack, search)
     end
@@ -284,11 +295,58 @@ function candidate_argument(method::Method, position::Integer)::Int
 end
 
 """
-The indices of the `operands` whose IR type is `writable`. A call cannot write a `Symbol` or a bits
-value (a `Ptr` too, which C reads by value) it is passed.
+The indices of the `operands` whose IR type is `writable`, and of the values a `Ptr` operand points
+into (`pointer_sources`). A call cannot write a `Symbol`, a `Cstring` or another bits value it is passed.
 """
 writable_operands(operands::AbstractVector, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::Vector{Int} =
-    operand_indices(operands[writable.(COMPILER.widenconst.(COMPILER.argextype.(operands, (ir,))))], estate)
+    reduce(vcat, pointer_sources.(operands, (ir,), (estate,), (Int[],)); init = Int[])
+
+"""
+The index of `operand` when its IR type is `writable`; for a `Ptr`, the indices of the `writable`
+values whose memory it may point into, traced back through the statements that compute it (`pointer`,
+`unsafe_convert`, a field read, a bitcast, pointer arithmetic, a phi). `seen` holds the SSA indices
+already traced. A `Ptr` argument reaches no argument.
+"""
+function pointer_sources(operand::Core.SSAValue, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState, seen::AbstractVector{Int})::Vector{Int}
+    if operand.id in seen || !(COMPILER.widenconst(COMPILER.argextype(operand, ir)) <: Ptr)
+        return writable_index(operand, ir, estate)
+    end
+    sources = traced_operands(ir.stmts.stmt[operand.id])
+    return reduce(vcat, pointer_sources.(sources, (ir,), (estate,), ([seen; operand.id],)); init = Int[])
+end
+
+pointer_sources(operand::Core.Argument, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState, ::AbstractVector{Int})::Vector{Int} =
+    writable_index(operand, ir, estate)
+
+pointer_sources(::Any, ::COMPILER.IRCode, ::ESCAPE.EscapeState, ::AbstractVector{Int})::Vector{Int} = Int[]
+
+"""The index of IR value `operand` when its type is `writable`; none otherwise."""
+function writable_index(operand::Union{Core.Argument, Core.SSAValue}, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::Vector{Int}
+    if writable(COMPILER.widenconst(COMPILER.argextype(operand, ir)))
+        return [operand_index(operand, estate)]
+    end
+    return Int[]
+end
+
+# IR operands, as `Expr.args` holds them.
+const IR_OPERANDS = fieldtype(Expr, :args)
+
+"""The operands of an IR statement that a `Ptr` it computes may derive from."""
+function traced_operands(statement::Expr)::IR_OPERANDS
+    if statement.head === :foreigncall
+        return foreign_operands(statement)
+    elseif statement.head === :invoke
+        return statement.args[3:end]
+    end
+    return statement.args[2:end]
+end
+
+traced_operands(statement::Core.PhiNode)::IR_OPERANDS = statement.values[filter(Base.Fix1(isassigned, statement.values), eachindex(statement.values))]
+traced_operands(statement::Core.PiNode)::IR_OPERANDS = collect(eltype(IR_OPERANDS), (statement.val,))
+traced_operands(::Any)::IR_OPERANDS = IR_OPERANDS()
+
+"""The C-function arguments of `:foreigncall` `statement`, without its GC roots."""
+foreign_operands(statement::Expr)::IR_OPERANDS = statement.args[6:(5 + length(statement.args[3]::Core.SimpleVector))]
 
 """The `ArgumentWrites` of `:invoke` statement `statement`: the indices of the operands its callee writes (`argument_writes`)."""
 function invoked_writes(

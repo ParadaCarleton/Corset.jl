@@ -284,7 +284,6 @@ widening_detail = 1
 "float_widening.jl statement_operands" = 2
 "imports.jl addition_edit" = 1
 "imports.jl import_statement" = 1
-"imports.jl literal_pieces" = 1
 "imports.jl move_targets" = 1
 "imports.jl single_unit" = 1
 "mutation.jl declared_io" = 1

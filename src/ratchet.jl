@@ -117,8 +117,8 @@ repository_sources(repository::Repository, directories::Tuple{Vararg{String}})::
     reduce(vcat, julia_files.(joinpath.(repository.root, directories), (repository.skipped_directories,)); init = String[]),
 )
 
-"""The baseline entry left after `found` sites against `entry`: a note stays while its offender has a site, a count falls to `found`."""
-remaining(entry::AbstractString, found::Integer)::Union{String, Int} = ifelse(found == 0, 0, entry)
+"""The baseline entry left after `found` sites against `entry`: a note stays, a count falls to `found`."""
+remaining(entry::AbstractString, ::Integer)::String = entry
 remaining(entry::Integer, found::Integer)::Int = min(entry, found)
 
 """Whether `found` sites exceed baseline `entry`; a note allows any number."""
@@ -220,14 +220,25 @@ end
 falls(entries::AbstractDict, measured::AbstractDict{String, Int}, scopes::Tuple{Vararg{String}}, key::String)::Bool =
     any(startswith.(key, scopes)) && remaining(entries[key], get(measured, key, 0)) != entries[key]
 
+"""The keys of `entries` under one of `scopes` that hold a note and that `measured` finds no site of."""
+function stale_notes(entries::AbstractDict, measured::AbstractDict{String, Int}, scopes::Tuple{Vararg{String}})::Vector{String}
+    names = collect(String, keys(entries))
+    return sort!(names[stale.((entries,), (measured,), (scopes,), names)])
+end
+
+"""Whether `key` of `entries` is under one of `scopes`, holds a note, and `measured` finds no site of it."""
+stale(entries::AbstractDict, measured::AbstractDict{String, Int}, scopes::Tuple{Vararg{String}}, key::String)::Bool =
+    any(startswith.(key, scopes)) && entries[key] isa AbstractString && !haskey(measured, key)
+
 """
     offenders!(repository, rule, sites; scopes = ("",), fix = "")
 
 The keys of `rule`'s offenders `sites` that `repository` does not allow, logged. Sites that a `# lint:`
 comment naming the rule opts out are dropped and counted in the log; the rest are tallied by key.
 Without a baseline (`Repository`'s default) every key is returned. With one, the offenders are held to
-`rule`'s table in the baseline file: the keys past their entry are returned, and an entry the tally
-undercuts is lowered or deleted and the file rewritten. A rule with no table is seeded with its tally.
+`rule`'s table in the baseline file: the keys past their entry are returned, and a count the tally
+undercuts is lowered or deleted and the file rewritten. A note stays; one with no site is logged stale.
+A rule with no table is seeded with its tally.
 Several testsets may share one rule's table, and a run may not measure all of it (a partial copy of
 the tree): each passes the prefixes `scopes` that begin the keys it measures, and only entries under
 one of them can fall. `fix` tells the reader of the log how to repair an offender, such as the forms
@@ -269,6 +280,10 @@ function offenders!(
     if !isempty(improved)
         write_baseline!(baseline, path)
         @info "$rule fell: baseline lowered in $path" improved
+    end
+    stale_keys = stale_notes(entries, measured, scopes)
+    if !isempty(stale_keys)
+        @warn "$rule: notes with no site left, kept in $path; delete one whose offender is gone:\n" * join(stale_keys, "\n")
     end
     return logged_over(rule, measured, detail_lines(kept), over, "the baseline in $path", fix)
 end

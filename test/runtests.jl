@@ -125,9 +125,17 @@ end
         @test isempty(offenders!(repository, "rule", [sites; Site("noted", "", 0, "")]))
         @test offenders!(repository, "rule", [sites; Site("counted", "", 0, "")]) == ["counted"]
         @test offenders!(repository, "rule", [Site("fresh", "", 0, "")]; scopes = ("noted",)) == ["fresh"]
-        @test TOML.parsefile(baseline)["rule"] == Dict("counted" => 2)
         @test ratchet!(repository, "rule", [Site("counted", "", 0, "")]) == String[]
-        @test TOML.parsefile(baseline)["rule"] == Dict("counted" => 1)
+        @test TOML.parsefile(baseline)["rule"] == Dict("counted" => 1, "noted" => "kept: deliberate")
+    end
+
+    @testset "a note outlives its last site: the run logs it stale and keeps it" begin
+        root = mktempdir()
+        baseline = joinpath(root, "baseline.toml")
+        write(baseline, "[rule]\nnoted = \"kept: deliberate\"\nother = \"unassigned\"\n")
+        repository = Repository(root; baseline)
+        @test isempty(@test_logs (:warn, r"rule: notes with no site[^\n]*\nnoted$") offenders!(repository, "rule", Site[]; scopes = ("noted",)))
+        @test TOML.parsefile(baseline)["rule"] == Dict("noted" => "kept: deliberate", "other" => "unassigned")
     end
 
     @testset "repository_sources skips hidden directories, and skipped ones when asked" begin

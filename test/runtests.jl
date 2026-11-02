@@ -373,19 +373,32 @@ end
     end
 
     @testset "nothing-return: a declared Union{Nothing, …} result" begin
-        @test site_keys(found_in(nothing_returns, "nothing-return")) == ["maybe"]
+        @test site_keys(found_in(nothing_returns, "nothing-return")) == ["source.jl maybe"]
     end
 
     @testset "range-guard: floatmin, floatmax, exp's range edge, isfinite of exp" begin
-        @test site_keys(found_in(range_guards, "range-guard")) == ["guard", "edge", "finite"]
+        @test site_keys(found_in(range_guards, "range-guard")) == ["source.jl guard", "source.jl edge", "source.jl finite"]
     end
 
     @testset "repeated-statement: a statement repeated in one block" begin
         sites = found_in(repeated_statements, "repeated-statement")
         @test length(sites) == 1
-        @test startswith(only(sites).key, "twice: ")
-        @test length(only(sites).key) > length("twice: ")
+        @test startswith(only(sites).key, "source.jl twice: ")
+        @test length(only(sites).key) > length("source.jl twice: ")
         @test only(sites).line == 3
+    end
+
+    @testset "nothing-return, range-guard, repeated-statement: same-named functions in two files keep apart" begin
+        text = SNIPPETS["nothing-return"]["source"] * "\n" * SNIPPETS["range-guard"]["source"] * "\n" * SNIPPETS["repeated-statement"]["source"]
+        root = write_tree(mktempdir(), ["src/a.jl" => text, "src/b/a.jl" => text])
+        repository = Repository(root)
+        for finder in (nothing_returns, range_guards, repeated_statements)
+            first_keys, second_keys = (site_keys(finder(Source(repository, joinpath(root, file)))) for file in ("src/a.jl", "src/b/a.jl"))
+            @test !isempty(first_keys)
+            @test all(startswith("src/a.jl "), first_keys)
+            @test all(startswith("src/b/a.jl "), second_keys)
+            @test isdisjoint(first_keys, second_keys)
+        end
     end
 
     @testset "return-type: Core.Compiler.return_type" begin

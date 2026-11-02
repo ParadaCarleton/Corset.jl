@@ -842,12 +842,12 @@ function Source(repository::Repository, path::AbstractString)::Source
     locate!(located, Expr(tree), 0, Symbol("<top level>"), 0)
     return Source(path, file_key(repository, path), text, tree, located, opt_out_comments(path, text), countlines(IOBuffer(text)))
 end
-"""Functions declaring a `Union{Nothing, …}` return: a "can't compute here" answer, one site per definition."""
+"""Functions declaring a `Union{Nothing, …}` return: a "can't compute here" answer, one site per definition, keyed by file and name."""
 function nothing_returns(source::Source)::Vector{Site}
     path = source.path
     return [
         Site(
-            string(defined_name(item.node)),
+            "$(source.name) $(defined_name(item.node))",
             path,
             first(definition_lines(item.node, item.line)),
             last(definition_lines(item.node, item.line)),
@@ -859,26 +859,26 @@ function nothing_returns(source::Source)::Vector{Site}
     ]
 end
 
-"""Overflow and underflow guards, keyed by the function they sit in."""
+"""Overflow and underflow guards, keyed by file and the function they sit in."""
 function range_guards(source::Source)::Vector{Site} # lint: abstract-local  Expr nodes hold untyped arguments
-    (; path, located) = source
+    (; path, name, located) = source
     sites = Site[]
     for item in located
         if is_range_guard(item.node)
-            push!(sites, Site(string(item.enclosing), path, item.line, ""))
+            push!(sites, Site("$name $(item.enclosing)", path, item.line, ""))
         end
         for argument in item.node.args
             if argument isa Real && is_range_guard(argument)
-                push!(sites, Site(string(item.enclosing), path, item.line, ""))
+                push!(sites, Site("$name $(item.enclosing)", path, item.line, ""))
             end
         end
     end
     return sites
 end
 
-"""Statements that repeat an earlier statement of the same block, keyed `definition: statement`. A statement pasted twice runs twice; the same line in two branches is in two blocks and passes."""
+"""Statements that repeat an earlier statement of the same block, keyed `file definition: statement`. A statement pasted twice runs twice; the same line in two branches is in two blocks and passes."""
 function repeated_statements(source::Source)::Vector{Site} # lint: abstract-local  Expr nodes hold untyped arguments
-    (; path, located) = source
+    (; path, name, located) = source
     sites = Site[]
     for item in located
         if item.node.head !== :block
@@ -892,7 +892,7 @@ function repeated_statements(source::Source)::Vector{Site} # lint: abstract-loca
             elseif argument isa Expr
                 statement = without_lines(argument)
                 if statement in seen
-                    push!(sites, Site("$(item.enclosing): $statement", path, line, ""))
+                    push!(sites, Site("$name $(item.enclosing): $statement", path, line, ""))
                 end
                 push!(seen, statement)
             end

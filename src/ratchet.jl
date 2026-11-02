@@ -142,7 +142,7 @@ end
 
 function opt_out_comments(path::AbstractString, text::String)::Vector{OptOutComment}
     tokens = [token.range for token in SYNTAX.tokenize(text) if SYNTAX.kind(token) == COMMENT_KIND]
-    comments = reduce(vcat, token_comments.(text, (SYNTAX.SourceFile(text),), tokens); init = OptOutComment[])
+    comments = collect(OptOutComment, Iterators.flatten(token_comments.(text, (SYNTAX.SourceFile(text),), tokens)))
     unclosed = filter(Base.Fix1(open_begin, comments), comments)
     if !isempty(unclosed)
         throw(UsageError("$path:$(first(unclosed).line): `# lint: $(first(unclosed).rule)-begin` has no `# lint: $(first(unclosed).rule)-end` below it"))
@@ -190,7 +190,7 @@ opt_outs(path::AbstractString, rule::AbstractString)::OptOuts = opt_outs(opt_out
 function opt_outs(comments::AbstractVector{OptOutComment}, rule::AbstractString)::OptOuts
     named = [comment for comment in comments if comment.rule == rule]
     spans = span_lines.((named,), filter(is_begin, named))
-    lines = Set{Int}(reduce(vcat, spans; init = Int[comment.line for comment in named]))
+    lines = Set{Int}(Iterators.flatten((Int[comment.line for comment in named], Iterators.flatten(spans))))
     return OptOuts(any(comment.form === :file for comment in named), lines)
 end
 
@@ -205,7 +205,7 @@ span_lines(comments::AbstractVector{OptOutComment}, opening::OptOutComment)::Vec
 function julia_files(directory::AbstractString, skipped::Tuple{Vararg{String}})::Vector{String}
     entries = readdir(directory; join = true)
     entered = filter(Base.Fix2(entered_directory, skipped), entries)
-    return reduce(vcat, julia_files.(entered, (skipped,)); init = filter(julia_file, entries))
+    return String[filter(julia_file, entries); collect(String, Iterators.flatten(julia_files.(entered, (skipped,))))]
 end
 
 """Whether `julia_files` enters `entry`: a directory, not a link, not hidden and not named in `skipped`."""
@@ -217,7 +217,7 @@ julia_file(entry::AbstractString)::Bool = !isdir(entry) && endswith(entry, ".jl"
 
 """The Julia files under `directories` of `repository`; hidden directories and its `skipped_directories` are left out."""
 repository_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String} = sort!(
-    reduce(vcat, julia_files.(joinpath.(repository.root, directories), (repository.skipped_directories,)); init = String[]),
+    collect(String, Iterators.flatten(julia_files.(joinpath.(repository.root, directories), (repository.skipped_directories,)))),
 )
 
 """The baseline entry left after `found` sites against `entry`: a note stays, a count falls to `found`."""

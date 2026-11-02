@@ -39,11 +39,11 @@ module_bindings(mod::Module)::AbstractVector = getfield.((mod,), filter(Base.Fix
 package_bindings(package::Package)::AbstractVector = reduce(vcat, module_bindings.(package_modules(package)))
 
 """Each root of `package` and every module nested in one."""
-package_modules(package::Package)::Vector{Module} = reduce(vcat, nested_modules.(package.roots); init = Module[])
+package_modules(package::Package)::Vector{Module} = collect(Module, Iterators.flatten(nested_modules.(package.roots)))
 
 """`mod` and the modules bound in it whose parent it is, recursively."""
 nested_modules(mod::Module)::Vector{Module} =
-    Module[mod; reduce(vcat, nested_modules.(child_modules(mod)); init = Module[])]
+    Module[mod; collect(Module, Iterators.flatten(nested_modules.(child_modules(mod))))]
 
 """The modules bound in `mod` whose `parentmodule` is `mod`, `mod` itself excluded."""
 child_modules(mod::Module)::Vector{Module} = filter(Base.Fix1(is_child, mod), module_bindings(mod))

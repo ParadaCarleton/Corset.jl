@@ -1,7 +1,7 @@
-# Source rules on parsed expressions for error handling, path checks, scans and file writes.
+# Source rules on parsed expressions for error handling, path checks, scans, folds and file writes.
 
 """Every expression in parsed expression `node`, `node` first."""
-nested(node::Expr)::Vector{Expr} = reduce(vcat, nested.(node.args); init = [node])
+nested(node::Expr)::Vector{Expr} = Expr[node; collect(Expr, Iterators.flatten(nested.(node.args)))]
 nested(::Any)::Vector{Expr} = Expr[]
 
 """The empty name: what `called_name` and `callee` give for an expression that names no function."""
@@ -118,13 +118,11 @@ function drops_missing_paths(node::Expr)::Bool # lint: runtime-dispatch # lint: 
 end
 
 """The expressions inside the arguments of call `node`."""
-argument_expressions(node::Expr)::Vector{Expr} = reduce( # lint: unmarked-mutation  Expr nodes hold untyped arguments
-    vcat, nested.(call_arguments(node)); init = Expr[]
-)
+argument_expressions(node::Expr)::Vector{Expr} = collect(Expr, Iterators.flatten(nested.(call_arguments(node)))) # lint: unmarked-mutation  Expr nodes hold untyped arguments
 
 """The expressions inside the arguments of every `rm` call or broadcast among `located`: a cleanup removes only what exists."""
 cleanup_expressions(located::AbstractVector{Located})::Vector{Expr} =
-    mapreduce(argument_expressions, vcat, [item.node for item in located if callee(item.node) === :rm]; init = Expr[])
+    collect(Expr, Iterators.flatten(argument_expressions.([item.node for item in located if callee(item.node) === :rm])))
 
 """Whether `item` drops the paths that do not exist outside the `cleanup` expressions."""
 hides_missing_paths(cleanup::AbstractVector{Expr}, item::Located)::Bool =
@@ -162,13 +160,13 @@ function iterated(node::Any)::Vector{Union{Symbol, Expr}} # lint: runtime-dispat
         return Union{Symbol, Expr}[node]
     end
     if Meta.isexpr(node, :call) && callee(node) in ITERATION_WRAPPERS
-        return reduce(vcat, iterated.(call_arguments(node)); init = Union{Symbol, Expr}[])
+        return collect(Union{Symbol, Expr}, Iterators.flatten(iterated.(call_arguments(node))))
     end
     return Union{Symbol, Expr}[]
 end
 
 """The named collections that iterating each of `nodes` walks."""
-all_iterated(nodes::AbstractVector)::Vector{Union{Symbol, Expr}} = reduce(vcat, iterated.(nodes); init = Union{Symbol, Expr}[]) # lint: runtime-dispatch  Expr nodes hold untyped arguments
+all_iterated(nodes::AbstractVector)::Vector{Union{Symbol, Expr}} = collect(Union{Symbol, Expr}, Iterators.flatten(iterated.(nodes))) # lint: runtime-dispatch  Expr nodes hold untyped arguments
 
 """The iteration specifications `x = xs` (how `for` and generators parse `x in xs`) in a loop `header`: one, a block of them, or a generator's `if` filter over them."""
 function iteration_specs(header::Any)::Vector{Expr} # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
@@ -176,14 +174,14 @@ function iteration_specs(header::Any)::Vector{Expr} # lint: runtime-dispatch # l
         return Expr[header]
     end
     if Meta.isexpr(header, :block) || Meta.isexpr(header, :filter)
-        return reduce(vcat, iteration_specs.((header::Expr).args); init = Expr[])
+        return collect(Expr, Iterators.flatten(iteration_specs.((header::Expr).args)))
     end
     return Expr[]
 end
 
 """The named collections the loop `headers` walk."""
 header_collections(headers::AbstractVector)::Vector{Union{Symbol, Expr}} = # lint: runtime-dispatch  Expr nodes hold untyped arguments
-    all_iterated([last(spec.args) for spec in reduce(vcat, iteration_specs.(headers); init = Expr[])])
+    all_iterated([last(spec.args) for spec in collect(Expr, Iterators.flatten(iteration_specs.(headers)))])
 
 """
 The named collections parsed expression `node` walks element by element, and the expressions it
@@ -195,7 +193,7 @@ function element_loop(node::Expr)::Tuple{Vector{Union{Symbol, Expr}}, Vector{Exp
         return header_collections(node.args[1:1]), nested(node.args[2])
     end
     if node.head === :generator
-        return header_collections(node.args[2:end]), [nested(node.args[1]); reduce(vcat, nested.(node.args[2:end]); init = Expr[])]
+        return header_collections(node.args[2:end]), [nested(node.args[1]); collect(Expr, Iterators.flatten(nested.(node.args[2:end])))]
     end
     if node.head === :do && callee(node.args[1]) in ELEMENTWISE
         return all_iterated(call_arguments(node.args[1])), nested(node.args[2])
@@ -250,7 +248,58 @@ Loops, comprehensions, generators, anonymous functions mapped over a collection,
 scan that same collection per element (`count`, `filter`, `findfirst`, `in`, …): quadratic in its
 length. Keyed by file and the function they sit in.
 """
-quadratic_scans(source::Source)::Vector{Site} = reduce(vcat, scan_sites.((source,), source.located); init = Site[])
+quadratic_scans(source::Source)::Vector{Site} = collect(Site, Iterators.flatten(scan_sites.((source,), source.located)))
+
+"""The concatenations a fold copies its whole accumulator into at each step."""
+const CONCATENATIONS = (:vcat, :hcat, :cat, :hvcat)
+
+"""The folds over a collection, each with the position of its operator among the call's arguments."""
+const FOLD_OPERATORS = (; reduce = 1, foldl = 1, foldr = 1, mapreduce = 2, mapfoldl = 2, mapfoldr = 2)
+
+"""The name keyword argument `argument` passes: `init` for `init = x` and for `init` after `;`."""
+keyword_name(argument::Symbol)::Symbol = argument
+keyword_name(argument::Expr)::Symbol = Meta.isexpr(argument, :kw) ? called_name(first(argument.args)) : NO_NAME # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+
+"""The names of the keywords call `node` passes, after `;` or as `name = value`."""
+keyword_names(node::Expr)::Vector{Symbol} = Symbol[ # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+    keyword_name.(filter(Base.Fix2(Meta.isexpr, :kw), node.args));
+    keyword_name.(collect(Any, Iterators.flatten([argument.args for argument in node.args if Meta.isexpr(argument, :parameters)])))
+]
+
+"""
+Whether `call`, with `shift` arguments moved to a `do` block, folds a concatenation one piece at a time.
+`reduce` does only with `init` or over a generator; on a vector it concatenates once.
+"""
+function folds_concatenation(call::Expr, shift::Integer)::Bool # lint: abstract-local # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+    name = callee(call)
+    position = get(FOLD_OPERATORS, name, 0) - shift
+    arguments = call_arguments(call)
+    if call.head !== :call || !(1 <= position < length(arguments)) || !(called_name(arguments[position]) in CONCATENATIONS)
+        return false
+    end
+    return name !== :reduce || :init in keyword_names(call) || Meta.isexpr(arguments[position + 1], :generator)
+end
+
+"""Whether parsed expression `node` folds a concatenation piece by piece, in call or `do` form (`folds_concatenation`)."""
+function concatenation_fold(node::Expr)::Bool # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+    if node.head === :do
+        return Meta.isexpr(node.args[1], :call) && folds_concatenation(node.args[1], 1)
+    end
+    return folds_concatenation(node, 0)
+end
+
+"""
+Folds that concatenate one piece at a time, keyed by file and the function they sit in:
+`reduce(vcat, pieces; init = T[])`, `reduce(vcat, generator)`, `foldl(vcat, …)` and `mapreduce(f, hcat, …)`.
+Each step copies the accumulator, so the fold is quadratic in the total length.
+"""
+function quadratic_concatenations(source::Source)::Vector{Site}
+    (; path, name, located) = source
+    return [
+        Site("$name $(item.enclosing)", path, item.line, "concatenates one piece at a time, copying the result per piece; use `collect(T, Iterators.flatten(pieces))`")
+            for item in located if concatenation_fold(item.node)
+    ]
+end
 
 """The `open` modes that write to the file."""
 const WRITE_MODES = ("w", "a", "w+", "a+", "r+")
@@ -260,12 +309,12 @@ const WRITE_KEYWORDS = (:write, :append, :truncate)
 
 """Every name in parsed expression `node`."""
 mentioned(node::Symbol)::Vector{Symbol} = [node]
-mentioned(node::Expr)::Vector{Symbol} = reduce(vcat, mentioned.(node.args); init = Symbol[]) # lint: runtime-dispatch  Expr nodes hold untyped arguments
+mentioned(node::Expr)::Vector{Symbol} = collect(Symbol, Iterators.flatten(mentioned.(node.args))) # lint: runtime-dispatch  Expr nodes hold untyped arguments
 mentioned(::Any)::Vector{Symbol} = Symbol[]
 
 """The names the iteration `headers` bind per element: `x` in `x in xs`, `index` and `item` in `(index, item) in enumerate(xs)`."""
 header_variables(headers::AbstractVector)::Vector{Symbol} = # lint: runtime-dispatch  Expr nodes hold untyped arguments
-    reduce(vcat, [mentioned(first(spec.args)) for spec in reduce(vcat, iteration_specs.(headers); init = Expr[])]; init = Symbol[])
+    collect(Symbol, Iterators.flatten([mentioned(first(spec.args)) for spec in collect(Expr, Iterators.flatten(iteration_specs.(headers)))]))
 
 """The names an element loop `node` (as `element_loop` reads it) binds per element: its iteration variables, or its anonymous function's arguments."""
 function loop_variables(node::Expr)::Vector{Symbol} # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
@@ -286,7 +335,7 @@ end
 
 """Whether `open` call `node` opens its file to write: a mode `"w"`, `"a"`, `"w+"`, `"a+"` or `"r+"`, or `write`, `append` or `truncate` set to `true`."""
 function opens_to_write(node::Expr)::Bool # lint: abstract-local # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
-    keywords = reduce(vcat, [argument.args for argument in node.args if Meta.isexpr(argument, :parameters)]; init = node.args[1:0])
+    keywords = collect(Any, Iterators.flatten([argument.args for argument in node.args if Meta.isexpr(argument, :parameters)]))
     return any(in(WRITE_MODES), filter(Base.Fix2(isa, String), call_arguments(node))) ||
         any(keyword -> Meta.isexpr(keyword, :kw) && first(keyword.args) in WRITE_KEYWORDS && last(keyword.args) === true, keywords)
 end
@@ -300,7 +349,7 @@ function writes_per_element(variables::AbstractVector{Symbol}, node::Expr)::Bool
         return !isdisjoint(mentioned(first(call_arguments(node))), variables)
     end
     return callee(node) === :open && opens_to_write(node) &&
-        !isdisjoint(reduce(vcat, mentioned.(call_arguments(node)); init = Symbol[]), variables)
+        !isdisjoint(collect(Symbol, Iterators.flatten(mentioned.(call_arguments(node)))), variables)
 end
 
 """

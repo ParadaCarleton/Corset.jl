@@ -125,13 +125,13 @@ function fix_diff(config::Config, root::AbstractString)::String
 end
 
 """
-    run_rules(config, root; mod = nothing, frames = nothing, fix = false, update_baseline = false)
+    run_rules(config, root; mod = nothing, frames = nothing, fix = false, update_baseline = false, own_methods = defined_methods(mod))
 
 The findings of every rule `config` leaves on, over the project at `root`, and the names of the rules
 skipped because they read the loaded package `mod` and none was given. The rules that read inferred types also
 need `frames`, the `entry_frames` of `mod`; without them they are skipped. `fix` first rewrites the files
 for the rules that have a fixer. `update_baseline` seeds and lowers the baseline file; without it the
-baseline is only read.
+baseline is only read. `own_methods` holds the `defined_methods` of `mod`.
 """
 function run_rules( # lint: abstract-local  loops over a tuple of different rule types
         config::Config,
@@ -140,6 +140,7 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
         frames::Union{AbstractVector{Inferred}, Nothing} = nothing,
         fix::Bool = false,
         update_baseline::Bool = false,
+        own_methods::AbstractVector{Method} = defined_methods(mod),
     )::Tuple{Vector{Finding}, Vector{String}}
     repository_ = repository(config, root)
     directories = present_directories(repository_, config.directories)
@@ -150,7 +151,7 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
         apply_fixes!(runnable, repository_, directories)
     end
     inferred = something(frames, Inferred[])
-    context = Context(repository_, directories, mod; inferred, candidates = CandidateSearch(inferred; config.candidate_limit))
+    context = Context(repository_, directories, mod; inferred, candidates = CandidateSearch(inferred; config.candidate_limit), own_methods)
     sites = Dict{String, Vector{Site}}(rule_name(rule) => Site[] for rule in runnable)
     for rule in runnable
         if !(rule isa FileRule)

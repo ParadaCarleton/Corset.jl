@@ -85,11 +85,14 @@ function parenthesized(text::AbstractString, edits::AbstractVector{WhereParenthe
     return rewritten
 end
 
+"""The file `path` => its new text after the `edits` whose `owners` (their paths) name it."""
+parenthesized_file(edits::AbstractVector{WhereParentheses}, owners::AbstractVector{String}, path::String)::Pair{String, String} =
+    path => parenthesized(read(path, String), edits[owners .== path])
+
 """The new text of each file `edits` touch, as path => text."""
 function parenthesized_texts(edits::AbstractVector{WhereParentheses})::Vector{Pair{String, String}}
-    paths = unique(String[edit.path for edit in edits])
     owners = String[edit.path for edit in edits]
-    return [path => parenthesized(read(path, String), edits[owners .== path]) for path in paths]
+    return parenthesized_file.((edits,), (owners,), unique(owners))
 end
 
 """

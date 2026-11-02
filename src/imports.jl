@@ -493,7 +493,8 @@ end
 
 function (placed::PlacedTexts)(moves::AbstractVector{ImportMove})::Vector{Pair{String, String}}
     touched = Set(reduce(vcat, [vcat([move.file], move.targets) for move in moves]; init = String[]))
-    return [file.path => placed_text(file, moves) for file in placed.files if file.path in touched]
+    rewritten = placed.files[in.([file.path for file in placed.files], (touched,))]
+    return Pair.([file.path for file in rewritten], placed_text.(rewritten, (moves,)))
 end
 
 """

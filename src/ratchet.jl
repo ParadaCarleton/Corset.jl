@@ -143,14 +143,11 @@ struct OptOuts
 end
 
 """
-    opt_outs(path, rule)
     opt_outs(comments, rule)
 
-The lines that the `# lint:` comments of `path` (`opt_out_comments`), or `comments`, take out of `rule`:
-each comment's own line, and every line from a `-begin` to the `-end` that closes it.
+The lines that the `# lint:` `comments` of one file take out of `rule`: each comment's own line, and
+every line from a `-begin` to the `-end` that closes it.
 """
-opt_outs(path::AbstractString, rule::AbstractString)::OptOuts = opt_outs(opt_out_comments(path), rule)
-
 function opt_outs(comments::AbstractVector{OptOutComment}, rule::AbstractString)::OptOuts
     named = [comment for comment in comments if comment.rule == rule]
     spans = span_lines.((named,), filter(is_begin, named))

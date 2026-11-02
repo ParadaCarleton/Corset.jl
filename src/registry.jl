@@ -96,7 +96,7 @@ declared(context::Context)::Dict{Symbol, Tuple{String, Int}} = struct_locations(
 scope(context::Context)::Module = something(context.mod, Base)
 
 @rule ModuleRule "hidden-input" :default "reads of a mutable or non-constant global, or a ScopedValue" context ->
-hidden_inputs(context.mod)
+hidden_inputs(context.repository, context.mod)
 
 @rule ModuleRule "non-public-access" :pedantic "qualified accesses and explicit imports of another module's non-public names" context ->
 non_public_accesses(context.mod)

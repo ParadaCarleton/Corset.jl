@@ -50,7 +50,7 @@ The `inferred` frames whose method is in `repository`'s own files and whose firs
 `# lint: rule` opt-out, which so covers the whole method.
 """
 function audited_frames(repository::Repository, inferred::AbstractVector{Inferred}, rule::AbstractString)::Vector{Inferred}
-    own = inferred[startswith.([string(item.method.file) for item in inferred], repository.root)]
+    own = inferred[in_repository.((repository,), getfield.(inferred, :method))]
     files = unique([string(item.method.file) for item in own])
     return own[.!opted_out.(own, (Dict(files .=> opt_outs.(files, rule)),))]
 end

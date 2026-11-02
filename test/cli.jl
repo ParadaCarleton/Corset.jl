@@ -229,8 +229,8 @@ end
 
     @testset "module rules run on a loaded package" begin
         findings, skipped = run_rules(
-            with_overrides(load_config(root), false, ["hidden-input" => :deny], nothing),
-            root;
+            with_overrides(load_config(pkgdir(Corset)), false, ["hidden-input" => :deny], nothing),
+            pkgdir(Corset);
             mod = Corset.WorkloadPackage,
             signatures = concrete_signatures(Corset.WorkloadPackage),
         )

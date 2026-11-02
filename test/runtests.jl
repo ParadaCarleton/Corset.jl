@@ -143,7 +143,9 @@ end
     inferred = inferred_methods(fixture, concrete_signatures(fixture))
 
     @testset "hidden-input: a read of a mutable or non-constant global" begin
-        @test unique(site_keys(hidden_inputs(fixture))) == ["counter"]
+        @test unique(site_keys(hidden_inputs(repository, fixture))) == ["counter"]
+        # A sibling directory whose name extends the root's is outside the repository.
+        @test isempty(hidden_inputs(Repository(mkpath(root[1:(end - 1)])), fixture))
     end
 
     @testset "non-public-access: a qualified access or explicit import of a non-public name" begin
@@ -598,6 +600,13 @@ end
         @test isempty(Corset.bound_names(Meta.parse("a.b")))
         @test Corset.one_letter_names(Meta.parse("try\n1\ncatch e\n2\nend"), ()) == [:e]
     end
+end
+
+@testset "defined_methods finds methods added to another module's function" begin
+    external = Module(:ExternalExtension)
+    Base.eval(external, :(Base.length(::Type{Val{:corset_probe}})::Int = 1))
+    defined = Corset.defined_methods(external)
+    @test any(method -> method.name === :length && method.module === external, defined)
 end
 
 @testset "closure reflection follows nested closures and macro-made code" begin

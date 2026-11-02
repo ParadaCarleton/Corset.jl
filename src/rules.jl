@@ -173,12 +173,16 @@ function statement_line(code::Union{Core.CodeInfo, COMPILER.IRCode}, method::Met
 end
 
 """
-    hidden_inputs(mod)
+    hidden_inputs(repository, mod)
 
 Each read of a global that some method of `mod` takes besides its arguments and immutable
 constants, keyed by the global and placed at the statement that reads it.
 """
-hidden_inputs(mod::Module)::Vector{Site} = reduce(vcat, method_hidden_inputs.(module_methods(mod)); init = Site[])
+hidden_inputs(repository::Repository, mod::Module)::Vector{Site} =
+    reduce(vcat, method_hidden_inputs.(filter(Base.Fix1(in_repository, repository), module_methods(mod))); init = Site[])
+
+"""Whether `method` is defined in a file under the repository's root."""
+in_repository(repository::Repository, method::Method)::Bool = startswith(string(method.file), joinpath(repository.root, ""))
 
 """The `hidden_inputs` sites of `method`'s lowered code; none for a method without one."""
 function method_hidden_inputs(method::Method)::Vector{Site}
@@ -415,7 +419,7 @@ function is_unmarked_method(repository::Repository, method::Method)::Bool # lint
         function_type isa DataType &&
         function_type <: Function &&
         function_type !== typeof(Core.kwcall) &&
-        startswith(string(method.file), repository.root)
+        in_repository(repository, method)
 end
 
 """The module that owns the function `method` is a method of."""

@@ -82,19 +82,25 @@ function opt_out_comments(path::AbstractString)::Vector{OptOutComment}
     return opt_out_comments(path, read(path, String))
 end
 
-function opt_out_comments(path::AbstractString, text::AbstractString)::Vector{OptOutComment}
-    source = SYNTAX.SourceFile(text)
+function opt_out_comments(path::AbstractString, text::String)::Vector{OptOutComment}
     tokens = [token.range for token in SYNTAX.tokenize(text) if SYNTAX.kind(token) == COMMENT_KIND]
-    comments = [
-        OptOutComment(found[1], opt_out_form(found[2]), SYNTAX.source_line(source, Int(first(range)) + found.offset - 1))
-            for range in tokens for found in eachmatch(OPT_OUT, SubString(text, first(range), thisind(text, last(range))))
-    ]
-    unclosed = comments[open_begin.((comments,), comments)]
+    comments = reduce(vcat, token_comments.(text, (SYNTAX.SourceFile(text),), tokens); init = OptOutComment[])
+    unclosed = filter(Base.Fix1(open_begin, comments), comments)
     if !isempty(unclosed)
         error("$path:$(first(unclosed).line): `# lint: $(first(unclosed).rule)-begin` has no `# lint: $(first(unclosed).rule)-end` below it")
     end
     return comments
 end
+
+"""The `# lint:` comments in the comment token at byte `range` of `text`, placed by `lines` (its `SourceFile`)."""
+function token_comments(text::String, lines::SYNTAX.SourceFile, range::AbstractUnitRange)::Vector{OptOutComment}
+    found = collect(RegexMatch{String}, eachmatch(OPT_OUT, SubString(text, first(range), thisind(text, last(range)))))
+    return opt_out_comment.((lines,), Int(first(range)), found)
+end
+
+"""The comment `found`, an `OPT_OUT` match in a comment token that starts at byte `start`, placed by `lines`."""
+opt_out_comment(lines::SYNTAX.SourceFile, start::Integer, found::RegexMatch)::OptOutComment =
+    OptOutComment(found[1], opt_out_form(found[2]), SYNTAX.source_line(lines, start + found.offset - 1))
 
 """The form an `OPT_OUT` suffix (`file`, `begin`, `end` or none) gives its comment."""
 opt_out_form(suffix::AbstractString)::Symbol = Symbol(suffix)
@@ -125,10 +131,17 @@ opt_outs(path::AbstractString, rule::AbstractString)::OptOuts = opt_outs(opt_out
 
 function opt_outs(comments::AbstractVector{OptOutComment}, rule::AbstractString)::OptOuts
     named = [comment for comment in comments if comment.rule == rule]
-    spans = [comment.line:minimum(closing_lines(named, comment)) for comment in named if comment.form === :begin]
-    lines = Set{Int}(Iterators.flatten((Int[comment.line for comment in named], spans...)))
+    spans = span_lines.((named,), filter(is_begin, named))
+    lines = Set{Int}(reduce(vcat, spans; init = Int[comment.line for comment in named]))
     return OptOuts(any(comment.form === :file for comment in named), lines)
 end
+
+"""Whether `comment` is a `-begin`."""
+is_begin(comment::OptOutComment)::Bool = comment.form === :begin
+
+"""The lines from `opening`, a `-begin` among `comments`, to the `-end` that closes it."""
+span_lines(comments::AbstractVector{OptOutComment}, opening::OptOutComment)::Vector{Int} =
+    collect(opening.line:minimum(closing_lines(comments, opening)))
 
 """The Julia files below `directory`, in no particular order; hidden directories, those named in `skipped` and links to directories are not entered."""
 function julia_files(directory::AbstractString, skipped::Tuple{Vararg{String}})::Vector{String}
@@ -181,8 +194,9 @@ element by element. One sort, and a binary search per group.
 """
 function grouped_details(groups::AbstractVector{G}, details::AbstractVector{String})::Dict{G, String} where {G}
     entries = sort!(unique(zip(groups, details)))
-    owners = first.(entries)
-    return Dict{G, String}(group => join(last.(entries[searchsorted(owners, group)]), "; ") for group in unique(groups))
+    distinct = unique(groups)
+    found = getindex.((last.(entries),), searchsorted.((first.(entries),), distinct))
+    return Dict{G, String}(distinct .=> join.(found, "; "))
 end
 
 """The `detail`s of the sites under each key, sorted and joined; a key none of whose sites has one is absent."""
@@ -232,9 +246,12 @@ function unopted(
     )::Tuple{Vector{Site}, Int} where {S <: Site}
     files = unique(String[site.file for site in sites])
     skips = Dict{String, OptOuts}(files .=> opt_outs.(file_comments.((comments,), files), rule))
-    kept = sites[.!opted.(getindex.((skips,), String[site.file for site in sites]), sites)]
+    kept = filter(Base.Fix1(kept_by, skips), sites)
     return kept, length(sites) - length(kept)
 end
+
+"""Whether no opt-out of `skips` (each file's `OptOuts`) covers `site`."""
+kept_by(skips::AbstractDict{String, OptOuts}, site::Site)::Bool = !opted(skips[site.file], site)
 
 """Whether `skips` (one file's `OptOuts`) covers a line of `site`."""
 opted(skips::OptOuts, site::Site)::Bool = skips.whole_file || any(in(skips.lines), site.line:site.last_line)

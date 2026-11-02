@@ -344,8 +344,11 @@ so neither the specialization order nor a second variable on the line changes wh
 function one_per_line(sites::AbstractVector{Site})::Vector{Site}
     places = [(site.key, site.file, site.line, site.last_line) for site in sites]
     details = grouped_details(places, String[site.detail for site in sites])
-    return [Site(place..., details[place]) for place in unique(places)]
+    return place_site.((details,), unique(places))
 end
+
+"""The site at `place` (key, file and lines), its detail the grouped one `details` holds for it."""
+place_site(details::AbstractDict{Tuple{String, String, Int, Int}, String}, place::Tuple{String, String, Int, Int})::Site = Site(place..., details[place])
 
 """
 Each named local variable (not an argument) of `repository`'s own methods whose inferred type is
@@ -839,10 +842,11 @@ function Source(path::AbstractString)::Source
 end
 """Functions declaring a `Union{Nothing, …}` return: a "can't compute here" answer, one site per definition."""
 function nothing_returns(source::Source)::Vector{Site}
+    path = source.path
     return [
         Site(
             string(defined_name(item.node)),
-            source.path,
+            path,
             first(definition_lines(item.node, item.line)),
             last(definition_lines(item.node, item.line)),
             "",
@@ -947,10 +951,14 @@ Where each struct of the parsed `sources` is declared, sorted by name: at its `s
 `# lint:` comment on that line opts the struct out even when a docstring sits above it. Two structs of
 one name in different files are both kept.
 """
-struct_locations(sources::AbstractVector{Source})::Vector{StructDeclaration} = sort!(
-    StructDeclaration[StructDeclaration(name, source.path, line) for source in sources for (name, line) in struct_lines(source.tree)];
-    by = declared_name,
-)
+struct_locations(sources::AbstractVector{Source})::Vector{StructDeclaration} =
+    sort!(reduce(vcat, map(source_declarations, sources); init = StructDeclaration[]); by = declared_name)
+
+"""The `struct` declarations of `source`."""
+function source_declarations(source::Source)::Vector{StructDeclaration}
+    lines = struct_lines(source.tree)
+    return StructDeclaration.(first.(lines), source.path, last.(lines))
+end
 
 const CONCRETE_CONTAINERS = (:Vector, :Matrix, :Array, :Dict)
 const RESIZERS = (
@@ -1498,6 +1506,9 @@ end
 """The files that define the constructors of struct `type`: where Julia evaluated its declaration."""
 constructor_files(type::DataType)::Set{String} = Set{String}(string(method.file) for method in methods(type.name.wrapper))
 
+"""Whether `declaration` sits in one of `files`."""
+declared_in(declaration::StructDeclaration, files::AbstractSet{String})::Bool = declaration.file in files
+
 """
     struct_site(type, locations)
 
@@ -1507,9 +1518,8 @@ declaration of its name the site has no file; with several and none in a constru
 """
 function struct_site(type::DataType, locations::AbstractVector{StructDeclaration})::Site
     name = nameof(type)
-    named = locations[searchsorted(locations, StructDeclaration(name, "", 0); by = declared_name)]
-    files = constructor_files(type)
-    own = [declaration for declaration in named if declaration.file in files]
+    named = collect(view(locations, searchsorted(locations, StructDeclaration(name, "", 0); by = declared_name)))
+    own = filter(Base.Fix2(declared_in, constructor_files(type)), named)
     if length(own) == 1
         named = own
     end

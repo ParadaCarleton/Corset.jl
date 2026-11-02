@@ -80,6 +80,9 @@ Keys:
 - `skipped_directories`: Directory names omitted wherever they sit.
 - `one_letter_exempt`: Variable names exempt from the `one-letter` rule.
 - `file_line_limit`: The most lines a source file may hold before the `file-length` rule reports it (default: `1500`).
+- `struct_field_limit`: The most fields a struct may hold before the `wide-struct` rule reports it (default: `12`).
+- `strict_captures`: Boolean; when `true`, `impure-anonymous-function` also reports a capture of plain immutable data, for a project whose functions read only their arguments (default: `false`).
+- `forbidden_patterns`: An array of tables `{name, pattern, message, unless, skip_files}`. The `forbidden-pattern` rule reports each line of a checked file that matches the regular expression `pattern`, unless it matches `unless` or sits in a file of `skip_files` (paths from the project root). The baseline key is `file name`.
 - `candidate_limit`: The most methods `unmarked-mutation` and `float-widening` list at one runtime-dispatch site (default: `4`; `0` lists none). A site with more methods keeps its conservative report. The budget is a count, so the findings do not depend on timing.
 - `entry_points`: `"file.jl:function"`, a file relative to the project root and a function in it that takes no arguments and returns a vector of signature types (`Type[Tuple{typeof(MyPackage.f), Int}]`). Its signatures replace the `--entries` sources.
 - `levels`: Map of rule names to `:allow`, `:warn`, or `:deny`.

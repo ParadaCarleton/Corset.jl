@@ -46,6 +46,12 @@ end
 struct SolverControls
     solver_tolerance::Int
 end
+struct Wide
+    first_field::Int
+    second_field::Int
+end
+const DEFAULT_PLAIN = Plain(1)
+const DERIVED_LIMIT = reads_limit(1)
 mutable struct Tally
     total::Int
 end

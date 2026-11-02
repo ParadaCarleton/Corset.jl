@@ -135,7 +135,7 @@ float_widenings(context.repository, context.inferred; search = context.candidate
 @rule ModuleRule "widened-return" :pedantic "methods whose inferred result a caller cannot compile against concretely" context ->
 widened_returns(context.repository, context.inferred; context.comments)
 
-@rule ModuleRule "impure-anonymous-function" :default "anonymous functions that capture mutable state, rebind a capture, or were never compiled" context ->
+@rule ModuleRule "impure-anonymous-function" :default "anonymous functions that capture mutable state, rebind a capture, or were never compiled (and, with strict_captures, any capture)" context ->
 impure_anonymous_functions(context.repository, context.mod)
 
 @rule ModuleRule "unstable-anonymous-function" :default "anonymous functions whose captures inference leaves abstract" context ->
@@ -152,6 +152,12 @@ struct_sites(filter(!isempty ∘ abstract_fields, module_structs(context.mod)), 
 
 @rule ModuleRule "mutable-struct" :default "structs declared with the mutable keyword" context ->
 struct_sites(mutable_structs(context.mod), context)
+
+@rule ModuleRule "wide-struct" :pedantic "structs with more fields than the repository's struct_field_limit" context ->
+struct_sites(filter(Base.Fix2(wider_struct, context.repository.struct_field_limit), module_structs(context.mod)), context)
+
+@rule ModuleRule "struct-constant" :default "constants that hold a struct of the package, which Revise leaves stale after an edit" context ->
+struct_holding_constants(context.mod)
 
 @rule ModuleRule "repeated-prefix" :pedantic "field names that repeat a word the type should say once" context ->
 struct_sites(filter(!isnothing ∘ repeated_prefix, module_structs(context.mod)), context)
@@ -191,6 +197,12 @@ one_letter_sites(context.repository, source)
 
 @rule FileRule "file-length" :default "source files longer than the repository's file_line_limit" (context, source) ->
 long_file_sites(context.repository, source)
+
+@rule FileRule "derived-constant" :default "constants computed by a function of the package, which Revise leaves stale after an edit" (context, source) ->
+derived_constant_sites(context.mod, source)
+
+@rule FileRule "forbidden-pattern" :default "lines that match a pattern the project forbids (forbidden_patterns)" (context, source) ->
+forbidden_pattern_sites(context.repository, source)
 
 @rule FileRule "where-return" :default "short-form definitions whose where binds the return annotation" (context, source) ->
 where_return_sites(source)

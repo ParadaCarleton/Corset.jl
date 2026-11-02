@@ -122,6 +122,7 @@ non-function `isbits` values, `String`s, `Symbol`s, and immutable structs, tuple
 | Rule | Function | Finds | Repair |
 | --- | --- | --- | --- |
 | `impure-anonymous-function` | `impure_anonymous_functions(repo, mod)` | a mutable capture (an array, `Dict`, `Ref`, a module); a `Core.Box`, a captured variable rebound; no compiled instance, so the captures are unverified | pass the data as an argument, or use `Base.Fix1`/`Base.Fix2` (`filter(in(allowed), items)`); cover an unverified function in the precompile workload |
+| | | with `Repository.strict_captures`: any capture, plain immutable data included | pass it as an argument |
 | `unstable-anonymous-function` | `unstable_anonymous_functions(repo, mod)` | a capture whose type inference left abstract, or an instance built where the capture types are unknown | make the captured variable's type concrete, or pass it as an argument |
 | `overspecialized-anonymous-function` | `overspecialized_anonymous_functions(repo, mod)` | a captured type or function: the anonymous function compiles anew for every value | pass it as an argument, or define a callable struct whose field is a `DataType` or `Function` |
 
@@ -139,8 +140,14 @@ place each site with `struct_site(T, struct_locations(Corset.Source.(files)))`.
 `mutable-struct` reports every struct of `mutable_structs(mod)`. Repair: return the changed data from
 the function that computes it and keep the struct immutable. A struct that needs a finalizer, a
 cyclic reference or a lock's identity opts out with `# lint: mutable-struct` and a reason.
-A limit on field count (`wide-struct`) takes one line: `fieldcount(T) > limit` over
-`module_structs(mod)`.
+`wide-struct` reports structs with more than `Repository.struct_field_limit` fields (default 12).
+Repair: group related fields into a struct of their own.
+
+`struct-constant` reports constants of the package that hold a struct it defines, or alias a type naming
+one (`const Alias = Union{Nothing, Setting}`): Revise rebuilds a revised struct but not an unchanged
+constant built from it. `derived-constant` reports a constant whose value calls a function the package
+defines, which Revise does not re-evaluate until the constant's own text changes. Repair: build the value
+in a function, and spell an alias at its use sites.
 
 ```julia
 files = repository_sources(REPO, ("src",))
@@ -171,6 +178,7 @@ Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 | `silent-existence-filter` | `silent_existence_filters(source)` | deny level: `filter(isdir, paths)` and its `do` form, `isfile ∘ f` and `path -> ispath(path)` predicates, masks `paths[isfile.(paths)]`, and comprehensions filtered by `if isdir(path)`; a configured path with a typo is then skipped in silence. A filter inside the arguments of `rm` passes | throw on the missing paths (`paths[.!isdir.(paths)]`), or opt out a path that is optional by design |
 | `quadratic-scan` | `quadratic_scans(source)` | a `for` loop, comprehension, generator, anonymous function passed to `map`, `count` and the like, or broadcast over a collection `xs` (a variable or field, also through `enumerate`, `zip` and `eachindex`) that calls `filter`, `findall`, `findfirst`, `findlast`, `count`, `any`, `all` or `in` on the same `xs` per element; `in.(xs, (xs,))` too | group `xs` once: a `Dict` from key to entries, or `sort` and `searchsorted` |
 | `non-atomic-write` | `non_atomic_writes(source)` | `write.(paths, texts)`, `foreach(write, paths, texts)`, and loops, comprehensions and mapped anonymous functions whose body calls `write(path, …)` or `open(path, "w")` (also `"a"`, `"w+"`, `"a+"`, `"r+"`, `write = true`, `append = true`, `truncate = true`) on a path built from the iteration variable; a crash halfway leaves some files rewritten. A function that calls `mv` or `rename` stages its writes and passes | compute every text, write each to a temporary file beside its target, then rename them all (`Corset.write_all!`) |
+| `forbidden-pattern` | `forbidden_pattern_sites(repo, source)` | lines that match a `Repository.forbidden_patterns` entry (`name`, `pattern`, `message`, optional `unless`, `skip_files`) | what the entry's `message` says |
 
 ## Rules with fixers
 

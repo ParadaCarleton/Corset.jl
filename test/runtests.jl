@@ -105,6 +105,9 @@ end
         @test repository.one_letter_exempt == ()
         @test repository.skipped_directories == ()
         @test repository.file_line_limit == Corset.DEFAULT_FILE_LINE_LIMIT
+        @test repository.struct_field_limit == Corset.DEFAULT_STRUCT_FIELD_LIMIT
+        @test !repository.strict_captures
+        @test isempty(repository.forbidden_patterns)
     end
 
     @testset "without a baseline every offender's key is past it" begin
@@ -282,6 +285,13 @@ end
         @test overspecialized.key == "fixture.jl kinded"
         @test occursin("{Int64}, so it compiles once per value", overspecialized.detail)
         @test isempty(Corset.unstable_anonymous_functions(repository, fixture))
+        @testset "strict_captures also reports a capture of plain immutable data" begin
+            strict = Repository(root; strict_captures = true)
+            strict_sites = Dict(site.key => site for site in impure_anonymous_functions(strict, fixture))
+            @test Set(keys(strict_sites)) == Set(["fixture.jl boxed", "fixture.jl lineless", "fixture.jl reader", "fixture.jl adder", "fixture.jl labeler"])
+            @test occursin("captures Int64, which `strict_captures` forbids", strict_sites["fixture.jl adder"].detail)
+            @test !haskey(strict_sites, "fixture.jl field_reader")
+        end
         @testset "plain immutable data is a non-function bits value, a String or Symbol, or an immutable composite of them" begin
             @test all(Corset.plain_capture, (Int, Float32, Char, String, Symbol, Nothing, Tuple{Int, String}, @NamedTuple{name::String}, Union{Nothing, String}))
             @test !any(Corset.plain_capture, (Vector{Int}, Dict{Int, Int}, SubArray{Int, 1, Vector{Int}, Tuple{UnitRange{Int}}, true}, DataType, typeof(sin), Module, Real, Union{Int, Vector{Int}}))
@@ -302,7 +312,7 @@ end
 
     @testset "abstract-field, repeated-prefix: struct fields" begin
         structs = Dict(nameof(type) => type for type in module_structs(fixture))
-        @test Set(keys(structs)) == Set([:Holder, :Plain, :SolverControls, :Tally])
+        @test Set(keys(structs)) == Set([:Holder, :Plain, :SolverControls, :Tally, :Wide])
         @test nameof.(Corset.mutable_structs(fixture)) == [:Tally]
         @test abstract_fields(structs[:Holder]) == [:held]
         @test isempty(abstract_fields(structs[:Plain]))
@@ -310,6 +320,34 @@ end
         @test isnothing(repeated_prefix(structs[:Plain]))
         path = joinpath(root, "fixture.jl")
         @test struct_site(structs[:Holder], struct_locations([parsed(path)])) == Site("Holder", path, findfirst(==("struct Holder"), readlines(path)), "")
+    end
+
+    @testset "wide-struct: more fields than the repository's struct_field_limit" begin
+        wide(limit::Integer) = nameof.(filter(Base.Fix2(Corset.wider_struct, limit), module_structs(fixture)))
+        @test isempty(wide(2))
+        @test wide(1) == [:Wide]
+        @test_throws Corset.UsageError Repository(root; struct_field_limit = 0)
+    end
+
+    @testset "struct-constant: a constant that holds a struct of the package" begin
+        @test site_keys(Corset.struct_holding_constants(fixture)) == [string(fixture, ".DEFAULT_PLAIN")]
+    end
+
+    @testset "derived-constant: a constant computed by a function of the package" begin
+        fixture_source = parsed(joinpath(root, "fixture.jl"))
+        @test site_keys(Corset.derived_constants(fixture_source, fixture)) == ["fixture.jl DERIVED_LIMIT"]
+        @test isempty(Corset.derived_constant_sites(nothing, fixture_source))
+    end
+
+    @testset "forbidden-pattern: matching lines, minus the `unless` match and the skipped files" begin
+        text = "stay_sets = 128\nExplicitCounts(stay_sets = 4)\nfield_draws = 8\n"
+        tree = write_tree(mktempdir(), ["a.jl" => text, "skip.jl" => text])
+        forbidden = Corset.ForbiddenPattern("count-literal", r"\b(stay_sets|field_draws)\s*=\s*\d", "name the count", r"ExplicitCounts\(", ("skip.jl",))
+        repository = Repository(tree; forbidden_patterns = (forbidden,))
+        sites = Corset.forbidden_pattern_sites(repository, Source(repository, joinpath(tree, "a.jl")))
+        @test site_keys(sites) == ["a.jl count-literal", "a.jl count-literal"]
+        @test site_lines(sites) == [1, 3]
+        @test isempty(Corset.forbidden_pattern_sites(repository, Source(repository, joinpath(tree, "skip.jl"))))
     end
 
     @testset "a struct is placed at its `struct` line, below its docstring" begin

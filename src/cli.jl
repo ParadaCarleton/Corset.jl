@@ -135,6 +135,9 @@ function with_overrides(
         checked_limit(something(candidate_limit, config.candidate_limit), "--candidate-limit"),
         config.entry_points,
         config.file_line_limit,
+        config.struct_field_limit,
+        config.strict_captures,
+        config.forbidden_patterns,
     )
 end
 
@@ -456,6 +459,34 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
         println(err, "skipped (they read the loaded package or need entry signatures): ", join(skipped, ", "))
     end
     return exit_code(findings, options.deny_warnings)
+end
+
+"""
+    check_project(root, mod, signatures; out = stdout, format = "human", deny_warnings = false, update_baseline = false)
+
+`corset check` for a package `mod` already loaded in this process, the entry `signatures` given by the
+caller, and the configuration of the project at `root`. Prints the findings to `out` and returns the exit
+code: a test calls this once, `@test check_project(root, MyPackage, signatures) == 0`. `update_baseline`
+seeds and lowers the baseline file as `corset check --update-baseline` does.
+"""
+function check_project(
+        root::AbstractString,
+        mod::Module,
+        signatures::AbstractVector{<:Type};
+        out::IO = stdout,
+        format::AbstractString = "human",
+        deny_warnings::Bool = false,
+        update_baseline::Bool = false,
+    )::Int
+    project = project_root(root)
+    config = load_config(project)
+    frames = nothing
+    if any(reads_signatures, enabled_rules(config))
+        frames = seeded_frames(Pair{String, Vector{Type}}["signatures" => Type[signatures...]], mod)
+    end
+    findings, _ = run_rules(config, project; mod, frames, update_baseline)
+    print_findings(out, project, findings, format)
+    return exit_code(findings, deny_warnings)
 end
 
 """Run `corset rules`: print the rules and their levels to `out`."""

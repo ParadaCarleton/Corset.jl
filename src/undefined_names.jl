@@ -211,7 +211,7 @@ function path_pieces( # lint: abstract-local  walks Julia ASTs, whose nodes are 
         if any(isnothing, parts)
             return nothing
         end
-        return reduce(vcat, parts; init = String[])
+        return collect(String, Iterators.flatten(parts))
     end
     return nothing
 end

@@ -89,7 +89,7 @@ runtime_dispatches(
     repository::Repository, inferred::AbstractVector{Inferred};
     comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
 )::Vector{Site} =
-    one_per_line(reduce(vcat, dispatch_sites.((repository,), audited_frames(repository, inferred, "runtime-dispatch", comments)); init = Site[]))
+    one_per_line(collect(Site, Iterators.flatten(dispatch_sites.((repository,), audited_frames(repository, inferred, "runtime-dispatch", comments)))))
 
 """The `runtime_dispatches` sites of `item`, one per dispatching statement, placed at its line in the method."""
 function dispatch_sites(repository::Repository, item::Inferred)::Vector{Site}

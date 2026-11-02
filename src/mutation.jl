@@ -63,7 +63,7 @@ function view_sources(index::Integer, ir::COMPILER.IRCode, estate::ESCAPE.Escape
     if !(statement isa Expr && statement.head === :call && called_builtin(statement, ir) in MEMORY_VIEWS)
         return Int[]
     end
-    return reduce(vcat, alias_indices.(operand_indices(statement.args[2:2], estate), (estate,)); init = Int[])
+    return collect(Int, Iterators.flatten(alias_indices.(operand_indices(statement.args[2:2], estate), (estate,))))
 end
 
 """
@@ -71,11 +71,11 @@ The arguments (2 and up; 1 is the function itself) whose memory the values at `i
 into: their escape-analysis aliases, closed under the memory a `MEMORY_VIEWS` result views.
 """
 function reached_arguments(indices::AbstractVector{<:Integer}, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::Vector{Int}
-    reached = unique(reduce(vcat, alias_indices.(indices, (estate,)); init = Int[]))
-    grown = union(reached, reduce(vcat, view_sources.(reached, (ir,), (estate,)); init = Int[]))
+    reached = unique(collect(Int, Iterators.flatten(alias_indices.(indices, (estate,)))))
+    grown = union(reached, collect(Int, Iterators.flatten(view_sources.(reached, (ir,), (estate,)))))
     while length(grown) > length(reached)
         reached = grown
-        grown = union(reached, reduce(vcat, view_sources.(reached, (ir,), (estate,)); init = Int[]))
+        grown = union(reached, collect(Int, Iterators.flatten(view_sources.(reached, (ir,), (estate,)))))
     end
     arguments = filter(in(2:estate.nargs), reached)
     return sort!(arguments[writable.(COMPILER.widenconst.(ir.argtypes[arguments]))])
@@ -164,17 +164,17 @@ function frame_writes(frame::Inferred, walk::WriteWalk, stack::Tuple, search::Ca
     written = effect_arguments(:written, effects, frame.ir, estate)
     dispatched = setdiff(effect_arguments(:dispatched, effects, frame.ir, estate), written)
     foreign = setdiff(effect_arguments(:foreign, effects, frame.ir, estate), written)
-    writers = reduce(vcat, reached_writers.(effects, (frame.ir,), (estate,)); init = Pair{Int, Method}[])
+    writers = collect(Pair{Int, Method}, Iterators.flatten(reached_writers.(effects, (frame.ir,), (estate,))))
     return ArgumentWrites(written, dispatched, foreign, writers, any(getfield.(effects, :cut)))
 end
 
 """The arguments that the `field` operands of the statement `effects` reach (`reached_arguments`)."""
 effect_arguments(field::Symbol, effects::AbstractVector{ArgumentWrites}, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::Vector{Int} =
-    reached_arguments(reduce(vcat, getfield.(effects, field); init = Int[]), ir, estate)
+    reached_arguments(collect(Int, Iterators.flatten(getfield.(effects, field))), ir, estate)
 
 """The `writers` of statement `effect`, each index replaced by the arguments it reaches."""
 reached_writers(effect::ArgumentWrites, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::Vector{Pair{Int, Method}} =
-    reduce(vcat, writer_arguments.(effect.writers, (ir,), (estate,)); init = Pair{Int, Method}[])
+    collect(Pair{Int, Method}, Iterators.flatten(writer_arguments.(effect.writers, (ir,), (estate,))))
 
 """The arguments the index of `writer` reaches (`reached_arguments`), each paired with its candidate."""
 writer_arguments(writer::Pair{Int, Method}, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::Vector{Pair{Int, Method}} =
@@ -255,8 +255,8 @@ function dispatch_writes(
     end
     # A candidate's own dispatches stay unresolved: the budget covers one level.
     effects = candidate_writes.(candidates.frames, (walk,), (stack,), (with_limit(search, 0),))
-    writers = reduce(vcat, position_writers.(candidates.frames, effects, (positions,), (statement.args,), (estate,)); init = Pair{Int, Method}[])
-    unresolved = unique(reduce(vcat, unresolved_positions.(candidates.frames, effects, (positions,)); init = Int[]))
+    writers = collect(Pair{Int, Method}, Iterators.flatten(position_writers.(candidates.frames, effects, (positions,), (statement.args,), (estate,))))
+    unresolved = unique(collect(Int, Iterators.flatten(unresolved_positions.(candidates.frames, effects, (positions,)))))
     return ArgumentWrites(unique(first.(writers)), operand_indices(statement.args[unresolved], estate), Int[], writers, any(getfield.(effects, :cut)))
 end
 
@@ -299,7 +299,7 @@ The indices of the `operands` whose IR type is `writable`, and of the values a `
 into (`pointer_sources`). A call cannot write a `Symbol`, a `Cstring` or another bits value it is passed.
 """
 writable_operands(operands::AbstractVector, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::Vector{Int} =
-    reduce(vcat, pointer_sources.(operands, (ir,), (estate,), (Int[],)); init = Int[])
+    collect(Int, Iterators.flatten(pointer_sources.(operands, (ir,), (estate,), (Int[],))))
 
 """
 The index of `operand` when its IR type is `writable`; for a `Ptr`, the indices of the `writable`
@@ -312,7 +312,7 @@ function pointer_sources(operand::Core.SSAValue, ir::COMPILER.IRCode, estate::ES
         return writable_index(operand, ir, estate)
     end
     sources = traced_operands(ir.stmts.stmt[operand.id])
-    return reduce(vcat, pointer_sources.(sources, (ir,), (estate,), ([seen; operand.id],)); init = Int[])
+    return collect(Int, Iterators.flatten(pointer_sources.(sources, (ir,), (estate,), ([seen; operand.id],))))
 end
 
 pointer_sources(operand::Core.Argument, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState, ::AbstractVector{Int})::Vector{Int} =
@@ -392,7 +392,7 @@ function unmarked_mutations(
     )::Vector{Site}
     walk = WriteWalk(Dict{Core.MethodInstance, Inferred}(item.code.parent => item for item in inferred))
     own = inferred[is_unmarked_method.((repository,), getfield.(inferred, :method))]
-    return one_per_line(reduce(vcat, mutation_sites.((repository,), own, (walk,), (search,)); init = Site[]))
+    return one_per_line(collect(Site, Iterators.flatten(mutation_sites.((repository,), own, (walk,), (search,)))))
 end
 
 """The `unmarked_mutations` sites of `item`, one per written or unverified argument."""

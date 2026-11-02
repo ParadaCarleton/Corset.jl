@@ -23,7 +23,7 @@ function identifier_names(node::SYNTAX.SyntaxNode)::Vector{String}
         end
         return String[]
     end
-    return reduce(vcat, [identifier_names(child) for child in SYNTAX.children(node)]; init = String[])
+    return collect(String, Iterators.flatten([identifier_names(child) for child in SYNTAX.children(node)]))
 end
 
 """The variable names `where` clause `clause` introduces: `T`, `T<:B` or `{T, S<:B}`, each the first identifier of its entry."""
@@ -110,7 +110,7 @@ no `# lint: where-return` comment opts out. Every text is computed before any fi
 `write_all!` stages the writes, so a failure leaves every file as it was.
 """
 function fix_where_returns!(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site}
-    sites = reduce(vcat, unopted_where_returns.((repository,), repository_sources(repository, directories)); init = Site[])
+    sites = collect(Site, Iterators.flatten(unopted_where_returns.((repository,), repository_sources(repository, directories))))
     fixed = unique(String[site.file for site in sites])
     write_all!(fixed, fix_where_returns.(fixed))
     return sites

@@ -648,6 +648,17 @@ end
         result = placed(["main.jl" => "module M\nusing A: a\ninclude(\"sub.jl\")\nend\n", "sub.jl" => documented])
         @test result == Dict("main.jl" => "module M\ninclude(\"sub.jl\")\nend\n", "sub.jl" => documented)
     end
+    @testset "a file included inside a `module` block takes only that block's imports" begin
+        child = "g() = a\n"
+        result = placed(["main.jl" => "using A: a\nmodule Inner\ninclude(\"child.jl\")\nend\nf() = 1\n", "child.jl" => child])
+        @test result == Dict("main.jl" => "module Inner\ninclude(\"child.jl\")\nend\nf() = 1\n", "child.jl" => child)
+        nested = placed(["main.jl" => "module M\nusing A: a\ninclude(\"top.jl\")\nend\n", "top.jl" => "module N\ninclude(\"deep.jl\")\nend\n", "deep.jl" => child])
+        @test nested["deep.jl"] == child
+        siblings = placed(["main.jl" => "module M\ninclude(\"x.jl\")\ninclude(\"y.jl\")\nend\n", "x.jl" => "using A: a\n", "y.jl" => child])
+        @test siblings == Dict("main.jl" => "module M\ninclude(\"x.jl\")\ninclude(\"y.jl\")\nend\n", "x.jl" => "", "y.jl" => "using A: a\n$child")
+        twice = ["main.jl" => "include(\"c.jl\")\nmodule M\ninclude(\"c.jl\")\nend\n", "c.jl" => "using A: a\n"]
+        @test isempty(misplaced_imports(Repository(write_tree(mktempdir(), twice)), (".",)))
+    end
     @testset "a moved import lands after the file's last top-level import, outside its module blocks" begin
         inner = "module Inner\nusing B: b\nh() = b\nend\n"
         result = placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "g() = a\n$inner"])

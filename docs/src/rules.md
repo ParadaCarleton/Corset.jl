@@ -175,7 +175,8 @@ comment opts out, in the line, block and file forms.
 Imports that their file does not use, or that only other files of the module use. An import item
 belongs in the files that use its name. `place_imports!(repo, directories)` deletes the unused ones
 and moves the rest, and returns the sites it handled. A file that holds only `module` blocks belongs
-to another module, so no import moves into it. The fixer computes every file before it writes any.
+to another module, so no import moves into it. A file included inside a `module` block belongs to
+that block's module: it takes only the block's imports. The fixer computes every file before it writes any.
 
 ### `where-return`: `where_return_sites(file)`
 

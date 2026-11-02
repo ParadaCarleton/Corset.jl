@@ -191,7 +191,7 @@ end
 unrepairable(shape::WhereShape)::Bool = !shape.binds && shape.opt_out in (:none, :other)
 
 """The where-return definitions of `package` no opt-out keeps and no fixer repairs: those binding no argument."""
-unrepairable_wheres(package::PackageShape)::Int =
+unrepairable_definitions(package::PackageShape)::Int =
     sum(Int[count(unrepairable, file.definitions) for file in vcat([package.root], package.included) if file.file_opt_out != "where-return"])
 
 """Whether byte `start` falls in one of the byte ranges `ranges`."""
@@ -274,7 +274,7 @@ function fix_keeps_properties(package::PackageShape)::Bool
         significant_tokens.([file.text for file in files]) == significant_tokens.(fixed) &&
         all(subsequence.([file.pinned for file in files], split.(fixed, '\n'))) &&
         count(==("misplaced-import"), rules) == 0 &&
-        count(==("where-return"), rules) == unrepairable_wheres(package) &&
+        count(==("where-return"), rules) == unrepairable_definitions(package) &&
         [finding.rule for finding in second] == rules &&
         file_texts(root, files) == fixed
 end

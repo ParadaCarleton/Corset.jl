@@ -186,7 +186,11 @@ end
 @testset "corset: every rule has a unique name and a known group" begin
     names = rule_name.(RULES)
     @test allunique(names)
-    @test all(group in (:default, :deny, :pedantic) for group in rule_group.(RULES))
+    @test all(group in (:default, :pedantic) for group in rule_group.(RULES))
+    @test sort!([rule_name(rule) for rule in RULES if rule_group(rule) === :pedantic]) == [
+        "c-type", "concrete-return", "file-length", "float64", "jscpd", "nothing-return", "one-letter",
+        "quadratic-scan", "range-guard", "ref", "repeated-prefix", "struct-constant", "wide-struct",
+    ]
 end
 
 @testset "corset: running the rules" begin
@@ -284,7 +288,7 @@ end
         unbraced = package_tree(
             "name = \"Demo\"\n",
             [
-                "src/Demo.jl" => "module Demo\nf(x::T)::T where T = x\ng(x)::T where {T} = convert(T, x)\nend\n",
+                "src/Demo.jl" => "module Demo\nf(x::T)::T where T = x\ng(x::Integer)::T where {T} = convert(T, x)\nend\n",
             ],
         )
         @test length(run_rules(load_config(unbraced), unbraced)[1]) == 2
@@ -292,7 +296,7 @@ end
         @test length(findings) == 1
         @test only(findings).rule == "where-return"
         @test occursin("(f(x::T)::T) where T = x", read(joinpath(unbraced, "src", "Demo.jl"), String))
-        @test occursin("g(x)::T where {T} = convert(T, x)", read(joinpath(unbraced, "src", "Demo.jl"), String))
+        @test occursin("g(x::Integer)::T where {T} = convert(T, x)", read(joinpath(unbraced, "src", "Demo.jl"), String))
     end
 
     @testset "module rules run on a loaded package" begin
@@ -336,7 +340,7 @@ end
     @test exit_code(Finding[], true) == 0
 
     @test occursin("where-return", sprint(print_rules, load_config(root)))
-    @test occursin(r"\nbroad-catch +deny +deny ", sprint(print_rules, load_config(root)))
+    @test occursin(r"\nbroad-catch +default +warn ", sprint(print_rules, load_config(root)))
 end
 
 @testset "corset: the command" begin
@@ -382,9 +386,9 @@ end
 @testset "corset: every pedantic rule reports on a source that breaks it" begin
     root = mktempdir()
     fixture = load_fixture(joinpath(root, "src"))
-    smells = join((SNIPPETS[name]["source"] for name in ("nothing-return", "range-guard", "return-type", "concrete-arg", "concrete-return", "float64", "c-type", "ref", "annotation", "one-letter", "fatou", "jscpd")), "\n")
+    smells = join((SNIPPETS[name]["source"] for name in ("nothing-return", "range-guard", "return-type", "concrete-arg", "concrete-return", "float64", "c-type", "ref", "annotation", "one-letter", "fatou", "jscpd", "quadratic-scan")), "\n")
     write(joinpath(root, "src", "smells.jl"), smells)
-    write(joinpath(root, "Project.toml"), "name = \"Demo\"\n[preferences.Corset]\nstruct_field_limit = 1\n")
+    write(joinpath(root, "Project.toml"), "name = \"Demo\"\n[preferences.Corset]\nstruct_field_limit = 1\nfile_line_limit = 1\n")
     config = with_overrides(load_config(root), true, Pair{String, Symbol}[], nothing)
     findings, skipped = run_rules(config, root; mod = fixture, frames = entry_frames(concrete_signatures(fixture), fixture))
     @test isempty(skipped)

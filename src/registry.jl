@@ -33,7 +33,7 @@ function Context(
 end
 
 """
-A check with a name, a group (`:default`, `:deny` or `:pedantic`) and a one-line summary. The subtypes say
+A check with a name, a group (`:default` or `:pedantic`) and a one-line summary. The subtypes say
 what it reads: `ModuleRule` the loaded package, `TreeRule` the source directories as a whole,
 `FileRule` one parsed file at a time.
 """
@@ -45,7 +45,7 @@ abstract type FileRule <: Rule end
 """The name of `rule` in baselines, opt-out comments and configuration."""
 function rule_name end
 
-"""`:default` for a rule that finds likely defects, `:deny` for one whose every site is a defect, `:pedantic` for one that enforces a style."""
+"""`:default` for a likely defect or a pattern Rust rejects without an explicit marker; `:pedantic` for house style or a noisy heuristic."""
 function rule_group end
 
 """One line saying what `rule` finds."""
@@ -116,25 +116,25 @@ scope(context::Context)::Module = something(context.mod, Base)
 @rule ModuleRule "hidden-input" :default "reads of a mutable or non-constant global, or a ScopedValue" context ->
 hidden_inputs(context.repository, context.mod; context.own_methods)
 
-@rule ModuleRule "non-public-access" :pedantic "qualified accesses and explicit imports of another module's non-public names" context ->
+@rule ModuleRule "non-public-access" :default "qualified accesses and explicit imports of another module's non-public names" context ->
 non_public_accesses(context.mod)
 
 @rule ModuleRule "abstract-local" :default "local variables whose inferred type is abstract or a union" context ->
 abstract_locals(context.repository, context.inferred; context.comments)
 
-@rule ModuleRule "bang" :pedantic "functions that always return nothing and have no ! in the name" context ->
+@rule ModuleRule "bang" :default "functions that always return nothing and have no ! in the name" context ->
 unmarked_effects(context.repository, context.inferred)
 
-@rule ModuleRule "unmarked-mutation" :pedantic "functions without ! in the name that write through an argument" context ->
+@rule ModuleRule "unmarked-mutation" :default "functions without ! in the name that write through an argument" context ->
 unmarked_mutations(context.repository, context.inferred; search = context.candidates)
 
-@rule ModuleRule "runtime-dispatch" :pedantic "calls left to run-time dispatch in the frames the signatures compile" context ->
+@rule ModuleRule "runtime-dispatch" :default "calls left to run-time dispatch in the frames the signatures compile" context ->
 runtime_dispatches(context.repository, context.inferred; context.comments)
 
-@rule ModuleRule "float-widening" :pedantic "statements whose float result is wider than every float argument of their method" context ->
+@rule ModuleRule "float-widening" :default "statements whose float result is wider than every float argument of their method" context ->
 float_widenings(context.repository, context.inferred; search = context.candidates, context.comments)
 
-@rule ModuleRule "widened-return" :pedantic "methods whose inferred result a caller cannot compile against concretely" context ->
+@rule ModuleRule "widened-return" :default "methods whose inferred result a caller cannot compile against concretely" context ->
 widened_returns(context.repository, context.inferred; context.comments)
 
 @rule ModuleRule "impure-anonymous-function" :default "anonymous functions that capture mutable state, rebind a capture, or were never compiled (and, with strict_captures, any capture)" context ->
@@ -158,7 +158,7 @@ struct_sites(mutable_structs(context.mod), context)
 @rule ModuleRule "wide-struct" :pedantic "structs with more fields than the repository's struct_field_limit" context ->
 struct_sites(filter(Base.Fix2(wider_struct, context.repository.struct_field_limit), module_structs(context.mod)), context)
 
-@rule ModuleRule "struct-constant" :default "constants that hold a struct of the package, which Revise leaves stale after an edit" context ->
+@rule ModuleRule "struct-constant" :pedantic "constants that hold a struct of the package, which Revise leaves stale after an edit" context ->
 struct_holding_constants(context.mod)
 
 @rule ModuleRule "repeated-prefix" :pedantic "field names that repeat a word the type should say once" context ->
@@ -173,16 +173,16 @@ range_guards(source)
 @rule FileRule "repeated-statement" :default "a statement repeated in one block" (context, source) ->
 repeated_statements(source)
 
-@rule FileRule "return-type" :pedantic "calls of Core.Compiler.return_type" (context, source) ->
+@rule FileRule "return-type" :default "calls of Core.Compiler.return_type" (context, source) ->
 return_type_calls(source)
 
-@rule FileRule "concrete-arg" :pedantic "arguments annotated with a concrete container the method never resizes" (context, source) ->
+@rule FileRule "concrete-arg" :default "arguments annotated with a concrete container the method never resizes" (context, source) ->
 concrete_arguments(source)
 
 @rule FileRule "concrete-return" :pedantic "results annotated with a concrete type" (context, source) ->
 concrete_returns(source, scope(context))
 
-@rule FileRule "annotation" :pedantic "methods with an unannotated argument or result" (context, source) ->
+@rule FileRule "annotation" :default "methods with an unannotated argument or result" (context, source) ->
 missing_annotations(source)
 
 @rule FileRule "float64" :pedantic "Float64 tokens and untyped float literals" (context, source) ->
@@ -197,7 +197,7 @@ ref_sites(source)
 @rule FileRule "one-letter" :pedantic "one-letter variable names" (context, source) ->
 one_letter_sites(context.repository, source)
 
-@rule FileRule "file-length" :default "source files longer than the repository's file_line_limit" (context, source) ->
+@rule FileRule "file-length" :pedantic "source files longer than the repository's file_line_limit" (context, source) ->
 long_file_sites(context.repository, source)
 
 @rule FileRule "derived-constant" :default "constants computed by a function of the package, which Revise leaves stale after an edit" (context, source) ->
@@ -209,10 +209,10 @@ forbidden_pattern_sites(context.repository, source)
 @rule FileRule "where-return" :default "short-form definitions whose where binds the return annotation" (context, source) ->
 where_return_sites(source)
 
-@rule FileRule "broad-catch" :deny "catch blocks that handle every exception alike, rethrowing none" (context, source) ->
+@rule FileRule "broad-catch" :default "catch blocks that handle every exception alike, rethrowing none" (context, source) ->
 broad_catches(source)
 
-@rule FileRule "quadratic-scan" :default "loops over a collection that scan the same collection per element" (context, source) ->
+@rule FileRule "quadratic-scan" :pedantic "loops over a collection that scan the same collection per element" (context, source) ->
 quadratic_scans(source)
 
 @rule FileRule "quadratic-vcat" :default "folds that concatenate one piece at a time: reduce(vcat, …; init), foldl(vcat, …), mapreduce(f, vcat, …)" (context, source) ->
@@ -224,7 +224,7 @@ non_atomic_writes(source)
 @rule TreeRule "misplaced-import" :default "imports their file does not use, or that only other files use" context ->
 misplaced_imports(context.repository, context.sources)
 
-@rule TreeRule "fatou" :pedantic "findings of fatou lint (fatou on PATH)" context ->
+@rule TreeRule "fatou" :default "findings of fatou lint (fatou on PATH)" context ->
 fatou_sites(context.repository, context.directories)
 
 @rule TreeRule "jscpd" :pedantic "findings of jscpd duplicate code checks (jscpd on PATH)" context ->

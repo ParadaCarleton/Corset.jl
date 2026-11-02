@@ -1,0 +1,49 @@
+name: AutoFormat
+on:
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: write
+  actions: write
+jobs:
+  runic:
+    # Fork PRs give a read-only token; CI's `format` job still reports on them.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      # Same action and Runic version as CI's `format` job; it exits nonzero when it rewrites files.
+      - uses: fredrikekre/runic-action@v1
+        continue-on-error: true
+        with:
+          version: "1"
+          format_files: true
+      # GITHUB_TOKEN pushes start no workflows, so dispatch the pull_request workflows on the new head.
+      - name: Commit, push and dispatch CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.head_ref }}
+          OLD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if git diff --quiet; then
+            echo "Runic changed nothing."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Format with Runic"
+          git push origin "HEAD:refs/heads/$HEAD_REF"
+          for workflow in CI.yml Downgrade.yml Documentation.yml SpellCheck.yml; do
+            gh workflow run "$workflow" --ref "$HEAD_REF"
+          done
+          # Cancel the stale head's other runs; a run may finish before its cancel lands.
+          gh run list --commit "$OLD_SHA" --json databaseId,status \
+            --jq ".[] | select(.status != \"completed\" and .databaseId != $GITHUB_RUN_ID) | .databaseId" \
+            | xargs -r -n1 gh run cancel || true

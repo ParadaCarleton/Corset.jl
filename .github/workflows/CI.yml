@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }}

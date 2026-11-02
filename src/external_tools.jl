@@ -6,8 +6,9 @@ const FATOU_FINDING = r"^(.+?):(\d+):\d+: \w+\[([a-z0-9-]+)\] "
 const FATOU_SUMMARY = r"^checked \d+ file\(s\)"
 
 """The `directories` that exist in `repository` (a job's copy holds only `src`, `ext`, `test` and links)."""
-present_directories(repository::Repository, directories::Tuple{Vararg{String}})::Tuple{Vararg{String}} =
-    filter(isdir ∘ Base.Fix1(joinpath, repository.root), directories)
+function present_directories(repository::Repository, directories::Tuple{Vararg{String}})::Tuple{Vararg{String}}
+    return filter(isdir ∘ Base.Fix1(joinpath, repository.root), directories) # lint: silent-existence-filter  load_config rejects a missing set directory; the default `src` may be absent
+end
 
 """
 One site per finding of `fatou lint` over `directories` of `repository`, keyed by file and Fatou

@@ -155,7 +155,7 @@ end
 @testset "corset: every rule has a unique name and a known group" begin
     names = rule_name.(RULES)
     @test allunique(names)
-    @test all(group in (:default, :pedantic) for group in rule_group.(RULES))
+    @test all(group in (:default, :deny, :pedantic) for group in rule_group.(RULES))
 end
 
 @testset "corset: running the rules" begin
@@ -305,6 +305,7 @@ end
     @test exit_code(Finding[], true) == 0
 
     @test occursin("where-return", sprint(print_rules, load_config(root)))
+    @test occursin(r"\nsilent-existence-filter +deny +deny ", sprint(print_rules, load_config(root)))
 end
 
 @testset "corset: the command" begin

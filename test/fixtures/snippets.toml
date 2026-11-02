@@ -163,3 +163,148 @@ struct var"Odd Name"
     held::Int
 end
 '''
+
+[broad-catch]
+source = '''
+function swallowed(path::String)::String
+    try
+        return read(path, String)
+    catch
+        return ""
+    end
+end
+function mapped(path::String)::Int
+    try
+        read(path, String)
+    catch error_
+        println(error_)
+        return 1
+    end
+    return 0
+end
+function rethrown(path::String)::String
+    try
+        return read(path, String)
+    catch error_
+        if error_ isa SystemError
+            return ""
+        end
+        Base.rethrow()
+    end
+end
+function thrown(path::String)::String
+    try
+        return read(path, String)
+    catch error_
+        throw(error_)
+    end
+end
+function cleaned(path::String)::Nothing
+    try
+        write(path, "x")
+    finally
+        rm(path)
+    end
+end
+function opted(path::String)::String
+    try
+        return read(path, String)
+    catch # lint: broad-catch  any failure means no cache
+        return ""
+    end
+end
+'''
+
+[silent-existence-filter]
+source = '''
+present(paths::Vector{String})::Vector{String} = filter(isdir, paths)
+rooted(root::String, paths::Vector{String})::Vector{String} = filter(isdir ∘ Base.Fix1(joinpath, root), paths)
+qualified(paths::Vector{String})::Vector{String} = filter(Base.isfile, paths)
+lambda(paths::Vector{String})::Vector{String} = filter(path -> ispath(path), paths)
+function block(paths::Vector{String})::Vector{String}
+    return filter(paths) do path
+        isdirpath(path)
+    end
+end
+masked(paths::Vector{String})::Vector{String} = paths[isfile.(paths)]
+comprehended(paths::Vector{String})::Vector{String} = [path for path in paths if isfile(path) && !isempty(path)]
+generated(paths::Vector{String})::Int = sum(length(path) for path in paths if isdir(path); init = 0)
+missing_ones(paths::Vector{String})::Vector{String} = paths[.!isdir.(paths)]
+typed(paths::Vector{String})::Vector{String} = filter(endswith(".jl"), paths)
+counted(paths::Vector{String})::Int = count(isfile, paths)
+cleaned(paths::Vector{String})::Nothing = (rm.(filter(isfile, paths)); nothing)
+listed(paths::Vector{String})::Vector{String} = [path for path in paths if !isempty(path)]
+opted(paths::Vector{String})::Vector{String} = filter(isdir, paths) # lint: silent-existence-filter  optional directories
+'''
+
+[quadratic-scan]
+source = '''
+function looped(items::Vector{Int})::Int
+    total = 0
+    for item in items
+        total += count(==(item), items)
+    end
+    return total
+end
+comprehended(items::Vector{Int})::Vector{Int} = [findfirst(==(item), items) for (index, item) in enumerate(items)]
+filtered(items::Vector{Int})::Vector{Int} = [item for item in items if item in items]
+mapped(items::Vector{Int})::Vector{Int} = map(item -> count(==(item), items), items)
+function blocked(items::Vector{Int})::Vector{Bool}
+    return map(items) do item
+        any(>(item), items)
+    end
+end
+broadcast_lambda(items::Vector{Int})::Vector{Int} = (item -> length(filter(<(item), items))).(items)
+shielded(items::Vector{Int})::Vector{Bool} = in.(items, (items,))
+fielded(holder::Holder)::Vector{Int} = [count(==(item), holder.items) for item in holder.items]
+other(items::Vector{Int}, others::Vector{Int})::Vector{Bool} = [item in others for item in items]
+grouped(items::Vector{Int})::Int = sum(get(counts(items), item, 0) for item in items)
+ranged(count_::Int)::Vector{Int} = [index for index in 1:count_ if index in (1, 2)]
+plain(items::Vector{Int})::Vector{Int} = map(abs, items)
+kept(items::Vector{Int}; limit::Int)::Vector{Int} = filter(<(limit), items)
+opted(items::Vector{Int})::Vector{Bool} = [item in items for item in items] # lint: quadratic-scan  items holds at most three
+'''
+
+[non-atomic-write]
+source = '''
+function looped(paths::Vector{String}, texts::Vector{String})::Nothing
+    for (path, text) in zip(paths, texts)
+        write(path, text)
+    end
+    return nothing
+end
+broadcast(paths::Vector{String}, texts::Vector{String})::Nothing = (write.(paths, texts); nothing)
+each(paths::Vector{String}, texts::Vector{String})::Nothing = foreach(write, paths, texts)
+function opened(names::Vector{String})::Nothing
+    for name in names
+        open(joinpath("out", name), "w") do io
+            println(io, name)
+        end
+    end
+    return nothing
+end
+appended(names::Vector{String})::Vector{Int} = [open(io -> write(io, name), name; append = true) for name in names]
+mapped(names::Vector{String})::Vector{Int} = map(name -> write("$name.txt", name), names)
+function streamed(io::IO, names::Vector{String})::Nothing
+    for name in names
+        write(io, name)
+    end
+    return nothing
+end
+read_each(names::Vector{String})::Vector{String} = [read(open(name, "r"), String) for name in names]
+function staged(paths::Vector{String}, texts::Vector{String})::Nothing
+    temporary = string.(paths, ".tmp")
+    write.(temporary, texts)
+    mv.(temporary, paths; force = true)
+    return nothing
+end
+single(path::String, text::String)::Int = write(path, text)
+function each_block(names::Vector{String})::Nothing
+    foreach(names) do name
+        write(name, name)
+    end
+    return nothing
+end
+lambda_broadcast(names::Vector{String})::Vector{Int} = (name -> write(name, name)).(names)
+opted(paths::Vector{String}, texts::Vector{String})::Nothing = (write.(paths, texts); nothing) # lint: non-atomic-write  scratch files
+'''

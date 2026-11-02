@@ -183,7 +183,8 @@
 
 [runtime-dispatch]
 "src/candidates.jl call_signature" = 1
-"src/check.jl anonymous function" = 14
+"src/check.jl anonymous function" = 15
+"src/check.jl enabled_rules" = 1
 "src/check.jl file_diff" = 1
 "src/check.jl fix_diff" = 3
 "src/check.jl module_rule_names" = 1

@@ -402,7 +402,10 @@ function exit_code(findings::AbstractVector{Finding}, deny_warnings::Bool)::Int
 end
 
 """The `corset rules` line for `rule`: its name, group, the level `config` gives it, and its summary."""
-rule_line(config::Config, rule::Rule)::String = rpad(rule_name(rule), 20) * rpad(rule_group(rule), 10) * rpad(level(config, rule), 7) * rule_summary(rule)
+rule_line(config::Config, rule::Rule)::String = rpad(rule_name(rule), NAME_COLUMN) * rpad(rule_group(rule), 10) * rpad(level(config, rule), 7) * rule_summary(rule)
+
+"""The width of the name column of `corset rules`: the longest rule name and a space."""
+const NAME_COLUMN = maximum(length ∘ rule_name, RULES) + 1
 
 """`corset rules`: one line per rule with its group and the level `config` gives it."""
 function print_rules(io::IO, config::Config)::Nothing

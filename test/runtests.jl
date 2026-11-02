@@ -557,6 +557,14 @@ end
             "line.jl" => opted_line * fixed, "block.jl" => opted_block * fixed, "file.jl" => opted_file, "plain.jl" => fixed,
         )
     end
+    @testset "a fix that cannot write one file writes none" begin
+        broken = "f(x::T)::Vector{T} where {T} = [x]\n"
+        tree = write_tree(mktempdir(), ["a/first.jl" => broken, "b/second.jl" => broken])
+        chmod(joinpath(tree, "b"), 0o555)
+        @test_throws SystemError Corset.fix_where_returns!(Repository(tree), (".",))
+        chmod(joinpath(tree, "b"), 0o755)
+        @test tree_texts(tree) == Dict("a/first.jl" => broken, "b/second.jl" => broken)
+    end
     @testset "the long form and a method-level `where` are left alone" begin
         for kept in (
                 "function f(x::V{E})::Vector{E} where {E}\n    x\nend\n",
@@ -1343,6 +1351,7 @@ end
 include("entries.jl")
 include("membership.jl")
 include("cli.jl")
+include("syntax_hazards.jl")
 
 @testset "undefined_names: a name nothing defines is reported, and so is an unlowered testset" begin
     write_scan(text::AbstractString)::String = joinpath(

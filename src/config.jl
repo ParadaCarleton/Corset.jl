@@ -163,10 +163,13 @@ function repository(config::Config, root::AbstractString)::Repository
     )
 end
 
-"""The level `config` gives `rule`: its own setting, else `:warn` for the default group and for the pedantic group when on."""
+"""The level `config` gives `rule`: its own setting, else `:deny` for the deny group, `:warn` for the default group and for the pedantic group when on."""
 function level(config::Config, rule::Rule)::Symbol
     if haskey(config.levels, rule_name(rule))
         return config.levels[rule_name(rule)]
+    end
+    if rule_group(rule) === :deny
+        return :deny
     end
     return ifelse(rule_group(rule) === :default || config.pedantic, :warn, :allow)
 end

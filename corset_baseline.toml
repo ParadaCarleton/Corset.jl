@@ -54,6 +54,7 @@
 [float64]
 
 [hidden-input]
+"stdout" = 2
 
 [impure-anonymous-function]
 "src/entries.jl compiled_signatures" = 1
@@ -78,7 +79,7 @@
 "Base.LibuvServer" = 1
 "Base.LibuvStream" = 1
 "Base.Meta.lower" = 1
-"Base.Meta.parseall" = 2
+"Base.Meta.parseall" = 3
 "Base.PkgId" = 2
 "Base.Process" = 1
 "Base.ProcessChain" = 1
@@ -96,7 +97,7 @@
 "Base.specializations" = 2
 "Base.uncompressed_ir" = 1
 "Base.uniontypes" = 4
-"Base.unwrap_unionall" = 18
+"Base.unwrap_unionall" = 19
 "Compiler.EscapeAnalysis" = 1
 "Compiler.IRCode" = 34
 "Compiler.MethodLookupResult" = 1
@@ -134,6 +135,7 @@
 "Core.SimpleVector" = 1
 "Core.SlotNumber" = 3
 "Core.TypeName" = 23
+"Core.TypeofVararg" = 1
 "Core._apply_iterate" = 1
 "Core.eval" = 3
 "Core.kwcall" = 1
@@ -262,6 +264,11 @@
 "src/rules.jl typed_frame" = 1
 "src/rules.jl untyped_argument" = 1
 "src/rules.jl without_lines" = 1
+
+[struct-constant]
+"Corset.NO_CANDIDATES" = 1
+"Corset.NO_WRITES" = 1
+"Corset.RULES" = 1
 
 [unmarked-mutation]
 "src/check.jl fix_diff" = 1

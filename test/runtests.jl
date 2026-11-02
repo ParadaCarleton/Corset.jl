@@ -331,6 +331,17 @@ end
 
     @testset "struct-constant: a constant that holds a struct of the package" begin
         @test site_keys(Corset.struct_holding_constants(fixture)) == [string(fixture, ".DEFAULT_PLAIN")]
+        plain = fixture.Plain
+        @test all(Base.Fix2(Corset.names_own_struct, fixture), (TypeVar(:T, plain), Vector{<:plain}, Union{Nothing, plain}, Tuple{Vararg{plain}}))
+        @test !Corset.names_own_struct(Union{}, fixture) && !Corset.names_own_struct(Tuple{Vararg}, fixture)
+        @test Corset.holds_own_struct(plain, fixture, 1) && !Corset.holds_own_struct(Int, fixture, 1)
+    end
+
+    @testset "derived-constant: a docstring and a callee qualified by the package name" begin
+        documented = last(Meta.parseall("\"\"\"A limit.\"\"\"\nconst LIMIT = Fixture.reads_limit(1)\n").args)
+        @test Corset.is_constant(Corset.undocumented(documented))
+        @test Corset.calls_own_function(last(Corset.undocumented(documented).args[1].args), fixture)
+        @test !Corset.own_callee(:(Base.reads_limit), fixture) && !Corset.own_callee(1, fixture)
     end
 
     @testset "derived-constant: a constant computed by a function of the package" begin

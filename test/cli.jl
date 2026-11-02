@@ -237,8 +237,14 @@ end
     end
 
     @testset "module rules run on a loaded package" begin
+        # Corset's baseline allows the workload's finding; check without it.
+        config = with_overrides(load_config(pkgdir(Corset)), false, ["hidden-input" => :deny], nothing)
+        unbaselined = Corset.Config(
+            config.directories, nothing, config.one_letter_exempt, config.skipped_directories, config.pedantic,
+            config.levels, config.candidate_limit, config.entry_points, config.file_line_limit,
+        )
         findings, skipped = run_rules(
-            with_overrides(load_config(pkgdir(Corset)), false, ["hidden-input" => :deny], nothing),
+            unbaselined,
             pkgdir(Corset);
             mod = Corset.WorkloadPackage,
             frames = entry_frames(concrete_signatures(Corset.WorkloadPackage), Corset.WorkloadPackage),

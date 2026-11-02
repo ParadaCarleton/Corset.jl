@@ -9,8 +9,8 @@ using PrecompileTools: PrecompileTools, @compile_workload
 """A package for the precompile workload to check: it holds one finding for a module rule to report."""
 module WorkloadPackage
     const COUNTER = Ref(0)
-    bump(x) = x + COUNTER[]
-    struct Holder
+    bump(x) = x + COUNTER[] # lint: hidden-input  the workload's finding for a module rule
+    struct Holder # lint: abstract-field  the workload's finding for a struct rule
         held::Any
     end
 end

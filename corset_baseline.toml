@@ -1,5 +1,4 @@
 [abstract-field]
-Holder = 1
 
 [abstract-local]
 "src/candidates.jl call_candidates" = 1
@@ -55,7 +54,6 @@ Holder = 1
 [float64]
 
 [hidden-input]
-COUNTER = 1
 
 [impure-anonymous-function]
 "src/entries.jl compiled_signatures" = 1

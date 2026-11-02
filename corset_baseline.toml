@@ -3,6 +3,7 @@
 [abstract-local]
 "candidates.jl call_candidates" = 1
 "cli.jl level_overrides" = 1
+"cli.jl option!" = 1
 "dispatch.jl dispatch_sites" = 1
 "dispatch.jl dispatches" = 1
 "float_widening.jl dispatch_widening" = 1
@@ -85,7 +86,7 @@
 "Base.include" = 1
 "Base.isvarargtype" = 1
 "Base.isvatuple" = 1
-"Base.loaded_modules" = 2
+"Base.loaded_modules" = 5
 "Base.require" = 3
 "Base.shell_parse" = 1
 "Base.specializations" = 2

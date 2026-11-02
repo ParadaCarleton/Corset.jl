@@ -144,6 +144,8 @@ end
 
     @testset "hidden-input: a read of a mutable or non-constant global" begin
         @test unique(site_keys(hidden_inputs(repository, fixture))) == ["counter"]
+        # A sibling directory whose name extends the root's is outside the repository.
+        @test isempty(hidden_inputs(Repository(mkpath(root[1:(end - 1)])), fixture))
     end
 
     @testset "non-public-access: a qualified access or explicit import of a non-public name" begin

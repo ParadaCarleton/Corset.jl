@@ -182,7 +182,7 @@ hidden_inputs(repository::Repository, mod::Module)::Vector{Site} =
     reduce(vcat, method_hidden_inputs.(filter(Base.Fix1(in_repository, repository), module_methods(mod))); init = Site[])
 
 """Whether `method` is defined in a file under the repository's root."""
-in_repository(repository::Repository, method::Method)::Bool = startswith(string(method.file), repository.root)
+in_repository(repository::Repository, method::Method)::Bool = startswith(string(method.file), joinpath(repository.root, ""))
 
 """The `hidden_inputs` sites of `method`'s lowered code; none for a method without one."""
 function method_hidden_inputs(method::Method)::Vector{Site}
@@ -419,7 +419,7 @@ function is_unmarked_method(repository::Repository, method::Method)::Bool # lint
         function_type isa DataType &&
         function_type <: Function &&
         function_type !== typeof(Core.kwcall) &&
-        startswith(string(method.file), repository.root)
+        in_repository(repository, method)
 end
 
 """The module that owns the function `method` is a method of."""

@@ -9,7 +9,7 @@ using Configurations: @option, from_dict, FieldTypeConversionError, InvalidKeyEr
 What a project sets for `corset`: the source `directories` to read, the `baseline` file, the
 `Repository` exemptions, whether the `pedantic` group is on, and per-rule `levels` (`:allow`,
 `:warn` or `:deny`) that override a rule's group, the `candidate_limit` of the typed rules'
-`CandidateSearch`, and the `entry_points` (`file => function`, the file relative to the project) whose
+`CandidateSearch`, the `file_line_limit` of the `file-length` rule, and the `entry_points` (`file => function`, the file relative to the project) whose
 signatures replace the `--entries` sources.
 """
 struct Config
@@ -21,6 +21,7 @@ struct Config
     levels::Dict{String, Symbol}
     candidate_limit::Int
     entry_points::Union{Nothing, Pair{String, Symbol}}
+    file_line_limit::Int
 end
 
 const LEVELS = (:allow, :warn, :deny)
@@ -35,6 +36,7 @@ const LEVELS = (:allow, :warn, :deny)
     levels::Union{Nothing, Dict{String, String}} = nothing
     candidate_limit::Union{Nothing, Int} = nothing
     entry_points::Union{Nothing, String} = nothing
+    file_line_limit::Union{Nothing, Int} = nothing
 end
 
 """Merge two preference dictionaries, with `over` overriding matching keys in `under`."""
@@ -102,6 +104,7 @@ function load_config(root::AbstractString)::Config
         levels,
         checked_limit(something(prefs.candidate_limit, DEFAULT_CANDIDATE_LIMIT), "[preferences.Corset] candidate_limit"),
         entry_point(prefs.entry_points),
+        checked_line_limit(something(prefs.file_line_limit, DEFAULT_FILE_LINE_LIMIT), "[preferences.Corset] file_line_limit"),
     )
 end
 
@@ -135,6 +138,7 @@ function repository(config::Config, root::AbstractString)::Repository
         baseline,
         one_letter_exempt = config.one_letter_exempt,
         skipped_directories = config.skipped_directories,
+        config.file_line_limit,
     )
 end
 

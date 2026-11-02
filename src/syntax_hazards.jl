@@ -81,13 +81,8 @@ is_existence_call(node::Any)::Bool = Meta.isexpr(node, :call) && callee(node) in
 is_existence_condition(node::Any)::Bool = is_existence_call(node) || # lint: runtime-dispatch  Expr nodes hold untyped arguments
     (Meta.isexpr(node, :&&) && any(is_existence_condition, (node::Expr).args))
 
-"""Whether function body `node` ends in a path test: its last statement, or the body itself when it is no block."""
-function returns_existence(node::Any)::Bool # lint: runtime-dispatch  Expr nodes hold untyped arguments
-    if Meta.isexpr(node, :block)
-        return is_existence_condition(last((node::Expr).args))
-    end
-    return is_existence_condition(node)
-end
+"""Whether the block `body` of an anonymous function ends in a path test."""
+returns_existence(body::Expr)::Bool = is_existence_condition(last(body.args)) # lint: runtime-dispatch  Expr nodes hold untyped arguments
 
 """
 Whether parsed function `node` keeps what exists: a path test (`isdir`, `Base.isfile`), one composed

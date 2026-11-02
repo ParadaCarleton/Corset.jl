@@ -11,6 +11,10 @@ end
     @test Corset.called_name(1) === Corset.NO_NAME
 end
 
+@testset "a literal is no path test, collection or name" begin
+    @test !Corset.is_existence_predicate(1) && !Corset.is_name(1) && isempty(Corset.mentioned(1))
+end
+
 @testset "broad-catch: a catch block that rethrows nothing" begin
     @test kept_lines(Corset.broad_catches, "broad-catch") == [2:5, 9:12]
     @test length(found_in(Corset.broad_catches, "broad-catch")) == 3
@@ -35,7 +39,7 @@ end
 end
 
 @testset "non-atomic-write: several files written in turn, unstaged" begin
-    @test kept_lines(Corset.non_atomic_writes, "non-atomic-write") == [2:2, 7:7, 8:8, 10:10, 17:17, 18:18]
-    @test length(found_in(Corset.non_atomic_writes, "non-atomic-write")) == 7
+    @test kept_lines(Corset.non_atomic_writes, "non-atomic-write") == [2:2, 7:7, 8:8, 10:10, 17:17, 18:18, 34:34, 39:39]
+    @test length(found_in(Corset.non_atomic_writes, "non-atomic-write")) == 9
     @test Corset.level(Corset.load_config(mktempdir()), Corset.NonAtomicWriteRule()) === :warn
 end

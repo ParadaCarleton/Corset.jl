@@ -30,6 +30,14 @@ function callee(node::Expr)::Symbol # lint: runtime-dispatch # lint: unmarked-mu
 end
 callee(::Any)::Symbol = NO_NAME
 
+"""The arguments of call or broadcast `node`, without the callee."""
+function call_arguments(node::Expr)::AbstractVector
+    if is_broadcast(node)
+        return (last(node.args)::Expr).args
+    end
+    return node.args[2:end]
+end
+
 """The first line marker in parsed expression `node`, or `fallback` when it has none."""
 first_line(node::Expr, fallback::Integer)::Int = first([Int[argument.line for argument in node.args if argument isa LineNumberNode]; fallback])
 
@@ -60,5 +68,81 @@ function broad_catches(source::Source)::Vector{Site}
     return [
         Site("$name $(item.enclosing)", path, item.line, first_line(item.node.args[3], item.line), "catches every exception alike")
             for item in located if is_broad_catch(item.node)
+    ]
+end
+
+"""The functions that test whether a path exists."""
+const EXISTENCE_TESTS = (:isdir, :isfile, :ispath, :isdirpath)
+
+"""Whether parsed expression `node` is a plain call of a path test: `isfile(path)`."""
+is_existence_call(node::Any)::Bool = Meta.isexpr(node, :call) && callee(node) in EXISTENCE_TESTS
+
+"""Whether condition `node` is a path test, alone or as one operand of `&&`."""
+is_existence_condition(node::Any)::Bool = is_existence_call(node) || # lint: runtime-dispatch  Expr nodes hold untyped arguments
+    (Meta.isexpr(node, :&&) && any(is_existence_condition, (node::Expr).args))
+
+"""Whether function body `node` ends in a path test: its last statement, or the body itself when it is no block."""
+function returns_existence(node::Any)::Bool # lint: runtime-dispatch  Expr nodes hold untyped arguments
+    if Meta.isexpr(node, :block)
+        return is_existence_condition(last((node::Expr).args))
+    end
+    return is_existence_condition(node)
+end
+
+"""
+Whether parsed function `node` keeps what exists: a path test (`isdir`, `Base.isfile`), one composed
+with another function (`isdir ∘ f`), or an anonymous function whose result is one (`x -> isfile(x)`).
+"""
+is_existence_predicate(node::Symbol)::Bool = node in EXISTENCE_TESTS
+function is_existence_predicate(node::Expr)::Bool # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+    if node.head === :->
+        return returns_existence(node.args[2])
+    end
+    if node.head === :call && callee(node) === :∘
+        return is_existence_predicate(node.args[2])
+    end
+    return node.head === :. && called_name(node) in EXISTENCE_TESTS
+end
+is_existence_predicate(::Any)::Bool = false
+
+"""
+Whether parsed expression `node` drops the paths that do not exist: `filter(isdir, paths)` and its
+`do` form, a mask `paths[isfile.(paths)]`, or a comprehension or generator filtered by `if ispath(path)`.
+"""
+function drops_missing_paths(node::Expr)::Bool # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+    if node.head === :call && callee(node) in (:filter, :filter!)
+        return length(node.args) >= 3 && is_existence_predicate(node.args[2])
+    end
+    if node.head === :do
+        return callee(node.args[1]) in (:filter, :filter!) && is_existence_predicate(node.args[2])
+    end
+    if node.head === :ref
+        return any(index -> Meta.isexpr(index, :.) && is_broadcast(index) && callee(index) in EXISTENCE_TESTS, node.args[2:end])
+    end
+    return node.head === :filter && is_existence_condition(node.args[1])
+end
+
+"""The expressions inside the arguments of call `node`."""
+argument_expressions(node::Expr)::Vector{Expr} = reduce( # lint: unmarked-mutation  Expr nodes hold untyped arguments
+    vcat, nested.(call_arguments(node)); init = Expr[]
+)
+
+"""The expressions inside the arguments of every `rm` call or broadcast among `located`: a cleanup removes only what exists."""
+cleanup_expressions(located::AbstractVector{Located})::Vector{Expr} =
+    mapreduce(argument_expressions, vcat, [item.node for item in located if callee(item.node) === :rm]; init = Expr[])
+
+"""Whether `item` drops the paths that do not exist outside the `cleanup` expressions."""
+hides_missing_paths(cleanup::AbstractVector{Expr}, item::Located)::Bool =
+    drops_missing_paths(item.node) && !any(Base.Fix1(===, item.node), cleanup)
+
+"""
+Path filters that drop the paths that do not exist, keyed by file and the function they sit in. A
+path the user named that is missing is a typo to report, so the filter hides it; a filter feeding `rm` passes.
+"""
+function silent_existence_filters(source::Source)::Vector{Site}
+    (; path, name, located) = source
+    return [
+        Site("$name $(item.enclosing)", path, item.line, "drops the paths that do not exist")
+            for item in filter(Base.Fix1(hides_missing_paths, cleanup_expressions(located)), located)
     ]
 end

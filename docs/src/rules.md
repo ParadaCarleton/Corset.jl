@@ -165,6 +165,7 @@ Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 | `one-letter` | `one_letter_sites(repo, source)` | one-letter variable names (exempt: `_` and `Repository.one_letter_exempt`) | name the variable |
 | `file-length` | `long_file_sites(repo, source)` | source files longer than `Repository.file_line_limit` lines (default 1500) | split the file by topic |
 | `broad-catch` | `broad_catches(source)` | deny level: `catch` blocks that neither call `rethrow()` nor `throw` what they caught, so a missing file and an internal `error()` end alike; placed from the `try` line to the block's first line | test the exception with `isa`, handle the expected types and `rethrow()` the rest |
+| `silent-existence-filter` | `silent_existence_filters(source)` | deny level: `filter(isdir, paths)` and its `do` form, `isfile ∘ f` and `path -> ispath(path)` predicates, masks `paths[isfile.(paths)]`, and comprehensions filtered by `if isdir(path)`; a configured path with a typo is then skipped in silence. A filter inside the arguments of `rm` passes | throw on the missing paths (`paths[.!isdir.(paths)]`), or opt out a path that is optional by design |
 
 ## Rules with fixers
 

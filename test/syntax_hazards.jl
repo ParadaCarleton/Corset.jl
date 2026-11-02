@@ -17,3 +17,10 @@ end
     @test site_keys(found_in(Corset.broad_catches, "broad-catch"))[1:2] == ["source.jl swallowed", "source.jl mapped"]
     @test Corset.level(Corset.load_config(mktempdir()), Corset.BroadCatchRule()) === :deny
 end
+
+@testset "silent-existence-filter: a filter, mask or comprehension that drops missing paths" begin
+    @test kept_lines(Corset.silent_existence_filters, "silent-existence-filter") == [1:1, 2:2, 3:3, 4:4, 6:6, 10:10, 11:11, 12:12]
+    @test length(found_in(Corset.silent_existence_filters, "silent-existence-filter")) == 9
+    @test first(site_keys(found_in(Corset.silent_existence_filters, "silent-existence-filter"))) == "source.jl present"
+    @test Corset.level(Corset.load_config(mktempdir()), Corset.SilentExistenceFilterRule()) === :deny
+end

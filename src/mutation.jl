@@ -92,7 +92,7 @@ os_handle(type::Type)::Bool = type <: OS_HANDLES || (type <: Base.LibuvStream &&
 
 """Whether `type` is an `IOContext` around an `os_handle`."""
 os_context(type::DataType)::Bool = type <: IOContext && os_handle(only(type.parameters))
-os_context(::Type)::Bool=false
+os_context(::Type)::Bool = false
 
 """
 Whether a write through a value of type `type` changes a Julia object: not `plain_capture` data, a

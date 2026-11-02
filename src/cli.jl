@@ -275,22 +275,31 @@ function seed_sources(
         return ["entry_points" => Entries.configured_signatures(abspath(root, file), name)]
     end
     sources = entry_sources(entries)
+    warn_tests(output, sources)
     return Pair{String, Vector{Type}}.(string.(sources), Entries.source_signatures.((mod,), sources; root, output, unset = (INNER_VARIABLE, "JULIA_LOAD_PATH")))
 end
 
-"""The line that says how many signatures each of `sources` gave, how many seeds their union holds, and how many signatures the walk `frames` inferred."""
-function seed_summary(sources::AbstractVector{Pair{String, Vector{Type}}}, frames::AbstractDict{Type})::String
-    counts = join(["$name $(length(signatures))" for (name, signatures) in sources], ", ")
-    seeds = length(unique(reduce(vcat, last.(sources); init = Type[])))
-    return "entry signatures: $counts; $seeds seeds, $(length(frames)) signatures inferred"
+"""Print to `output` that the `:tests` source, when `sources` holds it, runs the whole test suite and its child processes."""
+function warn_tests(output::IO, sources::AbstractVector{Symbol})::Nothing
+    if :tests in sources
+        println(output, "warning: --entries tests runs the package's whole test suite, and every process it starts, beside this one")
+    end
+    return nothing
 end
 
-"""The `entry_frames` of `mod` the typed rules read, walked once from the union of `sources`, with `seed_summary` printed to `output`."""
-function seeded_frames(sources::AbstractVector{Pair{String, Vector{Type}}}, mod::Module, output::IO)::Dict{Type, Vector{Inferred}}
-    frames = entry_frames(unique(reduce(vcat, last.(sources); init = Type[])), mod)
-    println(output, seed_summary(sources, frames))
-    return frames
+"""
+The line that says how many signatures each of `sources` gave, how many seeds their union holds, how
+many signatures the walk `frames` inferred, and the process's peak resident memory `peak` in bytes.
+"""
+function seed_summary(sources::AbstractVector{Pair{String, Vector{Type}}}, frames::AbstractDict{Type}, peak::Integer)::String
+    counts = join(["$name $(length(signatures))" for (name, signatures) in sources], ", ")
+    seeds = length(unique(reduce(vcat, last.(sources); init = Type[])))
+    return "entry signatures: $counts; $seeds seeds, $(length(frames)) signatures inferred; peak RSS $(peak ÷ 2^20) MiB"
 end
+
+"""The `entry_frames` of `mod` the typed rules read, walked once from the union of `sources`."""
+seeded_frames(sources::AbstractVector{Pair{String, Vector{Type}}}, mod::Module)::Dict{Type, Vector{Inferred}} =
+    entry_frames(unique(reduce(vcat, last.(sources); init = Type[])), mod)
 
 """The path of `site` relative to `root`; empty for a site with no file."""
 function display_path(root::AbstractString, site::Site)::String
@@ -386,18 +395,21 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
     end
     mod = nothing
     frames = nothing
+    sources = Pair{String, Vector{Type}}[]
     if loads
         mod = load_package(root)
-        sources = Pair{String, Vector{Type}}[]
         if any(reads_signatures, enabled_rules(config))
             sources = seed_sources(config, root, options.entries, mod, err)
         end
         if !isempty(sources)
-            frames = seeded_frames(sources, mod, err)
+            frames = seeded_frames(sources, mod)
         end
     end
     findings, skipped = run_rules(config, root; mod, signatures = frames, fix = options.fix, update_baseline = options.update_baseline)
     print_findings(out, root, findings, options.format)
+    if !isnothing(frames)
+        println(err, seed_summary(sources, frames, Sys.maxrss()))
+    end
     if !isempty(skipped)
         println(err, "skipped (they read the loaded package or need entry signatures): ", join(skipped, ", "))
     end

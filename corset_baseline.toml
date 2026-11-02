@@ -158,7 +158,7 @@ widening_detail = 1
 [one-letter]
 "float64_scan.jl float64_ops" = 1
 "precompile.jl bump" = 1
-"rules.jl jscpd_command" = 1
+"external_tools.jl jscpd_command" = 1
 
 [overspecialized-anonymous-function]
 

@@ -70,6 +70,15 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
         @test Corset.command_options(Corset.parse_args(["check", "--candidate-limit", "7"], Corset.argument_settings())).candidate_limit == 7
     end
 
+    @testset "file_line_limit: the config's, else the default, reaching the Repository; one below 1 fails loud" begin
+        @test config.file_line_limit == Corset.DEFAULT_FILE_LINE_LIMIT
+        tree = package_tree("name = \"D\"\n[preferences.Corset]\nfile_line_limit = 40\n", Pair[])
+        limited = load_config(tree)
+        @test limited.file_line_limit == 40
+        @test Corset.repository(limited, tree).file_line_limit == 40
+        @test_throws ErrorException load_config(package_tree("name = \"D\"\n[preferences.Corset]\nfile_line_limit = 0\n", Pair[]))
+    end
+
     @testset "a typo fails loud" begin
         @test_throws ErrorException load_config(
             package_tree(

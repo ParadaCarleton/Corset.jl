@@ -173,6 +173,9 @@ ref_sites(path)
 @rule FileRule "one-letter" :pedantic "one-letter variable names" (context, path, located) ->
 one_letter_sites(context.repository, path, located)
 
+@rule FileRule "file-length" :default "source files longer than the repository's file_line_limit" (context, path, located) ->
+long_file_sites(context.repository, path)
+
 @rule FileRule "where-return" :default "short-form definitions whose where binds the return annotation" (context, path, located) ->
 where_return_sites(path)
 

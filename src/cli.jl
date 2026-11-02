@@ -137,6 +137,7 @@ function with_overrides(
         levels,
         checked_limit(something(candidate_limit, config.candidate_limit), "--candidate-limit"),
         config.entry_points,
+        config.file_line_limit,
     )
 end
 

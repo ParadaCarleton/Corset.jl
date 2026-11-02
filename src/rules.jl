@@ -844,10 +844,10 @@ function Source(repository::Repository, path::AbstractString)::Source
 end
 """Functions declaring a `Union{Nothing, …}` return: a "can't compute here" answer, one site per definition, keyed by file and name."""
 function nothing_returns(source::Source)::Vector{Site}
-    path = source.path
+    (; path, name) = source
     return [
         Site(
-            "$(source.name) $(defined_name(item.node))",
+            "$name $(defined_name(item.node))",
             path,
             first(definition_lines(item.node, item.line)),
             last(definition_lines(item.node, item.line)),

@@ -3,6 +3,7 @@
 [abstract-local]
 "candidates.jl call_candidates" = 1
 "cli.jl level_overrides" = 1
+"cli.jl option!" = 1
 "dispatch.jl dispatch_sites" = 1
 "dispatch.jl dispatches" = 1
 "float_widening.jl dispatch_widening" = 1
@@ -86,7 +87,7 @@
 "Base.include" = 1
 "Base.isvarargtype" = 1
 "Base.isvatuple" = 1
-"Base.loaded_modules" = 2
+"Base.loaded_modules" = 5
 "Base.require" = 3
 "Base.shell_parse" = 1
 "Base.specializations" = 2
@@ -158,7 +159,7 @@ widening_detail = 1
 [one-letter]
 "float64_scan.jl float64_ops" = 1
 "precompile.jl bump" = 1
-"rules.jl jscpd_command" = 1
+"external_tools.jl jscpd_command" = 1
 
 [overspecialized-anonymous-function]
 

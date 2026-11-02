@@ -22,7 +22,7 @@ using MyPackage
 const REPO = Repository(pkgdir(MyPackage); baseline = joinpath(@__DIR__, "code_baseline.toml"))
 
 @testset "code rules" begin
-    ratchet!(REPO, "hidden-input", hidden_inputs(MyPackage))
+    ratchet!(REPO, "hidden-input", hidden_inputs(REPO, MyPackage))
     ratchet!(REPO, "abstract-local", abstract_locals(REPO, inferred_methods(MyPackage, SIGNATURES)))
 end
 ```

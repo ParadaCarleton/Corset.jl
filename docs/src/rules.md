@@ -15,7 +15,7 @@ entry_frames(seeds, MyPackage))` reads the frames an entry-point walk already in
 command line seeds that walk from `Corset.Entries` (see `--entries` in the CLI page). An opt-out on a method's first line covers
 every site these rules find in that method.
 
-### `hidden-input`: `hidden_inputs(mod)`
+### `hidden-input`: `hidden_inputs(repository, mod)`
 
 Reads of a non-constant or mutable global, or of a `ScopedValue`. The result of such a function
 depends on state its signature does not show.
@@ -160,6 +160,7 @@ Each takes a file path and `located_source(file)`, the parsed file.
 | `float64` | `float64_sites(file)` | `Float64` tokens and untyped float literals; `float-widening` reads where they widen a narrower argument | `zero(T)`, `T(0.5)` or `oftype(x, 0.5)` |
 | `ref` | `ref_sites(file)` | `Ref` and `RefValue` outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | Return the changed data from the function that computes it. A broadcast shield (`f.(Ref(x), xs)`) opts out with `# lint: ref` |
 | `c-type` | `c_type_sites(file)` | `Cint`, `Cdouble` and the other C-interop types outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | `Int`, `Float64` or `String`; convert at the `ccall` |
+| `file-length` | `long_file_sites(repo, file)` | source files longer than `Repository.file_line_limit` lines (default 1500) | split the file by topic |
 | `one-letter` | `one_letter_sites(repo, file)` | one-letter variable names (exempt: `_` and `Repository.one_letter_exempt`) | name the variable |
 
 ## Rules with fixers

@@ -59,7 +59,7 @@ Ask Corset for the offenders of the two rules that notice this:
 
 ```@example first
 repo = Repository(root)
-offenders!(repo, "hidden-input", hidden_inputs(Demo))
+offenders!(repo, "hidden-input", hidden_inputs(repo, Demo))
 ```
 
 ```@example first
@@ -79,7 +79,7 @@ using MyPackage
 const REPO = Repository(pkgdir(MyPackage))
 
 @testset "code rules" begin
-    ratchet!(REPO, "hidden-input", hidden_inputs(MyPackage))
+    ratchet!(REPO, "hidden-input", hidden_inputs(REPO, MyPackage))
     ratchet!(REPO, "abstract-local", abstract_locals(REPO, inferred_methods(MyPackage, SIGNATURES)))
 end
 ```

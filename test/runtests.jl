@@ -101,6 +101,7 @@ end
         @test isnothing(repository.baseline)
         @test repository.one_letter_exempt == ()
         @test repository.skipped_directories == ()
+        @test repository.file_line_limit == Corset.DEFAULT_FILE_LINE_LIMIT
     end
 
     @testset "without a baseline every offender's key is past it" begin
@@ -150,7 +151,9 @@ end
     inferred = inferred_methods(fixture, concrete_signatures(fixture))
 
     @testset "hidden-input: a read of a mutable or non-constant global" begin
-        @test unique(site_keys(hidden_inputs(fixture))) == ["counter"]
+        @test unique(site_keys(hidden_inputs(repository, fixture))) == ["counter"]
+        # A sibling directory whose name extends the root's is outside the repository.
+        @test isempty(hidden_inputs(Repository(mkpath(root[1:(end - 1)])), fixture))
     end
 
     @testset "non-public-access: a qualified access or explicit import of a non-public name" begin
@@ -305,6 +308,15 @@ end
         path = snippet_file("one-letter")
         @test length(one_letter_sites(Repository(dirname(path)), path)) == 2
         @test length(one_letter_sites(Repository(dirname(path); one_letter_exempt = (:p,)), path)) == 1
+    end
+
+    @testset "file-length: a file past the repository's line limit, reported as a whole" begin
+        path = joinpath(mktempdir(), "three.jl")
+        write(path, "a = 1\nb = 2\nc = 3\n")
+        @test Corset.long_file_sites(Repository(dirname(path); file_line_limit = 3), path) == Site[]
+        @test Corset.long_file_sites(Repository(dirname(path); file_line_limit = 2), path) ==
+            [Site("three.jl", path, 0, "3 lines, over 2")]
+        @test_throws ErrorException Repository(dirname(path); file_line_limit = 0)
     end
 
     @testset "fatou: findings of the real `fatou lint` (from mise.toml)" begin
@@ -668,6 +680,13 @@ end
         @test isempty(Corset.bound_names(Meta.parse("a.b")))
         @test Corset.one_letter_names(Meta.parse("try\n1\ncatch e\n2\nend"), ()) == [:e]
     end
+end
+
+@testset "defined_methods finds methods added to another module's function" begin
+    external = Module(:ExternalExtension)
+    Base.eval(external, :(Base.length(::Type{Val{:corset_probe}})::Int = 1))
+    defined = Corset.defined_methods(external)
+    @test any(method -> method.name === :length && method.module === external, defined)
 end
 
 @testset "closure reflection follows nested closures and macro-made code" begin

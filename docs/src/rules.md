@@ -15,7 +15,7 @@ entry_frames(seeds, MyPackage))` reads the frames an entry-point walk already in
 command line seeds that walk from `Corset.Entries` (see `--entries` in the CLI page). An opt-out on a method's first line covers
 every site these rules find in that method.
 
-### `hidden-input`: `hidden_inputs(mod)`
+### `hidden-input`: `hidden_inputs(repository, mod)`
 
 Reads of a non-constant or mutable global, or of a `ScopedValue`. The result of such a function
 depends on state its signature does not show.

@@ -223,6 +223,24 @@ end
         @test "Base.JuliaSyntax" in site_keys(non_public_accesses(Corset))
     end
 
+    @testset "non-public-access: a module whose submodule is in another file reads the file of its `module` block" begin
+        tree = write_tree(
+            mktempdir(), [
+                "outer.jl" => "module Outer\ninclude(\"inner.jl\")\nouter() = Base.uniontypes(Int)\nend\n",
+                "inner.jl" => "module Inner\ninner() = Base.uniontypes(Int)\nend\n",
+                "split.jl" => "Base.include(@__MODULE__, \"part.jl\")\nwhole() = 1\n", "part.jl" => "part() = 1\n",
+            ]
+        )
+        holder = Module(:Holder)
+        Base.include(holder, joinpath(tree, "outer.jl"))
+        @test Corset.entry_file(holder.Outer) == joinpath(tree, "outer.jl")
+        @test Corset.entry_file(holder.Outer.Inner) == joinpath(tree, "inner.jl")
+        @test [(basename(site.file), site.line) for site in non_public_accesses(holder.Outer)] == [("outer.jl", 3), ("inner.jl", 2)]
+        split = Module(:Split)
+        Base.include(split, joinpath(tree, "split.jl"))
+        @test_throws Corset.UsageError Corset.entry_file(split)
+    end
+
     @testset "abstract-local: a local variable that infers no concrete type" begin
         @test site_keys(abstract_locals(repository, inferred)) == ["fixture.jl abstract_local"]
         @test isempty(abstract_locals(Repository(mktempdir()), inferred))

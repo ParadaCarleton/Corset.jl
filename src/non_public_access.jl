@@ -45,11 +45,23 @@ function non_public_site(row::NamedTuple, owner::Union{Module, Symbol})::Site
     return Site("$owner.$(row.name)", String(file), parse(Int, line), "`$(row.name)` is not public in `$owner`")
 end
 
-"""The file `mod` was loaded from: its package entry file, or else the one source file its methods name."""
+"""
+The file `mod` was loaded from: its package entry file, else the file its `module` block is in, else
+the one source file its own methods (not its submodules') name. Methods in several files throw.
+"""
 function entry_file(mod::Module)::String
     package_file = pathof(mod)
-    if isnothing(package_file)
-        return only(filter(isfile, unique(string(method.file) for method in defined_methods(Package(mod)))))
+    if !isnothing(package_file)
+        return package_file
     end
-    return package_file
+    block_file = string(Base.moduleloc(mod).file) # lint: non-public-access  the `module` block's location has no public accessor
+    if isfile(block_file)
+        return block_file
+    end
+    methods_ = defined_methods(Package(mod))
+    files = filter(isfile, unique(string.(getfield.(methods_[getfield.(methods_, :module) .=== (mod,)], :file))))
+    if length(files) != 1
+        throw(UsageError("the methods of $mod are in $(length(files)) files ($(join(files, ", "))); pass the file that defines it"))
+    end
+    return only(files)
 end

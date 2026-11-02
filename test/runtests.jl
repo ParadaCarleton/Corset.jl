@@ -182,12 +182,12 @@ end
         @test first(Corset.unopted(sites, "rule", Corset.source_comments(context))) == [last(sites)]
     end
 
-    @testset "a note outlives its last site: the run logs it stale and keeps it" begin
+    @testset "a note outlives its last site: the run logs it stale and keeps it; a count falls to none" begin
         root = mktempdir()
         baseline = joinpath(root, "baseline.toml")
-        write(baseline, "[rule]\nnoted = \"kept: deliberate\"\nother = \"unassigned\"\n")
+        write(baseline, "[rule]\ngone = 2\nnoted = \"kept: deliberate\"\nother = \"unassigned\"\n")
         repository = Repository(root; baseline)
-        @test isempty(@test_logs (:warn, r"rule: notes with no site[^\n]*\nnoted$") offenders!(repository, "rule", Site[]; scopes = ("noted",)))
+        @test isempty(@test_logs (:info, r"rule fell") (:warn, r"rule: notes with no site[^\n]*\nnoted$") offenders!(repository, "rule", Site[]; scopes = ("noted", "gone")))
         @test TOML.parsefile(baseline)["rule"] == Dict("noted" => "kept: deliberate", "other" => "unassigned")
     end
 

@@ -34,11 +34,11 @@ corset check [path] [options]
 
 - `--format <format>`: Output format (`human`, `concise`, or `json`). Default is `human`.
 - `--fix`: Rewrite files in place for rules that provide an automated fixer (such as `where-return` and `misplaced-import`).
-- `--diff`: Print a unified diff of the changes `--fix` would make without modifying any files on disk. Exits with code `1` if changes are detected, `0` if clean. Cannot be combined with `--fix`.
+- `--diff`: Print a unified diff of the changes `--fix` would make without modifying any files on disk. Exits with code `1` if changes are detected, `0` if clean. It rejects `--fix` and the flags it would ignore: `--format`, `--deny-warnings`, `--update-baseline`, `--entries` and `--candidate-limit`.
 - `--pedantic`: Enable rules in the `:pedantic` group in addition to `:default` rules.
 - `--deny-warnings`: Exit nonzero on warnings in addition to deny-level findings.
 - `--update-baseline`: Seed missing baseline entries and lower counts for improved sites.
-- `--no-load`: Skip loading the package module into Julia; runs only file and tree syntax rules.
+- `--no-load`: Skip loading the package module into Julia; runs only file and tree syntax rules. It rejects `--entries`, which only the typed rules read.
 - `--candidate-limit <count>`: The most candidate methods one runtime-dispatch site lists; `0` lists none. Overrides `candidate_limit`.
 - `--entries <sources>`: Where the typed rules (`abstract-local`, `bang`, `runtime-dispatch`, `unmarked-mutation`, `widened-return`, `float-widening`) get their entry signatures, as a comma-separated list. `workload` (the default) takes the specializations the package's precompile workload compiled and the methods whose declared signature is already concrete. `tests` runs the package's tests under `--trace-compile` and keeps the traced signatures of the package's methods; it runs the whole test suite and every process it starts beside the check, so it needs their memory too. `none` skips the typed rules. After the findings, the command prints how many signatures each source gave, how many the walk inferred, and the peak resident memory of the run.
 - `--allow <rule>`: Disable the specified rule (repeatable).
@@ -74,7 +74,7 @@ where-return = "allow"
 
 Keys:
 
-- `directories`: Folders containing Julia source code to check (default: `["src"]`).
+- `directories`: Folders containing Julia source code to check (default: `["src"]`). A listed folder that does not exist is an error; a missing default `src` is skipped.
 - `baseline`: Path to the baseline TOML file, relative to the project root.
 - `pedantic`: Boolean to enable all pedantic rules by default.
 - `skipped_directories`: Directory names omitted wherever they sit.
@@ -88,4 +88,5 @@ Keys:
 
 - `0`: Clean run (no deny-level findings, or no findings when `--deny-warnings` is set).
 - `1`: One or more findings failed the run, or `--diff` detected rewrites.
-- `2`: Usage error, invalid configuration, or execution failure.
+- `2`: Usage error or invalid configuration, such as an unknown rule, a bad flag, or a configured directory that does not exist.
+- `3`: Internal error: Corset itself failed. The error and its backtrace go to standard error.

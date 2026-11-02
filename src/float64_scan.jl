@@ -3,7 +3,10 @@
 using InteractiveUtils: code_llvm
 
 const FLOAT64_IR_OPS =
-    ("fadd", "fmul", "fsub", "fdiv", "frem", "fcmp", "fpext", "fptrunc", "call")
+    ("fadd", "fmul", "fsub", "fdiv", "frem", "fneg", "fcmp", "fpext", "fptrunc", "sitofp", "uitofp", "call")
+
+"""An LLVM IR line naming the type `double` and an operation in `FLOAT64_IR_OPS`, each as a whole word."""
+const FLOAT64_IR_LINE = Regex("(?=.*\\bdouble\\b).*\\b(?:$(join(FLOAT64_IR_OPS, '|')))\\b")
 
 """
     float64_ops(f, types)
@@ -29,4 +32,4 @@ function float64_ops(f::Any, types::Tuple)::Int
 end
 
 """Whether LLVM IR `line` is a `double` operation in `FLOAT64_IR_OPS`."""
-float64_line(line::AbstractString)::Bool = occursin("double", line) && any(occursin.(FLOAT64_IR_OPS, line))
+float64_line(line::AbstractString)::Bool = occursin(FLOAT64_IR_LINE, line)

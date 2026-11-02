@@ -4,9 +4,9 @@ using Test: @testset, @test, @test_logs, @test_throws
 using JET: JET
 using TOML: TOML
 using Corset: Corset
-using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, abstract_locals,
+using Corset: CONCRETE_RETURN_FIX, Repository, Site, Source, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, abstract_locals,
     c_type_sites, impure_anonymous_functions, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
-    jscpd_sites, located_source, misplaced_imports, missing_annotations, module_structs, non_public_accesses, nothing_returns,
+    jscpd_sites, misplaced_imports, missing_annotations, module_structs, non_public_accesses, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
     where_return_sites, entry_frames, frame_callees, mentions_module, invoked_instance, logging_call, runtime_dispatches,
@@ -27,10 +27,13 @@ end
 """The path of `source.jl` holding the snippet of `rule` (`fixtures/snippets.toml`), in a fresh tree."""
 snippet_file(rule::AbstractString)::String = joinpath(write_tree(mktempdir(), ["source.jl" => SNIPPETS[rule]["source"]]), "source.jl")
 
-"""The `Site`s that `finder(path, located)` finds in the snippet of `rule`."""
+"""The `Source` of the file `path`, read as the repository its directory roots."""
+parsed(path::AbstractString)::Source = Source(Repository(dirname(path)), path)
+
+"""The `Site`s that `finder(source)` finds in the parsed snippet of `rule`."""
 function found_in(finder::Function, rule::AbstractString)::Vector{Site}
     path = snippet_file(rule)
-    return finder(path, located_source(path))
+    return finder(parsed(path))
 end
 
 """The keys of `sites`."""
@@ -90,7 +93,7 @@ function reflect_all(mod::Module)::Nothing
     Corset.defined_methods(Corset.Package(mod))
     abstract_fields.(structs)
     repeated_prefix.(structs)
-    impure_anonymous_functions(mod)
+    impure_anonymous_functions(Repository(pwd()), mod)
     return nothing
 end
 
@@ -121,6 +124,18 @@ end
         @test isempty(offenders!(Repository(root), "rule", [Site("whole", joinpath(root, "whole.jl"), 2, "")]))
     end
 
+    @testset "only a comment opts out: `# lint:` inside a string or docstring is text" begin
+        text = "doc = \"put `# lint: rule-file` on a line\"\nx = 1\n\"\"\"\n# lint: rule\n\"\"\"\ny = 2\n#= a block comment\n   # lint: rule =#\nz = 3 # lint: rule\n"
+        root = write_tree(mktempdir(), ["source.jl" => text])
+        sites = [Site("line $line", joinpath(root, "source.jl"), line, "") for line in 1:9]
+        @test offenders!(Repository(root), "rule", sites) == ["line $line" for line in 1:7]
+    end
+
+    @testset "a `-begin` with no `-end` below it throws, naming its file and line" begin
+        root = write_tree(mktempdir(), ["open.jl" => "x = 1\n# lint: rule-begin\ny = 2\n# lint: other-end\n"])
+        @test_throws r"open\.jl:2: `# lint: rule-begin` has no `# lint: rule-end`" offenders!(Repository(root), "rule", [Site("x", joinpath(root, "open.jl"), 3, "")])
+    end
+
     @testset "with a baseline each key is held to its entry, and entries fall" begin
         root = mktempdir()
         baseline = joinpath(root, "baseline.toml")
@@ -133,9 +148,47 @@ end
         @test isempty(offenders!(repository, "rule", [sites; Site("noted", "", 0, "")]))
         @test offenders!(repository, "rule", [sites; Site("counted", "", 0, "")]) == ["counted"]
         @test offenders!(repository, "rule", [Site("fresh", "", 0, "")]; scopes = ("noted",)) == ["fresh"]
-        @test TOML.parsefile(baseline)["rule"] == Dict("counted" => 2)
         @test ratchet!(repository, "rule", [Site("counted", "", 0, "")]) == String[]
-        @test TOML.parsefile(baseline)["rule"] == Dict("counted" => 1)
+        @test TOML.parsefile(baseline)["rule"] == Dict("counted" => 1, "noted" => "kept: deliberate")
+    end
+
+    @testset "32k sites group by place and by key in under 5 s, each group's details sorted" begin
+        sites = [Site("file$(index % 50).jl f$(index ÷ 2)", "/r/src/file$(index % 50).jl", index ÷ 2, "local `x$index`::Any") for index in 1:32_000]
+        Corset.one_per_line(sites[1:10])
+        Corset.detail_lines(sites[1:10])
+        @test (@elapsed Corset.one_per_line(sites)) + (@elapsed Corset.detail_lines(sites)) < 5
+        @test length(Corset.one_per_line(sites)) == 32_000
+        @test Corset.detail_lines([sites; Site("file2.jl f1", "", 0, "local `w`::Any")])["file2.jl f1"] == "local `w`::Any; local `x2`::Any"
+    end
+
+    @testset "a key names its file by the path from the repository root: two util.jl files differ" begin
+        root = write_tree(mktempdir(), ["src/util.jl" => "x = 1.0\n", "ext/X/util.jl" => "y = 2.0\n"])
+        repository = Repository(root)
+        keys = [site.key for path in ("src/util.jl", "ext/X/util.jl") for site in float64_sites(Source(repository, joinpath(root, path)))]
+        @test keys == ["src/util.jl", "ext/X/util.jl"]
+        @test Corset.file_key(repository, joinpath(root, "ext", "X", "util.jl")) == "ext/X/util.jl"
+    end
+
+    @testset "a Context parses each file once: its rules and opt-outs read no file after" begin
+        text = "struct Point # lint: rule\n    x::Float64\nend\nf(x) = x\n"
+        root = write_tree(mktempdir(), ["src/point.jl" => text])
+        context = Corset.Context(Repository(root), ("src",), nothing)
+        rm(joinpath(root, "src"); recursive = true)
+        source = only(context.sources)
+        file_rules = [rule for rule in Corset.RULES if rule isa Corset.FileRule]
+        @test sum(length(Corset.check(rule, context, source)) for rule in file_rules) > 0
+        @test Corset.declared(context) == [Corset.StructDeclaration(:Point, source.path, 1)]
+        sites = [Site("Point", source.path, 1, ""), Site("f", source.path, 4, "")]
+        @test first(Corset.unopted(sites, "rule", Corset.source_comments(context))) == [last(sites)]
+    end
+
+    @testset "a note outlives its last site: the run logs it stale and keeps it; a count falls to none" begin
+        root = mktempdir()
+        baseline = joinpath(root, "baseline.toml")
+        write(baseline, "[rule]\ngone = 2\nnoted = \"kept: deliberate\"\nother = \"unassigned\"\n")
+        repository = Repository(root; baseline)
+        @test isempty(@test_logs (:info, r"rule fell") (:warn, r"rule: notes with no site[^\n]*\nnoted$") offenders!(repository, "rule", Site[]; scopes = ("noted", "gone")))
+        @test TOML.parsefile(baseline)["rule"] == Dict("noted" => "kept: deliberate", "other" => "unassigned")
     end
 
     @testset "repository_sources skips hidden directories, and skipped ones when asked" begin
@@ -186,15 +239,15 @@ end
         for (maker, argument) in ((:adder, 1), (:labeler, "a"), (:reader, [1]), (:kinded, Int))
             Base.invokelatest(Base.invokelatest(getfield(fixture, maker), argument), 2)
         end
-        sites = Dict(site.key => site for site in impure_anonymous_functions(fixture))
+        sites = Dict(site.key => site for site in impure_anonymous_functions(repository, fixture))
         @test Set(keys(sites)) == Set(["fixture.jl boxed", "fixture.jl lineless", "fixture.jl reader"])
         @test sites["fixture.jl boxed"].detail == "holds a Core.Box: a captured variable is rebound"
         @test occursin("unverified", sites["fixture.jl lineless"].detail)
         @test sites["fixture.jl reader"].detail == "captures Vector{Int64}, not plain immutable data"
-        overspecialized = only(Corset.overspecialized_anonymous_functions(fixture))
+        overspecialized = only(Corset.overspecialized_anonymous_functions(repository, fixture))
         @test overspecialized.key == "fixture.jl kinded"
         @test occursin("{Int64}, so it compiles once per value", overspecialized.detail)
-        @test isempty(Corset.unstable_anonymous_functions(fixture))
+        @test isempty(Corset.unstable_anonymous_functions(repository, fixture))
         @testset "plain immutable data is a non-function bits value, a String or Symbol, or an immutable composite of them" begin
             @test all(Corset.plain_capture, (Int, Float32, Char, String, Symbol, Nothing, Tuple{Int, String}, @NamedTuple{name::String}, Union{Nothing, String}))
             @test !any(Corset.plain_capture, (Vector{Int}, Dict{Int, Int}, SubArray{Int, 1, Vector{Int}, Tuple{UnitRange{Int}}, true}, DataType, typeof(sin), Module, Real, Union{Int, Vector{Int}}))
@@ -222,21 +275,42 @@ end
         @test repeated_prefix(structs[:SolverControls]) == "solver"
         @test isnothing(repeated_prefix(structs[:Plain]))
         path = joinpath(root, "fixture.jl")
-        @test struct_site(:Holder, struct_locations([path])) == Site("Holder", path, findfirst(==("struct Holder"), readlines(path)), "")
+        @test struct_site(structs[:Holder], struct_locations([parsed(path)])) == Site("Holder", path, findfirst(==("struct Holder"), readlines(path)), "")
     end
 
     @testset "a struct is placed at its `struct` line, below its docstring" begin
         path = snippet_file("struct-line")
         lines = readlines(path)
-        locations = struct_locations([path])
-        @test locations == Dict(
-            :Documented => (path, findfirst(startswith("struct Documented"), lines)),
-            :Counter => (path, findfirst(endswith("struct Counter"), lines)),
-            :Plain => (path, findfirst(startswith("struct Plain"), lines)),
-            Symbol("Odd Name") => (path, findfirst(startswith("struct var\"Odd Name\""), lines)),
+        locations = struct_locations([parsed(path)])
+        @test Set(locations) == Set(
+            Corset.StructDeclaration.(
+                [:Documented, :Counter, :Plain, Symbol("Odd Name")],
+                path,
+                findfirst.([startswith("struct Documented"), endswith("struct Counter"), startswith("struct Plain"), startswith("struct var\"Odd Name\"")], (lines,)),
+            ),
         )
-        sites = [struct_site(name, locations) for name in (:Documented, :Counter)]
+        @test issorted(locations; by = Corset.declaration_name)
+        snippet = Module(:Snippet)
+        Base.include(snippet, path)
+        sites = [struct_site(Base.unwrap_unionall(getglobal(snippet, name)), locations) for name in (:Documented, :Counter)]
         @test offenders!(Repository(dirname(path)), "wide-struct", sites) == ["Counter"]
+    end
+
+    @testset "two structs of one name: each is placed in the file that defines its constructors" begin
+        root = write_tree(mktempdir(), ["src/a.jl" => "struct Same\n    a::Int\nend\n", "test/b.jl" => "\n\nstruct Same\n    a::Int\nend\n"])
+        files = joinpath.(root, ["src/a.jl", "test/b.jl"])
+        for (file, line) in zip(files, (1, 3))
+            owner = Module(:Owner)
+            Base.include(owner, file)
+            for order in (files, reverse(files))
+                @test struct_site(owner.Same, struct_locations(parsed.(order))) == Site("Same", file, line, "")
+            end
+        end
+        unplaced = Module(:Unplaced)
+        Core.eval(unplaced, :(struct Same end))
+        @test_throws r"struct Same is declared in .*a\.jl.*b\.jl" struct_site(unplaced.Same, struct_locations(parsed.(files)))
+        @test struct_site(unplaced.Same, struct_locations(parsed.(files[1:1]))) == Site("Same", first(files), 1, "")
+        @test struct_site(unplaced.Same, struct_locations(Source[])) == Site("Same", "", 0, "")
     end
 
     @testset "jet: JET reports as sites" begin
@@ -291,22 +365,22 @@ end
     end
 
     @testset "concrete-return: a result annotated with a concrete type, `Matrix{T}` included" begin
-        sites = found_in((path, located) -> concrete_returns(path, located, Base), "concrete-return")
+        sites = found_in(source -> concrete_returns(source, Base), "concrete-return")
         @test site_keys(sites) == ["source.jl fixed", "source.jl squared"]
         logged = (:error, Regex("Fix: \\Q$CONCRETE_RETURN_FIX\\E"))
         @test (@test_logs logged offenders!(Repository(mktempdir()), "concrete-return", sites; fix = CONCRETE_RETURN_FIX)) == site_keys(sites)
     end
 
     @testset "float64: Float64 tokens and untyped float literals" begin
-        @test site_lines(float64_sites(snippet_file("float64"))) == [1, 1]
+        @test site_lines(float64_sites(parsed(snippet_file("float64")))) == [1, 1]
     end
 
     @testset "c-type: C-interop types outside a ccall" begin
-        @test site_lines(c_type_sites(snippet_file("c-type"))) == [1, 1]
+        @test site_lines(c_type_sites(parsed(snippet_file("c-type")))) == [1, 1]
     end
 
     @testset "ref: Ref and RefValue outside a ccall" begin
-        @test site_lines(Corset.ref_sites(snippet_file("ref"))) == [1, 2, 5]
+        @test site_lines(Corset.ref_sites(parsed(snippet_file("ref")))) == [1, 2, 5]
     end
 
     @testset "annotation: every argument and result annotated" begin
@@ -315,15 +389,15 @@ end
 
     @testset "one-letter: one-letter variable names, with exemptions opt-in" begin
         path = snippet_file("one-letter")
-        @test length(one_letter_sites(Repository(dirname(path)), path)) == 2
-        @test length(one_letter_sites(Repository(dirname(path); one_letter_exempt = (:p,)), path)) == 1
+        @test length(one_letter_sites(Repository(dirname(path)), parsed(path))) == 2
+        @test length(one_letter_sites(Repository(dirname(path); one_letter_exempt = (:p,)), parsed(path))) == 1
     end
 
     @testset "file-length: a file past the repository's line limit, reported as a whole" begin
         path = joinpath(mktempdir(), "three.jl")
         write(path, "a = 1\nb = 2\nc = 3\n")
-        @test Corset.long_file_sites(Repository(dirname(path); file_line_limit = 3), path) == Site[]
-        @test Corset.long_file_sites(Repository(dirname(path); file_line_limit = 2), path) ==
+        @test Corset.long_file_sites(Repository(dirname(path); file_line_limit = 3), parsed(path)) == Site[]
+        @test Corset.long_file_sites(Repository(dirname(path); file_line_limit = 2), parsed(path)) ==
             [Site("three.jl", path, 0, "3 lines, over 2")]
         @test_throws ErrorException Repository(dirname(path); file_line_limit = 0)
     end
@@ -445,7 +519,7 @@ end
             @test where_fixed(kept) == kept
             path = tempname()
             write(path, kept)
-            @test isempty(where_return_sites(path))
+            @test isempty(where_return_sites(parsed(path)))
         end
     end
 end
@@ -464,7 +538,7 @@ end
     check(text::String, rule::Function) = (
         path = tempname() * ".jl";
         write(path, text);
-        rule(path, located_source(path))
+        rule(parsed(path))
     )
     @testset "a keyword splat needs no annotation, and Bool is an allowed result" begin
         text = "f(x::T; options...)::Bool where {T} = true\n"
@@ -472,7 +546,7 @@ end
         @test isempty(
             check(
                 text,
-                (path, located) -> concrete_returns(path, located, Main),
+                source -> concrete_returns(source, Main),
             )
         )
     end
@@ -500,7 +574,7 @@ end
     check(text::String) = (
         path = tempname() * ".jl";
         write(path, text);
-        length(concrete_returns(path, located_source(path), scope))
+        length(concrete_returns(parsed(path), scope))
     )
     @test check("(wrap(element::E)::Wrapped{E}) where {E} = Wrapped(element)\n") == 0
     @test check("(wrap(element::E)::Set{E}) where {E} = Set(element)\n") == 0
@@ -515,7 +589,7 @@ end
     # A macro-named function keys by the macro name alone, with no line-number node.
     path = tempname() * ".jl"
     write(path, "(@main)(args::AbstractVector)::Int = 0\n")
-    @test only(concrete_returns(path, located_source(path), scope)).key == "$(basename(path)) @main"
+    @test only(concrete_returns(parsed(path), scope)).key == "$(basename(path)) @main"
 end
 
 @testset "a name used only inside a macro call counts as used" begin
@@ -622,7 +696,9 @@ end
         @test isempty(Corset.method_hidden_inputs(first(methods(Core.tuple))))
     end
     @testset "an anonymous function's own method is keyed by its file alone" begin
-        @test Corset.method_key(only(methods(values -> values))) == "runtests.jl anonymous function"
+        anonymous = only(methods(values -> values))
+        @test Corset.method_key(Repository(@__DIR__), anonymous) == "runtests.jl anonymous function"
+        @test Corset.method_key(Repository(dirname(@__DIR__)), anonymous) == "test/runtests.jl anonymous function"
     end
     @testset "abstract local types: unions, containers, tuples and Type" begin
         concrete = (Union{}, Union{Int, String}, Type{Int}, Vector{Int}, Dict{String, Int}, Tuple{Int, Float64}, Tuple{Vararg{Int}})
@@ -657,7 +733,7 @@ end
         @test isnothing(Corset.testset_name(Meta.parse("@testset begin end")))
         path = tempname() * ".jl"
         write(path, "@testset \"inside\" begin\n    f(a) = 1\nend\n")
-        @test any(item.enclosing === :inside for item in located_source(path))
+        @test any(item.enclosing === :inside for item in parsed(path).located)
     end
     @testset "concrete containers: bare, in a Union, and not a type at all" begin
         @test Corset.is_concrete_container(Meta.parse("Union{Vector, Nothing}"))

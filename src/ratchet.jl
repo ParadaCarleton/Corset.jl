@@ -4,6 +4,8 @@
 using Test: @test
 using TOML: TOML
 
+const SYNTAX = Base.JuliaSyntax # lint: non-public-access  the registered JuliaSyntax lags the parser Julia 1.13 ships
+
 # The baseline file holds one table per rule, named as in the rule's opt-out comment. A string
 # is a named offender's note ("unassigned" waits on a decision, "kept: …" is deliberate) and
 # allows it at any number of sites; an integer allows that many sites. `TOML.print` drops comments.
@@ -53,6 +55,9 @@ function checked_line_limit(limit::Integer, source::AbstractString)::Int
     return limit
 end
 
+"""The name a key gives `file`: its path from the root of `repository`, joined with `/` on every system."""
+file_key(repository::Repository, file::AbstractString)::String = join(splitpath(relpath(file, repository.root)), "/")
+
 """
 One offender a rule found: `key` names it in the baseline; `file` (a path, empty when the offender
 has none) and the lines `line` through `last_line` place it for the opt-out comments, so a comment on
@@ -76,6 +81,61 @@ name is lowercase words joined by `-`.
 """
 const OPT_OUT = r"#\s*lint:\s*([a-z0-9]+(?:-[a-z0-9]+)*?)(?:-(file|begin|end))?(?![\w-])"
 
+"""One `# lint:` comment: the `rule` it names, its `form` (`:line`, `:file`, `:begin` or `:end`) and its `line`."""
+struct OptOutComment
+    rule::String
+    form::Symbol
+    line::Int
+end
+
+const COMMENT_KIND = SYNTAX.@K_str "Comment"
+
+"""
+    opt_out_comments(path, text = read(path, String))
+
+The `# lint:` comments (`OPT_OUT`) of the Julia source `text` of file `path`: matches inside comment
+tokens only, so a string or docstring that quotes one opts nothing out. A `-begin` with no `-end` of
+its rule below it throws. A path that is no file (a method a macro defined has the file `none`) has none.
+"""
+function opt_out_comments(path::AbstractString)::Vector{OptOutComment}
+    if !isfile(path)
+        return OptOutComment[]
+    end
+    return opt_out_comments(path, read(path, String))
+end
+
+function opt_out_comments(path::AbstractString, text::String)::Vector{OptOutComment}
+    tokens = [token.range for token in SYNTAX.tokenize(text) if SYNTAX.kind(token) == COMMENT_KIND]
+    comments = reduce(vcat, token_comments.(text, (SYNTAX.SourceFile(text),), tokens); init = OptOutComment[])
+    unclosed = filter(Base.Fix1(open_begin, comments), comments)
+    if !isempty(unclosed)
+        error("$path:$(first(unclosed).line): `# lint: $(first(unclosed).rule)-begin` has no `# lint: $(first(unclosed).rule)-end` below it")
+    end
+    return comments
+end
+
+"""The `# lint:` comments in the comment token at byte `range` of `text`, placed by `lines` (its `SourceFile`)."""
+function token_comments(text::String, lines::SYNTAX.SourceFile, range::AbstractUnitRange)::Vector{OptOutComment}
+    found = collect(RegexMatch{String}, eachmatch(OPT_OUT, SubString(text, first(range), thisind(text, last(range)))))
+    return opt_out_comment.((lines,), Int(first(range)), found)
+end
+
+"""The comment `found`, an `OPT_OUT` match in a comment token that starts at byte `start`, placed by `lines`."""
+opt_out_comment(lines::SYNTAX.SourceFile, start::Integer, found::RegexMatch)::OptOutComment =
+    OptOutComment(found[1], opt_out_form(found[2]), SYNTAX.source_line(lines, start + found.offset - 1))
+
+"""The form an `OPT_OUT` suffix (`file`, `begin`, `end` or none) gives its comment."""
+opt_out_form(suffix::AbstractString)::Symbol = Symbol(suffix)
+opt_out_form(::Nothing)::Symbol = :line
+
+"""Whether `comment` is a `-begin` that no `-end` of its rule among `comments` closes, on its line or below."""
+open_begin(comments::AbstractVector{OptOutComment}, comment::OptOutComment)::Bool =
+    comment.form === :begin && isempty(closing_lines(comments, comment))
+
+"""The lines of the `-end`s among `comments` that can close `opening`, a `-begin`: same rule, on its line or below. The first closes it."""
+closing_lines(comments::AbstractVector{OptOutComment}, opening::OptOutComment)::Vector{Int} =
+    [comment.line for comment in comments if comment.form === :end && comment.rule == opening.rule && comment.line >= opening.line]
+
 """Which lines of one file a rule skips: all of them when `whole_file`, else `lines`."""
 struct OptOuts
     whole_file::Bool
@@ -84,38 +144,26 @@ end
 
 """
     opt_outs(path, rule)
+    opt_outs(comments, rule)
 
-The lines of `path` that the `# lint:` comments (`OPT_OUT`) take out of `rule`. A `-begin` without
-an `-end` runs to the end of the file. A path that is no file (a method a macro defined has the file
-`none`) has none.
+The lines that the `# lint:` comments of `path` (`opt_out_comments`), or `comments`, take out of `rule`:
+each comment's own line, and every line from a `-begin` to the `-end` that closes it.
 """
-function opt_outs(path::AbstractString, rule::AbstractString)::OptOuts
-    whole_file = false
-    lines = Set{Int}()
-    if !isfile(path)
-        return OptOuts(whole_file, lines)
-    end
-    inside = false
-    for (number, text) in enumerate(eachline(path))
-        if inside
-            push!(lines, number)
-        end
-        for found in eachmatch(OPT_OUT, text)
-            if found[1] != rule
-                continue
-            end
-            push!(lines, number)
-            if found[2] == "file"
-                whole_file = true
-            elseif found[2] == "begin"
-                inside = true
-            elseif found[2] == "end"
-                inside = false
-            end
-        end
-    end
-    return OptOuts(whole_file, lines)
+opt_outs(path::AbstractString, rule::AbstractString)::OptOuts = opt_outs(opt_out_comments(path), rule)
+
+function opt_outs(comments::AbstractVector{OptOutComment}, rule::AbstractString)::OptOuts
+    named = [comment for comment in comments if comment.rule == rule]
+    spans = span_lines.((named,), filter(is_begin, named))
+    lines = Set{Int}(reduce(vcat, spans; init = Int[comment.line for comment in named]))
+    return OptOuts(any(comment.form === :file for comment in named), lines)
 end
+
+"""Whether `comment` is a `-begin`."""
+is_begin(comment::OptOutComment)::Bool = comment.form === :begin
+
+"""The lines from `opening`, a `-begin` among `comments`, to the `-end` that closes it."""
+span_lines(comments::AbstractVector{OptOutComment}, opening::OptOutComment)::Vector{Int} =
+    collect(opening.line:minimum(closing_lines(comments, opening)))
 
 """The Julia files below `directory`, in no particular order; hidden directories, those named in `skipped` and links to directories are not entered."""
 function julia_files(directory::AbstractString, skipped::Tuple{Vararg{String}})::Vector{String}
@@ -136,8 +184,8 @@ repository_sources(repository::Repository, directories::Tuple{Vararg{String}})::
     reduce(vcat, julia_files.(joinpath.(repository.root, directories), (repository.skipped_directories,)); init = String[]),
 )
 
-"""The baseline entry left after `found` sites against `entry`: a note stays while its offender has a site, a count falls to `found`."""
-remaining(entry::AbstractString, found::Integer)::Union{String, Int} = ifelse(found == 0, 0, entry)
+"""The baseline entry left after `found` sites against `entry`: a note stays, a count falls to `found`."""
+remaining(entry::AbstractString, ::Integer)::String = entry
 remaining(entry::Integer, found::Integer)::Int = min(entry, found)
 
 """Whether `found` sites exceed baseline `entry`; a note allows any number."""
@@ -160,16 +208,24 @@ function write_baseline!(baseline::Baseline, path::AbstractString)::String
     return mv(staged, path; force = true)
 end
 
+"""
+    grouped_details(groups, details)
+
+The distinct `details` in each of `groups`, sorted and joined with `"; "`; the two vectors pair up
+element by element. One sort, and a binary search per group.
+"""
+function grouped_details(groups::AbstractVector{G}, details::AbstractVector{String})::Dict{G, String} where {G}
+    entries = sort!(unique(zip(groups, details)))
+    distinct = unique(groups)
+    found = getindex.((last.(entries),), searchsorted.((first.(entries),), distinct))
+    return Dict{G, String}(distinct .=> join.(found, "; "))
+end
+
 """The `detail`s of the sites under each key, sorted and joined; a key none of whose sites has one is absent."""
 function detail_lines(sites::AbstractVector{S})::Dict{String, String} where {S <: Site}
     described = [site for site in sites if !isempty(site.detail)]
-    keys_ = unique([site.key for site in described])
-    return Dict{String, String}(keys_ .=> key_details.((described,), keys_))
+    return grouped_details(String[site.key for site in described], String[site.detail for site in described])
 end
-
-"""The `detail`s of the `sites` under `key`, sorted and joined."""
-key_details(sites::AbstractVector{<:Site}, key::String)::String =
-    join(sort!(unique([site.detail for site in sites if site.key == key])), "; ")
 
 """The parenthesized detail that follows `key` in the log, empty when `key` has none."""
 function detail_suffix(details::AbstractDict{String, String}, key::String)::String
@@ -195,20 +251,32 @@ function logged_over(
     return over
 end
 
-"""The sites of `sites` that no `# lint:` comment naming `rule` opts out, and how many were opted out."""
-function unopted(sites::AbstractVector{S}, rule::AbstractString)::Tuple{Vector{Site}, Int} where {S <: Site}
-    skips = Dict{String, OptOuts}()
-    kept = Site[]
-    for site in sites
-        if !haskey(skips, site.file)
-            skips[site.file] = opt_outs(site.file, rule)
-        end
-        if !(skips[site.file].whole_file || any(in(skips[site.file].lines), site.line:site.last_line))
-            push!(kept, site)
-        end
+"""The `# lint:` comments of `file`: those `comments` holds, or else the file's own (`opt_out_comments`)."""
+function file_comments(comments::AbstractDict{String, Vector{OptOutComment}}, file::String)::Vector{OptOutComment}
+    if haskey(comments, file)
+        return comments[file]
     end
+    return opt_out_comments(file)
+end
+
+"""
+The sites of `sites` that no `# lint:` comment naming `rule` opts out, and how many were opted out.
+`comments` holds the comments of files already parsed, by path; any other file is read.
+"""
+function unopted(
+        sites::AbstractVector{S}, rule::AbstractString, comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
+    )::Tuple{Vector{Site}, Int} where {S <: Site}
+    files = unique(String[site.file for site in sites])
+    skips = Dict{String, OptOuts}(files .=> opt_outs.(file_comments.((comments,), files), rule))
+    kept = filter(Base.Fix1(kept_by, skips), sites)
     return kept, length(sites) - length(kept)
 end
+
+"""Whether no opt-out of `skips` (each file's `OptOuts`) covers `site`."""
+kept_by(skips::AbstractDict{String, OptOuts}, site::Site)::Bool = !opted(skips[site.file], site)
+
+"""Whether `skips` (one file's `OptOuts`) covers a line of `site`."""
+opted(skips::OptOuts, site::Site)::Bool = skips.whole_file || any(in(skips.lines), site.line:site.last_line)
 
 """The number of `sites` under each key."""
 function tally(sites::AbstractVector{S})::Dict{String, Int} where {S <: Site}
@@ -239,23 +307,35 @@ end
 falls(entries::AbstractDict, measured::AbstractDict{String, Int}, scopes::Tuple{Vararg{String}}, key::String)::Bool =
     any(startswith.(key, scopes)) && remaining(entries[key], get(measured, key, 0)) != entries[key]
 
+"""The keys of `entries` under one of `scopes` that hold a note and that `measured` finds no site of."""
+function stale_notes(entries::AbstractDict, measured::AbstractDict{String, Int}, scopes::Tuple{Vararg{String}})::Vector{String}
+    names = collect(String, keys(entries))
+    return sort!(names[stale.((entries,), (measured,), (scopes,), names)])
+end
+
+"""Whether `key` of `entries` is under one of `scopes`, holds a note, and `measured` finds no site of it."""
+stale(entries::AbstractDict, measured::AbstractDict{String, Int}, scopes::Tuple{Vararg{String}}, key::String)::Bool =
+    any(startswith.(key, scopes)) && entries[key] isa AbstractString && !haskey(measured, key)
+
 """
-    offenders!(repository, rule, sites; scopes = ("",), fix = "")
+    offenders!(repository, rule, sites; scopes = ("",), fix = "", comments = Dict())
 
 The keys of `rule`'s offenders `sites` that `repository` does not allow, logged. Sites that a `# lint:`
 comment naming the rule opts out are dropped and counted in the log; the rest are tallied by key.
 Without a baseline (`Repository`'s default) every key is returned. With one, the offenders are held to
-`rule`'s table in the baseline file: the keys past their entry are returned, and an entry the tally
-undercuts is lowered or deleted and the file rewritten. A rule with no table is seeded with its tally.
+`rule`'s table in the baseline file: the keys past their entry are returned, and a count the tally
+undercuts is lowered or deleted and the file rewritten. A note stays; one with no site is logged stale.
+A rule with no table is seeded with its tally.
 Several testsets may share one rule's table, and a run may not measure all of it (a partial copy of
 the tree): each passes the prefixes `scopes` that begin the keys it measures, and only entries under
 one of them can fall. `fix` tells the reader of the log how to repair an offender, such as the forms
-the rule accepts.
+the rule accepts. `comments` holds the `# lint:` comments of files already parsed, by path.
 """
 function offenders!(
         repository::Repository, rule::String, sites::AbstractVector{Site}; scopes::Tuple{Vararg{String}} = ("",), fix::String = "",
+        comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
     )::Vector{String}
-    kept, opted = unopted(sites, rule)
+    kept, opted = unopted(sites, rule, comments)
     measured = tally(kept)
     if opted > 0
         @info "$rule: $opted site(s) opted out by `# lint: $rule`"
@@ -288,6 +368,10 @@ function offenders!(
     if !isempty(improved)
         write_baseline!(baseline, path)
         @info "$rule fell: baseline lowered in $path" improved
+    end
+    stale_keys = stale_notes(entries, measured, scopes)
+    if !isempty(stale_keys)
+        @warn "$rule: notes with no site left, kept in $path; delete one whose offender is gone:\n" * join(stale_keys, "\n")
     end
     return logged_over(rule, measured, detail_lines(kept), over, "the baseline in $path", fix)
 end

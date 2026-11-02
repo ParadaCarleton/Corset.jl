@@ -179,7 +179,7 @@ end
     @testset "a baseline allows today's sites and is read, not written" begin
         baselined = package_tree(
             "name = \"Demo\"\n[preferences.Corset]\nbaseline = \"base.toml\"\n",
-            [SOURCE_TREE; "base.toml" => "[where-return]\n\"Demo.jl\" = 1\n"],
+            [SOURCE_TREE; "base.toml" => "[where-return]\n\"src/Demo.jl\" = 1\n"],
         )
         before = read(joinpath(baselined, "base.toml"), String)
         @test isempty(first(run_rules(load_config(baselined), baselined)))
@@ -287,9 +287,9 @@ end
     root = package_tree("name = \"Demo\"\n", SOURCE_TREE)
     findings, _ = run_rules(load_config(root), root)
     human = sprint(print_findings, root, findings, "human")
-    @test human == "warn[where-return]: Demo.jl\n  --> src/Demo.jl:2\n"
+    @test human == "warn[where-return]: src/Demo.jl\n  --> src/Demo.jl:2\n"
     @test sprint(print_findings, root, findings, "concise") ==
-        "src/Demo.jl:2: warn: [where-return] Demo.jl\n"
+        "src/Demo.jl:2: warn: [where-return] src/Demo.jl\n"
     @test occursin(
         "\"rule\":\"where-return\"",
         sprint(print_findings, root, findings, "json"),
@@ -317,7 +317,7 @@ end
 @testset "corset: the command" begin
     root = package_tree("name = \"Demo\"\n", SOURCE_TREE)
     output, code = captured_main(["check", root, "--no-load", "--format", "concise"])
-    @test (output, code) == ("src/Demo.jl:2: warn: [where-return] Demo.jl\n", 0)
+    @test (output, code) == ("src/Demo.jl:2: warn: [where-return] src/Demo.jl\n", 0)
     @test captured_main(["check", root, "--no-load", "--deny-warnings"])[2] == 1
     @test captured_main(["check", root, "--no-load", "--deny", "where-return"])[2] == 1
     @test captured_main(["check", root, "--no-load", "--allow", "where-return"]) == ("", 0)

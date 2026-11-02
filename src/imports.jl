@@ -306,7 +306,10 @@ single_unit(membership::AbstractDict{String, Int}, move::ImportMove)::Bool =
     membership[move.file] == 1 && all(==(1), get.((membership,), move.targets, 0))
 
 """One site per move, keyed by file and name, at the import's line."""
-import_sites(moves::AbstractVector{ImportMove})::Vector{Site} = [Site("$(basename(move.file)) $(move.item.name)", move.file, move.statement.line, "") for move in moves]
+import_sites(repository::Repository, moves::AbstractVector{ImportMove})::Vector{Site} = map(Base.Fix1(import_site, repository), moves)
+
+"""The site of `move` in `repository`, keyed by file and name, at the import's line."""
+import_site(repository::Repository, move::ImportMove)::Site = Site("$(file_key(repository, move.file)) $(move.item.name)", move.file, move.statement.line, "")
 
 """The Julia files of `directories` in `repository`, parsed for import placement."""
 import_files(repository::Repository, directories::Tuple{Vararg{String}})::Vector{ImportFile} =
@@ -318,7 +321,7 @@ import_files(repository::Repository, directories::Tuple{Vararg{String}})::Vector
 One site per import item in `directories` that its file does not use: one that no file of its module
 uses, or that other files of the module use. `place_imports!` fixes them.
 """
-misplaced_imports(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site} = import_sites(import_moves(import_files(repository, directories)))
+misplaced_imports(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site} = import_sites(repository, import_moves(import_files(repository, directories)))
 
 """The first byte of the line holding byte `index` of `bytes`."""
 line_start(bytes::AbstractVector{UInt8}, index::Integer)::Int = something(findprev(==(UInt8('\n')), bytes, index - 1), 0) + 1
@@ -421,7 +424,7 @@ function place_imports!(repository::Repository, directories::Tuple{Vararg{String
     rewritten = files[in.([file.path for file in files], (touched,))]
     texts::Vector{String} = placed_text.(rewritten, (moves,))
     write_all!([file.path for file in rewritten], texts)
-    return import_sites(moves)
+    return import_sites(repository, moves)
 end
 
 """

@@ -116,14 +116,14 @@ non-function `isbits` values, `String`s, `Symbol`s, and immutable structs, tuple
 
 | Rule | Function | Finds | Repair |
 | --- | --- | --- | --- |
-| `impure-anonymous-function` | `impure_anonymous_functions(mod)` | a mutable capture (an array, `Dict`, `Ref`, a module); a `Core.Box`, a captured variable rebound; no compiled instance, so the captures are unverified | pass the data as an argument, or use `Base.Fix1`/`Base.Fix2` (`filter(in(allowed), items)`); cover an unverified function in the precompile workload |
-| `unstable-anonymous-function` | `unstable_anonymous_functions(mod)` | a capture whose type inference left abstract, or an instance built where the capture types are unknown | make the captured variable's type concrete, or pass it as an argument |
-| `overspecialized-anonymous-function` | `overspecialized_anonymous_functions(mod)` | a captured type or function: the anonymous function compiles anew for every value | pass it as an argument, or define a callable struct whose field is a `DataType` or `Function` |
+| `impure-anonymous-function` | `impure_anonymous_functions(repo, mod)` | a mutable capture (an array, `Dict`, `Ref`, a module); a `Core.Box`, a captured variable rebound; no compiled instance, so the captures are unverified | pass the data as an argument, or use `Base.Fix1`/`Base.Fix2` (`filter(in(allowed), items)`); cover an unverified function in the precompile workload |
+| `unstable-anonymous-function` | `unstable_anonymous_functions(repo, mod)` | a capture whose type inference left abstract, or an instance built where the capture types are unknown | make the captured variable's type concrete, or pass it as an argument |
+| `overspecialized-anonymous-function` | `overspecialized_anonymous_functions(repo, mod)` | a captured type or function: the anonymous function compiles anew for every value | pass it as an argument, or define a callable struct whose field is a `DataType` or `Function` |
 
 ### `abstract-field`: `abstract_fields(type)`, `repeated-prefix`: `repeated_prefix(type)`
 
 Both take a struct type. Apply them to every struct a module defines with `module_structs(mod)` and
-place each site with `struct_site(name, struct_locations(files))`.
+place each site with `struct_site(T, struct_locations(Corset.Source.(files)))`.
 
 - `abstract_fields` finds fields declared with an abstract type, or with a concrete container of one:
   `Vector{Any}`, `Base.RefValue{Any}` and `Dict{Tuple, Any}` are concrete, but every read from them is
@@ -139,14 +139,14 @@ A limit on field count (`wide-struct`) takes one line: `fieldcount(T) > limit` o
 
 ```julia
 files = repository_sources(REPO, ("src",))
-locations = struct_locations(files)
-sites = [struct_site(nameof(T), locations) for T in module_structs(MyPackage) if !isempty(abstract_fields(T))]
+locations = struct_locations(Corset.Source.(files))
+sites = [struct_site(T, locations) for T in module_structs(MyPackage) if !isempty(abstract_fields(T))]
 ratchet!(REPO, "abstract-field", sites)
 ```
 
 ## Rules on source files
 
-Each takes a file path and `located_source(file)`, the parsed file.
+Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 
 | Rule | Function | Finds | Repair |
 | --- | --- | --- | --- |
@@ -155,13 +155,13 @@ Each takes a file path and `located_source(file)`, the parsed file.
 | `repeated-statement` | `repeated_statements` | a statement repeated in one block; the same line in two branches passes | delete the copy |
 | `return-type` | `return_type_calls` | calls of `Core.Compiler.return_type`, a guess at a result type | restructure so the type is known |
 | `concrete-arg` | `concrete_arguments` | arguments annotated `Vector`, `Matrix`, `Array` or `Dict` that the method never resizes | `AbstractVector{T}` and the like; they accept views, `OffsetArray` and GPU arrays |
-| `concrete-return` | `concrete_returns(file, located, mod)` | result types that name a concrete type, `Vector{E}` included; `AbstractMatrix{T}` passes; a constructor returning its own type is exempt | annotate by what the arguments bind; `Corset.CONCRETE_RETURN_FIX` is the log text |
+| `concrete-return` | `concrete_returns(source, mod)` | result types that name a concrete type, `Vector{E}` included; `AbstractMatrix{T}` passes; a constructor returning its own type is exempt | annotate by what the arguments bind; `Corset.CONCRETE_RETURN_FIX` is the log text |
 | `annotation` | `missing_annotations` | methods with an unannotated argument or result | annotate |
-| `float64` | `float64_sites(file)` | `Float64` tokens and untyped float literals; `float-widening` reads where they widen a narrower argument | `zero(T)`, `T(0.5)` or `oftype(x, 0.5)` |
-| `ref` | `ref_sites(file)` | `Ref` and `RefValue` outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | Return the changed data from the function that computes it. A broadcast shield (`f.(Ref(x), xs)`) opts out with `# lint: ref` |
-| `c-type` | `c_type_sites(file)` | `Cint`, `Cdouble` and the other C-interop types outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | `Int`, `Float64` or `String`; convert at the `ccall` |
-| `file-length` | `long_file_sites(repo, file)` | source files longer than `Repository.file_line_limit` lines (default 1500) | split the file by topic |
-| `one-letter` | `one_letter_sites(repo, file)` | one-letter variable names (exempt: `_` and `Repository.one_letter_exempt`) | name the variable |
+| `float64` | `float64_sites(source)` | `Float64` tokens and untyped float literals; `float-widening` reads where they widen a narrower argument | `zero(T)`, `T(0.5)` or `oftype(x, 0.5)` |
+| `ref` | `ref_sites(source)` | `Ref` and `RefValue` outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | Return the changed data from the function that computes it. A broadcast shield (`f.(Ref(x), xs)`) opts out with `# lint: ref` |
+| `c-type` | `c_type_sites(source)` | `Cint`, `Cdouble` and the other C-interop types outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | `Int`, `Float64` or `String`; convert at the `ccall` |
+| `one-letter` | `one_letter_sites(repo, source)` | one-letter variable names (exempt: `_` and `Repository.one_letter_exempt`) | name the variable |
+| `file-length` | `long_file_sites(repo, source)` | source files longer than `Repository.file_line_limit` lines (default 1500) | split the file by topic |
 
 ## Rules with fixers
 

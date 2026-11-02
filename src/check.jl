@@ -24,13 +24,14 @@ function disallowed_keys(
         sites::AbstractVector{Site},
         kept::AbstractVector{Site},
         update::Bool,
+        comments::AbstractDict{String, Vector{OptOutComment}},
     )::Vector{String}
     if update
         if !isnothing(repository.baseline) && !isfile(repository.baseline)
             mkpath(dirname(repository.baseline))
             touch(repository.baseline)
         end
-        return offenders!(repository, rule, sites)
+        return offenders!(repository, rule, sites; comments)
     end
     return exceeding(allowances(repository, rule), tally(kept))
 end
@@ -38,6 +39,7 @@ end
 """
 The findings among `sites` of `rule` at `level`: the sites no `# lint:` comment opts out, whose key the
 baseline does not allow. With `update`, the baseline is seeded and lowered as `offenders!` does.
+`comments` holds the `# lint:` comments of the files already parsed; any other file is read.
 """
 function judge(
         repository::Repository,
@@ -45,10 +47,11 @@ function judge(
         level::Symbol,
         sites::AbstractVector{Site},
         update::Bool,
+        comments::AbstractDict{String, Vector{OptOutComment}},
     )::Vector{Finding}
     name::String = rule_name(rule)
-    kept, _ = unopted(sites, name)
-    over = disallowed_keys(repository, name, sites, kept, update)
+    kept, _ = unopted(sites, name, comments)
+    over = disallowed_keys(repository, name, sites, kept, update, comments)
     return Finding.(name, level, kept[in.(getfield.(kept, :key), (over,))])
 end
 
@@ -72,18 +75,18 @@ is_on(config::Config, rule::Rule)::Bool = level(config, rule) !== :allow
 """The rules `config` leaves on."""
 enabled_rules(config::Config)::Tuple = filter(Base.Fix1(is_on, config), RULES)
 
-"""Run the fixer of every fixable rule in `rules` over the files `context` names."""
-apply_fixes!(::Tuple{}, ::Context)::Nothing = nothing
+"""Run the fixer of every fixable rule in `rules` over the files under `directories` of `repository`."""
+apply_fixes!(::Tuple{}, ::Repository, ::Tuple{Vararg{String}})::Nothing = nothing
 
-function apply_fixes!(rules::Tuple, context::Context)::Nothing
-    apply_fix!(first(rules), context)
-    return apply_fixes!(Base.tail(rules), context)
+function apply_fixes!(rules::Tuple, repository::Repository, directories::Tuple{Vararg{String}})::Nothing
+    apply_fix!(first(rules), repository, directories)
+    return apply_fixes!(Base.tail(rules), repository, directories)
 end
 
-"""Run the fixer of `rule` over the files `context` names, when `rule` has one."""
-function apply_fix!(rule::Rule, context::Context)::Nothing
+"""Run the fixer of `rule` over the files under `directories` of `repository`, when `rule` has one."""
+function apply_fix!(rule::Rule, repository::Repository, directories::Tuple{Vararg{String}})::Nothing
     if fixable(rule)
-        fix!(rule, context)
+        fix!(rule, repository, directories)
     end
     return nothing
 end
@@ -116,10 +119,7 @@ function fix_diff(config::Config, root::AbstractString)::String
         mkpath(dirname(joinpath(copies, directory)))
         cp(joinpath(original.root, directory), joinpath(copies, directory))
     end
-    apply_fixes!(
-        enabled_rules(config),
-        Context(repository(config, copies), directories, nothing),
-    )
+    apply_fixes!(enabled_rules(config), repository(config, copies), directories)
     labels = relpath.(repository_sources(original, directories), original.root)
     return join(file_diff.(labels, joinpath.(original.root, labels), joinpath.(copies, labels)))
 end
@@ -147,10 +147,10 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
     runnable = enabled[collect(can_run.(enabled, (mod,), (frames,)))]
     skipped = setdiff(module_rule_names(enabled), module_rule_names(runnable))
     if fix
-        apply_fixes!(runnable, Context(repository_, directories, mod))
+        apply_fixes!(runnable, repository_, directories)
     end
     inferred = something(frames, Inferred[])
-    context = Context(repository_, directories, mod, inferred, CandidateSearch(inferred; config.candidate_limit))
+    context = Context(repository_, directories, mod; inferred, candidates = CandidateSearch(inferred; config.candidate_limit))
     sites = Dict{String, Vector{Site}}(rule_name(rule) => Site[] for rule in runnable)
     for rule in runnable
         if !(rule isa FileRule)
@@ -159,13 +159,13 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
     end
     file_rules = Tuple(rule for rule in runnable if rule isa FileRule)
     if !isempty(file_rules)
-        for path in repository_sources(repository_, directories)
-            located = located_source(path)
+        for source in context.sources
             for rule in file_rules
-                append!(sites[rule_name(rule)], check(rule, context, path, located))
+                append!(sites[rule_name(rule)], check(rule, context, source))
             end
         end
     end
+    comments = source_comments(context)
     findings = Finding[]
     for rule in runnable
         append!(
@@ -176,6 +176,7 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
                 level(config, rule),
                 sites[rule_name(rule)],
                 update_baseline,
+                comments,
             ),
         )
     end

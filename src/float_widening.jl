@@ -171,18 +171,18 @@ function float_widenings(
         inferred::AbstractVector{Inferred};
         search::CandidateSearch = CandidateSearch(inferred),
     )::Vector{Site}
-    return one_per_line(reduce(vcat, frame_widenings.(audited_frames(repository, inferred, "float-widening"), (search,)); init = Site[]))
+    return one_per_line(reduce(vcat, frame_widenings.((repository,), audited_frames(repository, inferred, "float-widening"), (search,)); init = Site[]))
 end
 
 """The `float_widenings` sites of `item`, one per widening statement."""
-function frame_widenings(item::Inferred, search::CandidateSearch)::Vector{Site}
+function frame_widenings(repository::Repository, item::Inferred, search::CandidateSearch)::Vector{Site}
     budget = float_budget(item)
     if !judged(budget)
         return Site[]
     end
     details = statement_widening.(item.ir.stmts.stmt, item.ir.stmts.type, (item.ir,), (budget,), (search,))
     found = findall(!isnothing, details)
-    return Site.(method_key(item.method), string(item.method.file), statement_line.((item.ir,), (item.method,), found), details[found])
+    return Site.(method_key(repository, item.method), string(item.method.file), statement_line.((item.ir,), (item.method,), found), details[found])
 end
 
 """The widening detail of IR statement `statement` of type `type`: a dispatch's (`dispatch_widening`) or another's (`widening_detail`)."""

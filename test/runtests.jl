@@ -4,9 +4,9 @@ using Test: @testset, @test, @test_logs, @test_throws
 using JET: JET
 using TOML: TOML
 using Corset: Corset
-using Corset: CONCRETE_RETURN_FIX, Repository, Site, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, abstract_locals,
+using Corset: CONCRETE_RETURN_FIX, Repository, Site, Source, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, abstract_locals,
     c_type_sites, impure_anonymous_functions, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
-    inferred_methods, jscpd_sites, located_source, misplaced_imports, missing_annotations, module_structs, non_public_accesses, nothing_returns,
+    inferred_methods, jscpd_sites, misplaced_imports, missing_annotations, module_structs, non_public_accesses, nothing_returns,
     one_letter_sites, place_imports!, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects, fix_where_returns,
     where_return_sites, entry_frames, frame_callees, mentions_module, invoked_instance, logging_call, runtime_dispatches,
@@ -27,10 +27,10 @@ end
 """The path of `source.jl` holding the snippet of `rule` (`fixtures/snippets.toml`), in a fresh tree."""
 snippet_file(rule::AbstractString)::String = joinpath(write_tree(mktempdir(), ["source.jl" => SNIPPETS[rule]["source"]]), "source.jl")
 
-"""The `Site`s that `finder(path, located)` finds in the snippet of `rule`."""
+"""The `Site`s that `finder(source)` finds in the parsed snippet of `rule`."""
 function found_in(finder::Function, rule::AbstractString)::Vector{Site}
     path = snippet_file(rule)
-    return finder(path, located_source(path))
+    return finder(Source(path))
 end
 
 """The keys of `sites`."""
@@ -150,6 +150,19 @@ end
         @test Corset.detail_lines([sites; Site("file2.jl f1", "", 0, "local `w`::Any")])["file2.jl f1"] == "local `w`::Any; local `x2`::Any"
     end
 
+    @testset "a Context parses each file once: its rules and opt-outs read no file after" begin
+        text = "struct Point # lint: rule\n    x::Float64\nend\nf(x) = x\n"
+        root = write_tree(mktempdir(), ["src/point.jl" => text])
+        context = Corset.Context(Repository(root), ("src",), nothing)
+        rm(joinpath(root, "src"); recursive = true)
+        source = only(context.sources)
+        file_rules = [rule for rule in Corset.RULES if rule isa Corset.FileRule]
+        @test sum(length(Corset.check(rule, context, source)) for rule in file_rules) > 0
+        @test Corset.declared(context) == Dict(:Point => (source.path, 1))
+        sites = [Site("Point", source.path, 1, ""), Site("f", source.path, 4, "")]
+        @test first(Corset.unopted(sites, "rule", Corset.source_comments(context))) == [last(sites)]
+    end
+
     @testset "a note outlives its last site: the run logs it stale and keeps it" begin
         root = mktempdir()
         baseline = joinpath(root, "baseline.toml")
@@ -241,13 +254,13 @@ end
         @test repeated_prefix(structs[:SolverControls]) == "solver"
         @test isnothing(repeated_prefix(structs[:Plain]))
         path = joinpath(root, "fixture.jl")
-        @test struct_site(:Holder, struct_locations([path])) == Site("Holder", path, findfirst(==("struct Holder"), readlines(path)), "")
+        @test struct_site(:Holder, struct_locations([Source(path)])) == Site("Holder", path, findfirst(==("struct Holder"), readlines(path)), "")
     end
 
     @testset "a struct is placed at its `struct` line, below its docstring" begin
         path = snippet_file("struct-line")
         lines = readlines(path)
-        locations = struct_locations([path])
+        locations = struct_locations([Source(path)])
         @test locations == Dict(
             :Documented => (path, findfirst(startswith("struct Documented"), lines)),
             :Counter => (path, findfirst(endswith("struct Counter"), lines)),
@@ -301,22 +314,22 @@ end
     end
 
     @testset "concrete-return: a result annotated with a concrete type, `Matrix{T}` included" begin
-        sites = found_in((path, located) -> concrete_returns(path, located, Base), "concrete-return")
+        sites = found_in(source -> concrete_returns(source, Base), "concrete-return")
         @test site_keys(sites) == ["source.jl fixed", "source.jl squared"]
         logged = (:error, Regex("Fix: \\Q$CONCRETE_RETURN_FIX\\E"))
         @test (@test_logs logged offenders!(Repository(mktempdir()), "concrete-return", sites; fix = CONCRETE_RETURN_FIX)) == site_keys(sites)
     end
 
     @testset "float64: Float64 tokens and untyped float literals" begin
-        @test site_lines(float64_sites(snippet_file("float64"))) == [1, 1]
+        @test site_lines(float64_sites(Source(snippet_file("float64")))) == [1, 1]
     end
 
     @testset "c-type: C-interop types outside a ccall" begin
-        @test site_lines(c_type_sites(snippet_file("c-type"))) == [1, 1]
+        @test site_lines(c_type_sites(Source(snippet_file("c-type")))) == [1, 1]
     end
 
     @testset "ref: Ref and RefValue outside a ccall" begin
-        @test site_lines(Corset.ref_sites(snippet_file("ref"))) == [1, 2, 5]
+        @test site_lines(Corset.ref_sites(Source(snippet_file("ref")))) == [1, 2, 5]
     end
 
     @testset "annotation: every argument and result annotated" begin
@@ -325,8 +338,8 @@ end
 
     @testset "one-letter: one-letter variable names, with exemptions opt-in" begin
         path = snippet_file("one-letter")
-        @test length(one_letter_sites(Repository(dirname(path)), path)) == 2
-        @test length(one_letter_sites(Repository(dirname(path); one_letter_exempt = (:p,)), path)) == 1
+        @test length(one_letter_sites(Repository(dirname(path)), Source(path))) == 2
+        @test length(one_letter_sites(Repository(dirname(path); one_letter_exempt = (:p,)), Source(path))) == 1
     end
 
     @testset "fatou: findings of the real `fatou lint` (from mise.toml)" begin
@@ -425,7 +438,7 @@ end
             @test fix_where_returns(kept) == kept
             path = tempname()
             write(path, kept)
-            @test isempty(where_return_sites(path))
+            @test isempty(where_return_sites(Source(path)))
         end
     end
 end
@@ -444,7 +457,7 @@ end
     check(text::String, rule::Function) = (
         path = tempname() * ".jl";
         write(path, text);
-        rule(path, located_source(path))
+        rule(Source(path))
     )
     @testset "a keyword splat needs no annotation, and Bool is an allowed result" begin
         text = "f(x::T; options...)::Bool where {T} = true\n"
@@ -452,7 +465,7 @@ end
         @test isempty(
             check(
                 text,
-                (path, located) -> concrete_returns(path, located, Main),
+                source -> concrete_returns(source, Main),
             )
         )
     end
@@ -480,7 +493,7 @@ end
     check(text::String) = (
         path = tempname() * ".jl";
         write(path, text);
-        length(concrete_returns(path, located_source(path), scope))
+        length(concrete_returns(Source(path), scope))
     )
     @test check("(wrap(element::E)::Wrapped{E}) where {E} = Wrapped(element)\n") == 0
     @test check("(wrap(element::E)::Set{E}) where {E} = Set(element)\n") == 0
@@ -495,7 +508,7 @@ end
     # A macro-named function keys by the macro name alone, with no line-number node.
     path = tempname() * ".jl"
     write(path, "(@main)(args::AbstractVector)::Int = 0\n")
-    @test only(concrete_returns(path, located_source(path), scope)).key == "$(basename(path)) @main"
+    @test only(concrete_returns(Source(path), scope)).key == "$(basename(path)) @main"
 end
 
 @testset "a name used only inside a macro call counts as used" begin
@@ -595,7 +608,7 @@ end
         @test isnothing(Corset.testset_name(Meta.parse("@testset begin end")))
         path = tempname() * ".jl"
         write(path, "@testset \"inside\" begin\n    f(a) = 1\nend\n")
-        @test any(item.enclosing === :inside for item in located_source(path))
+        @test any(item.enclosing === :inside for item in Source(path).located)
     end
     @testset "concrete containers: bare, in a Union, and not a type at all" begin
         @test Corset.is_concrete_container(Meta.parse("Union{Vector, Nothing}"))

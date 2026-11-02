@@ -4,8 +4,11 @@ using InteractiveUtils: subtypes
 # are methods. The library functions stay callable on their own; a rule here fixes their arguments.
 
 """
+    Context(repository, directories, mod; inferred = Inferred[], candidates = CandidateSearch(inferred))
+
 Everything a rule reads: the repository, the source directories that exist, the loaded package, its
-inferred frames, and the `CandidateSearch` the typed rules share.
+inferred frames, the `CandidateSearch` the typed rules share, and the `Source` of every Julia file
+under `directories`, each parsed once here and read by every rule.
 """
 struct Context
     repository::Repository
@@ -13,11 +16,19 @@ struct Context
     mod::Union{Module, Nothing}
     inferred::Vector{Inferred}
     candidates::CandidateSearch
+    sources::Vector{Source}
 end
 
-"""A `Context` with no inferred frames, for the rules that read no types."""
-Context(repository::Repository, directories::Tuple{Vararg{String}}, mod::Union{Module, Nothing})::Context =
-    Context(repository, directories, mod, Inferred[], CandidateSearch(Inferred[]))
+function Context(
+        repository::Repository, directories::Tuple{Vararg{AbstractString}}, mod::Union{Module, Nothing};
+        inferred::AbstractVector{Inferred} = Inferred[], candidates::CandidateSearch = CandidateSearch(inferred),
+    )::Context
+    return Context(repository, directories, mod, inferred, candidates, Source.(repository_sources(repository, directories)))
+end
+
+"""The `# lint:` comments of each file `context` parsed, by path."""
+source_comments(context::Context)::Dict{String, Vector{OptOutComment}} =
+    Dict{String, Vector{OptOutComment}}(source.path => source.comments for source in context.sources)
 
 """
 A check with a name, a group (`:default` or `:pedantic`) and a one-line summary. The subtypes say
@@ -40,14 +51,19 @@ function rule_summary end
 
 """
     check(rule, context)
-    check(rule, context, path, located)
+    check(rule, context, source)
 
-The `Site`s `rule` finds: in the whole `context` for a `ModuleRule` or `TreeRule`, in the file `path`
-(parsed as `located`) for a `FileRule`.
+The `Site`s `rule` finds: in the whole `context` for a `ModuleRule` or `TreeRule`, in the parsed file
+`source` for a `FileRule`.
 """
 function check end
 
-"""Rewrite the source files so `rule` finds nothing. Only a `fixable` rule has a method."""
+"""
+    fix!(rule, repository, directories)
+
+Rewrite the Julia files under `directories` of `repository` so `rule` finds nothing. Only a `fixable`
+rule has a method.
+"""
 function fix! end
 
 """Whether `rule` has a `fix!`."""
@@ -57,14 +73,14 @@ fixable(::Rule)::Bool = false
 const RULE_PARAMETERS = (;
     ModuleRule = (Pair{Symbol, Any}(:context, :Context),),
     TreeRule = (Pair{Symbol, Any}(:context, :Context),),
-    FileRule = (Pair{Symbol, Any}(:context, :Context), Pair{Symbol, Any}(:path, :String), Pair{Symbol, Any}(:located, :(Vector{Located}))),
+    FileRule = (Pair{Symbol, Any}(:context, :Context), Pair{Symbol, Any}(:source, :Source)),
 )
 
 """
-    @rule Kind "name" :group "summary" (context, path, located) -> body
+    @rule Kind "name" :group "summary" (context, source) -> body
 
 Define the rule `name` (a `ModuleRule`, `TreeRule` or `FileRule`) whose `check` is `body`, with the
-parameters of its kind bound as written: `context` for the first two, `context`, `path` and `located` for
+parameters of its kind bound as written: `context` for the first two, `context` and `source` for
 a `FileRule`. The type is the rule name in CamelCase with `Rule` appended.
 """
 macro rule(kind, name, group, summary, definition)
@@ -90,7 +106,7 @@ macro rule(kind, name, group, summary, definition)
 end
 
 """Every struct the package defines with the file and line it is declared at, for placing a struct rule's sites."""
-declared(context::Context)::Dict{Symbol, Tuple{String, Int}} = struct_locations(repository_sources(context.repository, context.directories))
+declared(context::Context)::Dict{Symbol, Tuple{String, Int}} = struct_locations(context.sources)
 
 """The scope a `FileRule` resolves type names in: the loaded package, or `Base` when none is loaded."""
 scope(context::Context)::Module = something(context.mod, Base)
@@ -140,41 +156,41 @@ struct_sites(mutable_structs(context.mod), context)
 @rule ModuleRule "repeated-prefix" :pedantic "field names that repeat a word the type should say once" context ->
 struct_sites(filter(!isnothing ∘ repeated_prefix, module_structs(context.mod)), context)
 
-@rule FileRule "nothing-return" :pedantic "declared Union{Nothing, …} results" (context, path, located) ->
-nothing_returns(path, located)
+@rule FileRule "nothing-return" :pedantic "declared Union{Nothing, …} results" (context, source) ->
+nothing_returns(source)
 
-@rule FileRule "range-guard" :pedantic "floatmin/floatmax and exp range edges used as overflow guards" (context, path, located) ->
-range_guards(path, located)
+@rule FileRule "range-guard" :pedantic "floatmin/floatmax and exp range edges used as overflow guards" (context, source) ->
+range_guards(source)
 
-@rule FileRule "repeated-statement" :default "a statement repeated in one block" (context, path, located) ->
-repeated_statements(path, located)
+@rule FileRule "repeated-statement" :default "a statement repeated in one block" (context, source) ->
+repeated_statements(source)
 
-@rule FileRule "return-type" :pedantic "calls of Core.Compiler.return_type" (context, path, located) ->
-return_type_calls(path, located)
+@rule FileRule "return-type" :pedantic "calls of Core.Compiler.return_type" (context, source) ->
+return_type_calls(source)
 
-@rule FileRule "concrete-arg" :pedantic "arguments annotated with a concrete container the method never resizes" (context, path, located) ->
-concrete_arguments(path, located)
+@rule FileRule "concrete-arg" :pedantic "arguments annotated with a concrete container the method never resizes" (context, source) ->
+concrete_arguments(source)
 
-@rule FileRule "concrete-return" :pedantic "results annotated with a concrete type" (context, path, located) ->
-concrete_returns(path, located, scope(context))
+@rule FileRule "concrete-return" :pedantic "results annotated with a concrete type" (context, source) ->
+concrete_returns(source, scope(context))
 
-@rule FileRule "annotation" :pedantic "methods with an unannotated argument or result" (context, path, located) ->
-missing_annotations(path, located)
+@rule FileRule "annotation" :pedantic "methods with an unannotated argument or result" (context, source) ->
+missing_annotations(source)
 
-@rule FileRule "float64" :pedantic "Float64 tokens and untyped float literals" (context, path, located) ->
-float64_sites(path)
+@rule FileRule "float64" :pedantic "Float64 tokens and untyped float literals" (context, source) ->
+float64_sites(source)
 
-@rule FileRule "c-type" :pedantic "C-interop types (Cint, Cdouble, ...) outside a ccall" (context, path, located) ->
-c_type_sites(path)
+@rule FileRule "c-type" :pedantic "C-interop types (Cint, Cdouble, ...) outside a ccall" (context, source) ->
+c_type_sites(source)
 
-@rule FileRule "ref" :pedantic "Ref and RefValue outside a ccall, state carried by reference" (context, path, located) ->
-ref_sites(path)
+@rule FileRule "ref" :pedantic "Ref and RefValue outside a ccall, state carried by reference" (context, source) ->
+ref_sites(source)
 
-@rule FileRule "one-letter" :pedantic "one-letter variable names" (context, path, located) ->
-one_letter_sites(context.repository, path, located)
+@rule FileRule "one-letter" :pedantic "one-letter variable names" (context, source) ->
+one_letter_sites(context.repository, source)
 
-@rule FileRule "where-return" :default "short-form definitions whose where binds the return annotation" (context, path, located) ->
-where_return_sites(path)
+@rule FileRule "where-return" :default "short-form definitions whose where binds the return annotation" (context, source) ->
+where_return_sites(source)
 
 @rule TreeRule "misplaced-import" :default "imports their file does not use, or that only other files use" context ->
 misplaced_imports(context.repository, context.directories)
@@ -186,10 +202,10 @@ fatou_sites(context.repository, context.directories)
 jscpd_sites(context.repository, context.directories)
 
 fixable(::MisplacedImportRule)::Bool = true
-fix!(::MisplacedImportRule, context::Context)::Nothing = (place_imports!(context.repository, context.directories); nothing)
+fix!(::MisplacedImportRule, repository::Repository, directories::Tuple{Vararg{String}})::Nothing = (place_imports!(repository, directories); nothing)
 
 fixable(::WhereReturnRule)::Bool = true
-fix!(::WhereReturnRule, context::Context)::Nothing = (fix_where_returns!(context.repository, context.directories); nothing)
+fix!(::WhereReturnRule, repository::Repository, directories::Tuple{Vararg{String}})::Nothing = (fix_where_returns!(repository, directories); nothing)
 
 """Every rule, ordered by name."""
 const RULES = Tuple(sort!([type() for kind in (ModuleRule, TreeRule, FileRule) for type in subtypes(kind)]; by = rule_name))

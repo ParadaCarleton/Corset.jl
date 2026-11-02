@@ -16,15 +16,15 @@ There are two kinds of rules.
 
 - **Module rules** read a loaded module: `hidden_inputs(MyPackage)`, `impure_anonymous_functions(MyPackage)`,
   `abstract_locals(repo, inferred_methods(MyPackage, SIGNATURES))`.
-- **Source rules** read a file's syntax. Parse each file once with `located_source`, then hand it to
-  each rule: `nothing_returns(file, located_source(file))`. `repository_sources(repo, ("src",))`
+- **Source rules** read a file's syntax. Parse each file once with `Corset.Source`, then hand it to
+  each rule: `nothing_returns(Corset.Source(file))`. `repository_sources(repo, ("src",))`
   lists a repository's files.
 
 ```julia
 @testset "code rules" begin
     files = repository_sources(REPO, ("src",))
     ratchet!(REPO, "nothing-return",
-        [site for file in files for site in nothing_returns(file, located_source(file))])
+        [site for file in files for site in nothing_returns(Corset.Source(file))])
 end
 ```
 
@@ -57,7 +57,8 @@ After that:
 - A **new** offender fails the test, because its key has no entry or the entry's count is exceeded.
 - A **fixed** offender lowers the file. When a run finds fewer sites than an entry allows, the entry
   falls to the new count, or is deleted at zero, and the file is rewritten. Commit the change. The
-  allowance can only shrink.
+  allowance can only shrink. A note stays when its offender has no site left: the run logs it as
+  stale, and you delete it by hand.
 
 A testset that measures only part of a rule's keys passes the key prefixes it covers as `scopes`, so
 entries outside them never fall.

@@ -123,7 +123,7 @@ non-function `isbits` values, `String`s, `Symbol`s, and immutable structs, tuple
 ### `abstract-field`: `abstract_fields(type)`, `repeated-prefix`: `repeated_prefix(type)`
 
 Both take a struct type. Apply them to every struct a module defines with `module_structs(mod)` and
-place each site with `struct_site(name, struct_locations(files))`.
+place each site with `struct_site(name, struct_locations(Corset.Source.(files)))`.
 
 - `abstract_fields` finds fields declared with an abstract type, or with a concrete container of one:
   `Vector{Any}`, `Base.RefValue{Any}` and `Dict{Tuple, Any}` are concrete, but every read from them is
@@ -139,14 +139,14 @@ A limit on field count (`wide-struct`) takes one line: `fieldcount(T) > limit` o
 
 ```julia
 files = repository_sources(REPO, ("src",))
-locations = struct_locations(files)
+locations = struct_locations(Corset.Source.(files))
 sites = [struct_site(nameof(T), locations) for T in module_structs(MyPackage) if !isempty(abstract_fields(T))]
 ratchet!(REPO, "abstract-field", sites)
 ```
 
 ## Rules on source files
 
-Each takes a file path and `located_source(file)`, the parsed file.
+Each takes `Corset.Source(file)`, the file read and parsed once.
 
 | Rule | Function | Finds | Repair |
 | --- | --- | --- | --- |
@@ -155,12 +155,12 @@ Each takes a file path and `located_source(file)`, the parsed file.
 | `repeated-statement` | `repeated_statements` | a statement repeated in one block; the same line in two branches passes | delete the copy |
 | `return-type` | `return_type_calls` | calls of `Core.Compiler.return_type`, a guess at a result type | restructure so the type is known |
 | `concrete-arg` | `concrete_arguments` | arguments annotated `Vector`, `Matrix`, `Array` or `Dict` that the method never resizes | `AbstractVector{T}` and the like; they accept views, `OffsetArray` and GPU arrays |
-| `concrete-return` | `concrete_returns(file, located, mod)` | result types that name a concrete type, `Vector{E}` included; `AbstractMatrix{T}` passes; a constructor returning its own type is exempt | annotate by what the arguments bind; `Corset.CONCRETE_RETURN_FIX` is the log text |
+| `concrete-return` | `concrete_returns(source, mod)` | result types that name a concrete type, `Vector{E}` included; `AbstractMatrix{T}` passes; a constructor returning its own type is exempt | annotate by what the arguments bind; `Corset.CONCRETE_RETURN_FIX` is the log text |
 | `annotation` | `missing_annotations` | methods with an unannotated argument or result | annotate |
-| `float64` | `float64_sites(file)` | `Float64` tokens and untyped float literals; `float-widening` reads where they widen a narrower argument | `zero(T)`, `T(0.5)` or `oftype(x, 0.5)` |
-| `ref` | `ref_sites(file)` | `Ref` and `RefValue` outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | Return the changed data from the function that computes it. A broadcast shield (`f.(Ref(x), xs)`) opts out with `# lint: ref` |
-| `c-type` | `c_type_sites(file)` | `Cint`, `Cdouble` and the other C-interop types outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | `Int`, `Float64` or `String`; convert at the `ccall` |
-| `one-letter` | `one_letter_sites(repo, file)` | one-letter variable names (exempt: `_` and `Repository.one_letter_exempt`) | name the variable |
+| `float64` | `float64_sites(source)` | `Float64` tokens and untyped float literals; `float-widening` reads where they widen a narrower argument | `zero(T)`, `T(0.5)` or `oftype(x, 0.5)` |
+| `ref` | `ref_sites(source)` | `Ref` and `RefValue` outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | Return the changed data from the function that computes it. A broadcast shield (`f.(Ref(x), xs)`) opts out with `# lint: ref` |
+| `c-type` | `c_type_sites(source)` | `Cint`, `Cdouble` and the other C-interop types outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | `Int`, `Float64` or `String`; convert at the `ccall` |
+| `one-letter` | `one_letter_sites(repo, source)` | one-letter variable names (exempt: `_` and `Repository.one_letter_exempt`) | name the variable |
 
 ## Rules with fixers
 

@@ -102,16 +102,11 @@ opt_out_form(::Nothing)::Symbol = :line
 
 """Whether `comment` is a `-begin` that no `-end` of its rule among `comments` closes, on its line or below."""
 open_begin(comments::AbstractVector{OptOutComment}, comment::OptOutComment)::Bool =
-    comment.form === :begin && isnothing(closing_line(comments, comment))
+    comment.form === :begin && isempty(closing_lines(comments, comment))
 
-"""The line of the first `-end` among `comments` that closes `opening`, a `-begin`: same rule, on its line or below."""
-function closing_line(comments::AbstractVector{OptOutComment}, opening::OptOutComment)::Union{Int, Nothing}
-    lines = [comment.line for comment in comments if comment.form === :end && comment.rule == opening.rule && comment.line >= opening.line]
-    if isempty(lines)
-        return nothing
-    end
-    return minimum(lines)
-end
+"""The lines of the `-end`s among `comments` that can close `opening`, a `-begin`: same rule, on its line or below. The first closes it."""
+closing_lines(comments::AbstractVector{OptOutComment}, opening::OptOutComment)::Vector{Int} =
+    [comment.line for comment in comments if comment.form === :end && comment.rule == opening.rule && comment.line >= opening.line]
 
 """Which lines of one file a rule skips: all of them when `whole_file`, else `lines`."""
 struct OptOuts
@@ -130,7 +125,7 @@ opt_outs(path::AbstractString, rule::AbstractString)::OptOuts = opt_outs(opt_out
 
 function opt_outs(comments::AbstractVector{OptOutComment}, rule::AbstractString)::OptOuts
     named = [comment for comment in comments if comment.rule == rule]
-    spans = [comment.line:something(closing_line(named, comment)) for comment in named if comment.form === :begin]
+    spans = [comment.line:minimum(closing_lines(named, comment)) for comment in named if comment.form === :begin]
     lines = Set{Int}(Iterators.flatten((Int[comment.line for comment in named], spans...)))
     return OptOuts(any(comment.form === :file for comment in named), lines)
 end
@@ -220,10 +215,23 @@ function logged_over(
     return over
 end
 
-"""The sites of `sites` that no `# lint:` comment naming `rule` opts out, and how many were opted out."""
-function unopted(sites::AbstractVector{S}, rule::AbstractString)::Tuple{Vector{Site}, Int} where {S <: Site}
+"""The `# lint:` comments of `file`: those `comments` holds, or else the file's own (`opt_out_comments`)."""
+function file_comments(comments::AbstractDict{String, Vector{OptOutComment}}, file::String)::Vector{OptOutComment}
+    if haskey(comments, file)
+        return comments[file]
+    end
+    return opt_out_comments(file)
+end
+
+"""
+The sites of `sites` that no `# lint:` comment naming `rule` opts out, and how many were opted out.
+`comments` holds the comments of files already parsed, by path; any other file is read.
+"""
+function unopted(
+        sites::AbstractVector{S}, rule::AbstractString, comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
+    )::Tuple{Vector{Site}, Int} where {S <: Site}
     files = unique(String[site.file for site in sites])
-    skips = Dict{String, OptOuts}(files .=> opt_outs.(opt_out_comments.(files), rule))
+    skips = Dict{String, OptOuts}(files .=> opt_outs.(file_comments.((comments,), files), rule))
     kept = sites[.!opted.(getindex.((skips,), String[site.file for site in sites]), sites)]
     return kept, length(sites) - length(kept)
 end
@@ -271,7 +279,7 @@ stale(entries::AbstractDict, measured::AbstractDict{String, Int}, scopes::Tuple{
     any(startswith.(key, scopes)) && entries[key] isa AbstractString && !haskey(measured, key)
 
 """
-    offenders!(repository, rule, sites; scopes = ("",), fix = "")
+    offenders!(repository, rule, sites; scopes = ("",), fix = "", comments = Dict())
 
 The keys of `rule`'s offenders `sites` that `repository` does not allow, logged. Sites that a `# lint:`
 comment naming the rule opts out are dropped and counted in the log; the rest are tallied by key.
@@ -282,12 +290,13 @@ A rule with no table is seeded with its tally.
 Several testsets may share one rule's table, and a run may not measure all of it (a partial copy of
 the tree): each passes the prefixes `scopes` that begin the keys it measures, and only entries under
 one of them can fall. `fix` tells the reader of the log how to repair an offender, such as the forms
-the rule accepts.
+the rule accepts. `comments` holds the `# lint:` comments of files already parsed, by path.
 """
 function offenders!(
         repository::Repository, rule::String, sites::AbstractVector{Site}; scopes::Tuple{Vararg{String}} = ("",), fix::String = "",
+        comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
     )::Vector{String}
-    kept, opted = unopted(sites, rule)
+    kept, opted = unopted(sites, rule, comments)
     measured = tally(kept)
     if opted > 0
         @info "$rule: $opted site(s) opted out by `# lint: $rule`"

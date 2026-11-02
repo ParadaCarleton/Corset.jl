@@ -53,10 +53,10 @@ function where_return_sites!(sites::AbstractVector{Site}, path::AbstractString, 
     return nothing
 end
 
-"""The short-form definitions of the Julia file `path` whose `where` binds the return annotation, keyed by file."""
-function where_return_sites(path::AbstractString)::Vector{Site}
+"""The short-form definitions of the Julia file `source` whose `where` binds the return annotation, keyed by file."""
+function where_return_sites(source::Source)::Vector{Site}
     sites = Site[]
-    where_return_sites!(sites, path, SYNTAX.parseall(SYNTAX.SyntaxNode, read(path, String)))
+    where_return_sites!(sites, source.path, source.tree)
     return sites
 end
 
@@ -101,7 +101,7 @@ Rewrite the Julia files of `directories` with `fix_where_returns`. Returns the s
 function fix_where_returns!(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site}
     sites = Site[]
     for path in repository_sources(repository, directories)
-        found = where_return_sites(path)
+        found = where_return_sites(Source(path))
         if !isempty(found)
             write(path, fix_where_returns(read(path, String)))
             append!(sites, found)

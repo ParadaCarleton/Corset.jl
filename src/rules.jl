@@ -817,33 +817,45 @@ function locate!( # lint: abstract-local  Expr nodes hold untyped arguments
     return line
 end
 
-"""Every expression of the parsed file `path`, as `Located`s."""
-function located_source(path::AbstractString)::Vector{Located}
-    found = Located[]
-    locate!(found, Meta.parseall(read(path, String)), 0, Symbol("<top level>"), 0)
-    return found
+"""
+    Source(path)
+
+The Julia file `path`, read and parsed once for every rule that reads source: its syntax `tree`, its
+expressions as `Located`s (`located`), and its `# lint:` `comments` (`opt_out_comments`).
+"""
+struct Source
+    path::String
+    tree::SYNTAX.SyntaxNode
+    located::Vector{Located}
+    comments::Vector{OptOutComment}
 end
 
+function Source(path::AbstractString)::Source
+    text = read(path, String)
+    tree = SYNTAX.parseall(SYNTAX.SyntaxNode, text; filename = path)
+    located = Located[]
+    locate!(located, Expr(tree), 0, Symbol("<top level>"), 0)
+    return Source(path, tree, located, opt_out_comments(path, text))
+end
 """Functions declaring a `Union{Nothing, …}` return: a "can't compute here" answer, one site per definition."""
-function nothing_returns(path::AbstractString, located::AbstractVector{Located})::Vector{
-        Site,
-    }
+function nothing_returns(source::Source)::Vector{Site}
     return [
         Site(
             string(defined_name(item.node)),
-            path,
+            source.path,
             first(definition_lines(item.node, item.line)),
             last(definition_lines(item.node, item.line)),
             "",
         )
-            for item in located
+            for item in source.located
             if !isnothing(defined_name(item.node)) &&
             mentions_nothing(return_annotation(item.node))
     ]
 end
 
 """Overflow and underflow guards, keyed by the function they sit in."""
-function range_guards(path::AbstractString, located::AbstractVector{Located})::Vector{Site} # lint: abstract-local  Expr nodes hold untyped arguments
+function range_guards(source::Source)::Vector{Site} # lint: abstract-local  Expr nodes hold untyped arguments
+    (; path, located) = source
     sites = Site[]
     for item in located
         if is_range_guard(item.node)
@@ -859,10 +871,8 @@ function range_guards(path::AbstractString, located::AbstractVector{Located})::V
 end
 
 """Statements that repeat an earlier statement of the same block, keyed `definition: statement`. A statement pasted twice runs twice; the same line in two branches is in two blocks and passes."""
-function repeated_statements( # lint: abstract-local  Expr nodes hold untyped arguments
-        path::AbstractString,
-        located::AbstractVector{Located},
-    )::Vector{Site}
+function repeated_statements(source::Source)::Vector{Site} # lint: abstract-local  Expr nodes hold untyped arguments
+    (; path, located) = source
     sites = Site[]
     for item in located
         if item.node.head !== :block
@@ -886,9 +896,8 @@ function repeated_statements( # lint: abstract-local  Expr nodes hold untyped ar
 end
 
 """Calls of `Core.Compiler.return_type`, a guess at a result type, keyed by file."""
-function return_type_calls(path::AbstractString, located::AbstractVector{Located})::Vector{
-        Site,
-    }
+function return_type_calls(source::Source)::Vector{Site}
+    (; path, located) = source
     return [
         Site(basename(path), path, item.line, "")
             for item in located
@@ -923,11 +932,10 @@ function struct_lines(node::SYNTAX.SyntaxNode)::Vector{Pair{Symbol, Int}}
     return nested
 end
 
-"""Where each struct of the parsed source `files` is declared: its name with the file and line of its `struct` keyword, so a `# lint:` comment on that line opts the struct out even when a docstring sits above it."""
-function struct_locations(files::AbstractVector{<:AbstractString})::Dict{Symbol, Tuple{String, Int}}
+"""Where each struct of the parsed `sources` is declared: its name with the file and line of its `struct` keyword, so a `# lint:` comment on that line opts the struct out even when a docstring sits above it."""
+function struct_locations(sources::AbstractVector{Source})::Dict{Symbol, Tuple{String, Int}}
     return Dict{Symbol, Tuple{String, Int}}(
-        name => (file, line) for file in files
-            for (name, line) in struct_lines(SYNTAX.parseall(SYNTAX.SyntaxNode, read(file, String); filename = file))
+        name => (source.path, line) for source in sources for (name, line) in struct_lines(source.tree)
     )
 end
 
@@ -1015,9 +1023,8 @@ Arguments annotated with a concrete container (`is_concrete_container`) that the
 resize, one site per argument at the method's signature, keyed by file: `AbstractVector{T}` takes a
 view, an `OffsetArray` or a GPU array, a `Vector{T}` takes none of them.
 """
-function concrete_arguments(path::AbstractString, located::AbstractVector{Located})::Vector{ # lint: abstract-local  Expr nodes hold untyped arguments
-        Site,
-    }
+function concrete_arguments(source::Source)::Vector{Site} # lint: abstract-local  Expr nodes hold untyped arguments
+    (; path, located) = source
     sites = Site[]
     for item in located
         call = signature_call(item.node)
@@ -1169,12 +1176,8 @@ method at its signature, keyed by file and function name: a result type must be 
 what the arguments bind, not by a fixed type. A package struct parameterized by the method's `where` variables is
 generic. A constructor returning its own struct (`constructs_own_type`) is exempt.
 """
-function concrete_returns(
-        path::AbstractString,
-        located::AbstractVector{Located},
-        scope::Module,
-    )::Vector{Site}
-    return definition_site.(path, filter(Base.Fix2(returns_concrete, scope), located))
+function concrete_returns(source::Source, scope::Module)::Vector{Site}
+    return definition_site.(source.path, filter(Base.Fix2(returns_concrete, scope), source.located))
 end
 
 """Whether the definition `item` declares a return type naming a concrete type of `scope`, and is no constructor of its own type."""
@@ -1226,14 +1229,10 @@ function float64_sites!(
     return nothing
 end
 
-"""The Float64 sites of the Julia file `path`, by `float64_sites!`."""
-function float64_sites(path::AbstractString)::Vector{Site}
+"""The Float64 sites of the Julia file `source`, by `float64_sites!`."""
+function float64_sites(source::Source)::Vector{Site}
     sites = Site[]
-    float64_sites!(
-        sites,
-        path,
-        SYNTAX.parseall(SYNTAX.SyntaxNode, read(path, String); filename = path),
-    )
+    float64_sites!(sites, source.path, source.tree)
     return sites
 end
 
@@ -1279,14 +1278,11 @@ function name_sites(
     return reduce(vcat, (name_sites(path, child, names, fields) for child in children); init = Site[])
 end
 
-"""The syntax tree of the Julia file `path`."""
-source_tree(path::AbstractString)::SYNTAX.SyntaxNode = SYNTAX.parseall(SYNTAX.SyntaxNode, read(path, String); filename = path)
+"""The C-interop type names (`C_TYPE_NAMES`) of the Julia file `source` outside a C call, by `name_sites`."""
+c_type_sites(source::Source)::Vector{Site} = name_sites(source.path, source.tree, C_TYPE_NAMES, false)
 
-"""The C-interop type names (`C_TYPE_NAMES`) of the Julia file `path` outside a C call, by `name_sites`."""
-c_type_sites(path::AbstractString)::Vector{Site} = name_sites(path, source_tree(path), C_TYPE_NAMES, false)
-
-"""The `Ref` and `RefValue` names (`REF_NAMES`) of the Julia file `path` outside a C call, by `name_sites`."""
-ref_sites(path::AbstractString)::Vector{Site} = name_sites(path, source_tree(path), REF_NAMES, true)
+"""The `Ref` and `RefValue` names (`REF_NAMES`) of the Julia file `source` outside a C call, by `name_sites`."""
+ref_sites(source::Source)::Vector{Site} = name_sites(source.path, source.tree, REF_NAMES, true)
 
 """Whether a parsed argument of a method signature has no `::` annotation (a bare name, alone or with a default or `...`)."""
 untyped_argument(argument::Symbol)::Bool = true
@@ -1324,13 +1320,10 @@ end
 Methods that lack an argument annotation or a return type, one site per method at its
 signature, keyed by file and function name.
 """
-function missing_annotations(
-        path::AbstractString,
-        located::AbstractVector{Located},
-    )::Vector{Site}
+function missing_annotations(source::Source)::Vector{Site}
     return [
-        definition_site(path, item)
-            for item in located
+        definition_site(source.path, item)
+            for item in source.located
             if lacks_annotation(item.node)
     ]
 end
@@ -1373,14 +1366,9 @@ function one_letter_names(node::Expr, exempt::Tuple{Vararg{Symbol}})::Vector{Sym
     return filter(Base.Fix2(is_one_letter, exempt), names)
 end
 
-"""One site per one-letter variable name in the Julia file `path`, keyed by file and enclosing function (or testset); `repository.one_letter_exempt` names the allowed ones."""
-function one_letter_sites(
-        repository::Repository,
-        path::AbstractString,
-        located::AbstractVector{Located} = located_source(path),
-    )::Vector{Site}
-    return reduce(vcat, one_letter_item_sites.(path, located, (repository.one_letter_exempt,)); init = Site[])
-end
+"""One site per one-letter variable name in the Julia file `source`, keyed by file and enclosing function (or testset); `repository.one_letter_exempt` names the allowed ones."""
+one_letter_sites(repository::Repository, source::Source)::Vector{Site} =
+    reduce(vcat, one_letter_item_sites.(source.path, source.located, (repository.one_letter_exempt,)); init = Site[])
 
 """One site per `one_letter_names` name `item` of the file `path` binds, at the item's line or its definition's."""
 function one_letter_item_sites(path::AbstractString, item::Located, exempt::Tuple{Vararg{Symbol}})::Vector{Site}

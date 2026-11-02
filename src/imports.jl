@@ -6,14 +6,17 @@ const IMPORT_KIND = SYNTAX.@K_str "import"
 const COLON_KIND = SYNTAX.@K_str ":"
 const AS_KIND = SYNTAX.@K_str "as"
 const CALL_KIND = SYNTAX.@K_str "call"
-const STRING_KIND = SYNTAX.@K_str "string"
-const STRING_TEXT_KIND = SYNTAX.@K_str "String"
+const DOC_KIND = SYNTAX.@K_str "doc"
 const MACRO_NAME_KIND = SYNTAX.@K_str "macro_name"
 const MODULE_KIND = SYNTAX.@K_str "module"
 const STRING_MACRO_NAME_KIND = SYNTAX.@K_str "StrMacroName"
 const COMMAND_TEXT_KIND = SYNTAX.@K_str "CmdString"
-# An import opts out on its own line or the line above; Fatou's own opt-out counts.
-const IMPORT_OPT_OUT = r"fatou-ignore\s+unused-import|lint:\s*misplaced-import"
+# The rule's name in opt-out comments, as `registry.jl` registers it.
+const MISPLACED_IMPORT_RULE = "misplaced-import"
+# Fatou's own opt-out, on an import's line or the line above, also pins it.
+const FATOU_OPT_OUT = r"fatou-ignore\s+unused-import"
+# What goes with a statement cut out of its line: the blanks after it, and a `;` with the blanks after that.
+const STATEMENT_TAIL = r"^[ \t]*(;[ \t]*)?"
 # A name the rule places: an identifier or macro. Operators (`import Base: +`) are used without a name token.
 const PLACED_NAME = r"^@?[\p{L}_]"
 
@@ -25,7 +28,8 @@ end
 
 """
 An import statement: `prefix` (`using M: ` or `import `) before its `items`, at bytes
-`first_byte:last_byte`, starting on `line`. A `pinned` one (a bare `using M`, or opted out) stays.
+`first_byte:last_byte`, starting on `line`. A `pinned` one (a bare `using M`, or opted out on any of
+its lines) stays.
 A `nested` one sits in a `module` block of its file and serves only that block and its includes.
 """
 struct ImportStatement
@@ -40,7 +44,8 @@ end
 
 """
 A parsed Julia file: the names it uses outside imports, its import statements, and the paths it
-includes (`""` for an include no literal names). An `editable` file is one the rule checks.
+includes (`""` for an include no literal names). An `editable` file is one the rule checks. A file
+that `opens_module` holds only `module` blocks at its top level, so its names are another module's.
 """
 struct ImportFile
     path::String
@@ -49,6 +54,7 @@ struct ImportFile
     statements::Vector{ImportStatement}
     includes::Vector{String}
     editable::Bool
+    opens_module::Bool
 end
 
 """An import `item` of `statement` that `file` does not use: it goes from `file` and is added to each of `targets` (none when no other file needs it)."""
@@ -127,8 +133,16 @@ function item_name(node::SYNTAX.SyntaxNode)::String
     return String(SYNTAX.sourcetext(tail))
 end
 
-"""The statement a `using` or `import` `node` of `text` (split into `lines`) declares; `nested` when it sits in a `module` block."""
-function import_statement(node::SYNTAX.SyntaxNode, text::AbstractString, lines::AbstractVector{<:AbstractString}, nested::Bool)::ImportStatement
+"""Whether `skipped` opts out any of `lines`."""
+covers(skipped::OptOuts, lines::Union{Integer, AbstractUnitRange{<:Integer}})::Bool = skipped.whole_file || !isdisjoint(skipped.lines, lines)
+
+"""
+The statement a `using` or `import` `node` of `text` (split into `lines`) declares; `nested` when it
+sits in a `module` block. The `# lint: misplaced-import` comments `skipped` holds may pin it.
+"""
+function import_statement(
+        node::SYNTAX.SyntaxNode, text::AbstractString, lines::AbstractVector{<:AbstractString}, nested::Bool, skipped::OptOuts,
+    )::ImportStatement
     keyword = "import"
     if SYNTAX.kind(node) === USING_KIND
         keyword = "using"
@@ -144,30 +158,16 @@ function import_statement(node::SYNTAX.SyntaxNode, text::AbstractString, lines::
     end
     items::Vector{ImportItem} = [ImportItem(item_name(item), strip(text[SYNTAX.byte_range(item)])) for item in item_nodes]
     line = first(SYNTAX.source_location(node))
-    opted_out = occursin(IMPORT_OPT_OUT, join(lines[max(1, line - 1):line], "\n"))
     bytes = SYNTAX.byte_range(node)
+    last_line = line + count(==('\n'), text[bytes])
+    opted_out = occursin(FATOU_OPT_OUT, join(lines[max(1, line - 1):line], "\n")) || covers(skipped, line:last_line)
     return ImportStatement(prefix, items, first(bytes), last(bytes), line, opted_out || (keyword == "using" && !colon), nested)
 end
 
-"""Whether `node` is a string literal with no interpolation."""
-is_literal_string(node::SYNTAX.SyntaxNode)::Bool =
-    SYNTAX.kind(node) === STRING_KIND && length(SYNTAX.children(node)) == 1 && SYNTAX.kind(only(SYNTAX.children(node))) === STRING_TEXT_KIND
-
-"""The path pieces of include argument `node`: `"a.jl"` or `joinpath(@__DIR__, "a", "b.jl")`; empty for anything else."""
-function literal_pieces(node::SYNTAX.SyntaxNode)::Vector{String}
-    if is_literal_string(node)
-        return [String(SYNTAX.sourcetext(only(SYNTAX.children(node))))]
-    elseif SYNTAX.kind(node) !== CALL_KIND
-        return String[]
-    end
-    parts = SYNTAX.children(node)
-    if length(parts) >= 3 && SYNTAX.sourcetext(first(parts)) == "joinpath" && SYNTAX.sourcetext(parts[2]) == "@__DIR__" && all(is_literal_string, parts[3:end])
-        return [String(SYNTAX.sourcetext(only(SYNTAX.children(part)))) for part in parts[3:end]]
-    end
-    return String[]
-end
-
-"""The paths the `include` calls below `node` name, relative to `directory`; `""` for one whose path is not a literal."""
+"""
+The paths the `include` calls below `node` name, relative to `directory` and resolved by `included_path`;
+`""` for one whose path is not a literal.
+"""
 function include_paths(node::SYNTAX.SyntaxNode, directory::AbstractString)::Vector{String}
     kind = SYNTAX.kind(node)
     if SYNTAX.is_leaf(node) || kind === QUOTE_KIND
@@ -175,16 +175,27 @@ function include_paths(node::SYNTAX.SyntaxNode, directory::AbstractString)::Vect
     end
     children = SYNTAX.children(node)
     if kind === CALL_KIND && SYNTAX.kind(first(children)) === IDENTIFIER_KIND && SYNTAX.sourcetext(first(children)) == "include"
-        pieces = String[]
+        path = nothing
         if length(children) == 2
-            pieces = literal_pieces(last(children))
+            path = included_path(Expr(last(children)), directory)
         end
-        if isempty(pieces)
-            return [""]
-        end
-        return [normpath(joinpath(directory, pieces...))]
+        return [something(path, "")]
     end
     return String[path for child in children for path in include_paths(child, directory)]
+end
+
+"""The kind of top-level `statement`, or of the statement its docstring documents."""
+function documented_kind(statement::SYNTAX.SyntaxNode)::SYNTAX.Kind
+    if SYNTAX.kind(statement) === DOC_KIND
+        return SYNTAX.kind(last(SYNTAX.children(statement)))
+    end
+    return SYNTAX.kind(statement)
+end
+
+"""Whether parsed file `tree` holds only `module` blocks, documented or not, at its top level."""
+function opens_module(tree::SYNTAX.SyntaxNode)::Bool
+    kinds::Vector{SYNTAX.Kind} = [documented_kind(statement) for statement in SYNTAX.children(tree)]
+    return !isempty(kinds) && all(==(MODULE_KIND), kinds)
 end
 
 """Julia file `path` parsed for import placement; `editable` marks a file the rule checks and rewrites."""
@@ -194,8 +205,9 @@ function import_file(path::AbstractString, editable::Bool)::ImportFile
     lines = split(text, '\n')
     modules = [SYNTAX.byte_range(node) for node in module_nodes(tree)]
     nodes = import_nodes(tree)
-    statements = ImportStatement[import_statement.(nodes, text, (lines,), inside_module.(nodes, (modules,)))...]
-    return ImportFile(normpath(path), text, Set(name_tokens(tree)), statements, include_paths(tree, dirname(path)), editable)
+    skipped = opt_outs(path, MISPLACED_IMPORT_RULE)
+    statements = ImportStatement[import_statement.(nodes, text, (lines,), inside_module.(nodes, (modules,)), (skipped,))...]
+    return ImportFile(normpath(path), text, Set(name_tokens(tree)), statements, include_paths(tree, dirname(path)), editable, opens_module(tree))
 end
 
 """Whether `node` starts inside one of the byte ranges `modules`."""
@@ -215,7 +227,7 @@ function unit_files(path::AbstractString, known::AbstractDict{String, ImportFile
     if path in seen
         return ImportFile[]
     elseif path == "" || !isfile(path)
-        return [ImportFile("", "", Set{String}(), ImportStatement[], String[], false)]
+        return [ImportFile("", "", Set{String}(), ImportStatement[], String[], false, false)]
     end
     file::ImportFile = if haskey(known, path)
         known[path]
@@ -264,9 +276,12 @@ function move_targets(unit::AbstractVector{ImportFile}, supplied::Bool, file::Im
     return unique([target.path for target in targets])
 end
 
-"""Whether `item` of `statement` in `file` can move to `other`: it uses the name, does not import it, and a nested statement only moves into an include."""
+"""
+Whether `item` of `statement` in `file` can move to `other`: it uses the name, does not import it, does
+not open a module of its own, and a nested statement only moves into an include.
+"""
 move_target(other::ImportFile, supplied::Bool, file::ImportFile, statement::ImportStatement, item::ImportItem)::Bool =
-    other.editable && !supplied && other.path != file.path && item.name in other.used &&
+    other.editable && !other.opens_module && !supplied && other.path != file.path && item.name in other.used &&
     !imports_name(other, item.name) && (!statement.nested || other.path in file.includes)
 
 """Every import move in `files` (the rule's own), module by module; a file in two modules is left alone."""
@@ -314,34 +329,49 @@ line_end(bytes::AbstractVector{UInt8}, index::Integer)::Int = something(findnext
 """Whether `byte` is a space or tab."""
 is_blank(byte::Unsigned)::Bool = byte == UInt8(' ') || byte == UInt8('\t')
 
-"""The edit taking `removed` items out of `statement` in `bytes`: the statement rewritten, or its whole lines deleted when nothing stays."""
+"""
+The edit taking `removed` items out of `statement` in `bytes`: the statement rewritten, or deleted when
+nothing stays. A deleted statement takes its `STATEMENT_TAIL`, and its whole lines when only blanks
+come before it and only a comment after.
+"""
 function removal_edit(bytes::AbstractVector{UInt8}, statement::ImportStatement, removed::AbstractVector{ImportItem})::Pair{UnitRange{Int}, String}
     kept::Vector{String} = [item.text for item in filter(!Base.Fix2(in, removed), statement.items)]
     if !isempty(kept)
         return (statement.first_byte:statement.last_byte) => statement.prefix * join(kept, ", ")
     end
     start = line_start(bytes, statement.first_byte)
-    if all(is_blank, view(bytes, start:(statement.first_byte - 1)))
-        return (start:line_end(bytes, statement.last_byte)) => ""
+    stop = line_end(bytes, statement.last_byte)
+    after = String(bytes[(statement.last_byte + 1):stop])
+    tail = ncodeunits(match(STATEMENT_TAIL, after).match)
+    rest = strip(after[(tail + 1):end])
+    if all(is_blank, view(bytes, start:(statement.first_byte - 1))) && (isempty(rest) || startswith(rest, '#'))
+        return (start:stop) => ""
     end
-    return (statement.first_byte:statement.last_byte) => ""
+    return (statement.first_byte:(statement.last_byte + tail)) => ""
 end
 
 """The import statement of the `items` (prefix => item text) under `prefix`."""
 prefix_statement(items::AbstractVector{Pair{String, String}}, prefix::String)::String =
     prefix * join(unique([text for (owner, text) in items if owner == prefix]), ", ")
 
-"""The edit adding `items` (prefix => item text) to `file`: after its last import, at that import's indent, or at the top of a file with none."""
+"""Whether `statement` sits at the top level of its file, outside every `module` block."""
+top_level(statement::ImportStatement)::Bool = !statement.nested
+
+"""The last byte of `statement`."""
+last_byte(statement::ImportStatement)::Int = statement.last_byte
+
+"""
+The edit adding `items` (prefix => item text) to `file`: after its last top-level import, at that
+import's indent, or at the top of a file with none.
+"""
 function addition_edit(file::ImportFile, items::AbstractVector{Pair{String, String}})::Pair{UnitRange{Int}, String}
     statements::Vector{String} = prefix_statement.((items,), unique(first.(items)))
-    if isempty(file.statements)
-        if occursin(r"^\s*(bare)?module\s"m, file.text)
-            error("$(file.path) holds a module but no import to place $(statements) beside")
-        end
+    top = filter(top_level, file.statements)
+    if isempty(top)
         return (1:0) => join(statements .* "\n")
     end
     bytes = codeunits(file.text)
-    last_statement = argmax(statement -> statement.last_byte, file.statements)
+    last_statement = argmax(last_byte, top)
     start = line_start(bytes, last_statement.first_byte)
     indent = String(bytes[start:(start + findfirst(!is_blank, view(bytes, start:length(bytes))) - 2)])
     stop = line_end(bytes, last_statement.last_byte)
@@ -389,6 +419,24 @@ function place_imports!(repository::Repository, directories::Tuple{Vararg{String
     moves = import_moves(files)
     touched = Set(reduce(vcat, [vcat([move.file], move.targets) for move in moves]; init = String[]))
     rewritten = files[in.([file.path for file in files], (touched,))]
-    write.([file.path for file in rewritten], placed_text.(rewritten, (moves,)))
+    texts::Vector{String} = placed_text.(rewritten, (moves,))
+    write_all!([file.path for file in rewritten], texts)
     return import_sites(moves)
+end
+
+"""
+Write each of `texts` to the file of `paths` at its index, keeping the file's mode. Every text is
+staged beside its file first, so a failure leaves all of `paths` as they were.
+"""
+function write_all!(paths::AbstractVector{String}, texts::AbstractVector{String})::Nothing
+    staged::Vector{String} = tempname.(dirname.(paths); cleanup = false)
+    try
+        write.(staged, texts)
+        chmod.(staged, filemode.(paths) .& 0o7777)
+    catch
+        rm.(filter(isfile, staged))
+        rethrow()
+    end
+    mv.(staged, paths; force = true)
+    return nothing
 end

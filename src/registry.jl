@@ -4,10 +4,10 @@ using InteractiveUtils: subtypes
 # are methods. The library functions stay callable on their own; a rule here fixes their arguments.
 
 """
-    Context(repository, directories, mod; inferred = Inferred[], candidates = CandidateSearch(inferred))
+    Context(repository, directories, mod; inferred = Inferred[], candidates = CandidateSearch(inferred), own_methods = defined_methods(mod))
 
 Everything a rule reads: the repository, the source directories that exist, the loaded package, its
-inferred frames, the `CandidateSearch` the typed rules share, the `Source` of every Julia file
+inferred frames, the `CandidateSearch` the typed rules share, the package's `defined_methods`, the `Source` of every Julia file
 under `directories`, each parsed once here and read by every rule, and the `# lint:` `comments` of
 those files and of the frames' files (`frame_comments`), by path.
 """
@@ -17,6 +17,7 @@ struct Context
     mod::Union{Module, Nothing}
     inferred::Vector{Inferred}
     candidates::CandidateSearch
+    own_methods::Vector{Method}
     sources::Vector{Source}
     comments::Dict{String, Vector{OptOutComment}}
 end
@@ -24,10 +25,11 @@ end
 function Context(
         repository::Repository, directories::Tuple{Vararg{AbstractString}}, mod::Union{Module, Nothing};
         inferred::AbstractVector{Inferred} = Inferred[], candidates::CandidateSearch = CandidateSearch(inferred),
+        own_methods::AbstractVector{Method} = defined_methods(mod),
     )::Context
     sources = Source.((repository,), repository_sources(repository, directories))
     parsed = Dict{String, Vector{OptOutComment}}(source.path => source.comments for source in sources)
-    return Context(repository, directories, mod, inferred, candidates, sources, merge(parsed, frame_comments(repository, inferred, parsed)))
+    return Context(repository, directories, mod, inferred, candidates, own_methods, sources, merge(parsed, frame_comments(repository, inferred, parsed)))
 end
 
 """
@@ -112,7 +114,7 @@ declared(context::Context)::Vector{StructDeclaration} = struct_locations(context
 scope(context::Context)::Module = something(context.mod, Base)
 
 @rule ModuleRule "hidden-input" :default "reads of a mutable or non-constant global, or a ScopedValue" context ->
-hidden_inputs(context.repository, context.mod)
+hidden_inputs(context.repository, context.mod; context.own_methods)
 
 @rule ModuleRule "non-public-access" :pedantic "qualified accesses and explicit imports of another module's non-public names" context ->
 non_public_accesses(context.mod)
@@ -136,13 +138,13 @@ float_widenings(context.repository, context.inferred; search = context.candidate
 widened_returns(context.repository, context.inferred; context.comments)
 
 @rule ModuleRule "impure-anonymous-function" :default "anonymous functions that capture mutable state, rebind a capture, or were never compiled (and, with strict_captures, any capture)" context ->
-impure_anonymous_functions(context.repository, context.mod)
+impure_anonymous_functions(context.repository, context.mod; context.own_methods)
 
 @rule ModuleRule "unstable-anonymous-function" :default "anonymous functions whose captures inference leaves abstract" context ->
-unstable_anonymous_functions(context.repository, context.mod)
+unstable_anonymous_functions(context.repository, context.mod; context.own_methods)
 
 @rule ModuleRule "overspecialized-anonymous-function" :default "anonymous functions that capture a type or function, compiling once per value" context ->
-overspecialized_anonymous_functions(context.repository, context.mod)
+overspecialized_anonymous_functions(context.repository, context.mod; context.own_methods)
 
 """The sites of the struct `types`, each placed at its declaration in `context`'s sources."""
 struct_sites(types::AbstractVector{DataType}, context::Context)::Vector{Site} = struct_site.(types, (declared(context),))

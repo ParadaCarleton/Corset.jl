@@ -301,15 +301,16 @@ end
 
 """
 The entry signatures of the loaded package `mod` at `root`, by source name: the `entry_points` of
-`config` alone when it sets them, else the `entries` sources. Test output goes to `output`; the
-tests run without this command's own environment variables.
+`config` alone when it sets them, else the `entries` sources, read from `mod`'s methods `own_methods`.
+Test output goes to `output`; the tests run without this command's own environment variables.
 """
 function seed_sources(
         config::Config,
         root::AbstractString,
         entries::Union{Nothing, AbstractString},
         mod::Module,
-        output::IO,
+        output::IO;
+        own_methods::AbstractVector{Method} = defined_methods(mod),
     )::Vector{Pair{String, Vector{Type}}}
     sources = checked_entries(config, entries)
     if !isnothing(config.entry_points)
@@ -317,7 +318,7 @@ function seed_sources(
         return ["entry_points" => Entries.configured_signatures(abspath(root, file), name)]
     end
     warn_tests!(output, sources)
-    return Pair{String, Vector{Type}}.(string.(sources), Entries.source_signatures.((mod,), sources; root, output, unset = (INNER_VARIABLE, "JULIA_LOAD_PATH")))
+    return Pair{String, Vector{Type}}.(string.(sources), Entries.source_signatures.((mod,), sources; root, output, unset = (INNER_VARIABLE, "JULIA_LOAD_PATH"), own_methods))
 end
 
 """Print to `output` that the `:tests` source, when `sources` holds it, runs the whole test suite and its child processes."""
@@ -334,13 +335,13 @@ many of the package's frames the walk kept (`frames`), and the process's peak re
 """
 function seed_summary(sources::AbstractVector{Pair{String, Vector{Type}}}, frames::AbstractVector{Inferred}, peak::Integer)::String
     counts = join(["$name $(length(signatures))" for (name, signatures) in sources], ", ")
-    seeds = length(unique(reduce(vcat, last.(sources); init = Type[])))
+    seeds = length(unique(collect(Type, Iterators.flatten(last.(sources)))))
     return "entry signatures: $counts; $seeds seeds, $(length(frames)) frames kept; peak RSS $(peak ÷ 2^20) MiB"
 end
 
 """The `entry_frames` of `mod` the typed rules read, walked once from the union of `sources`."""
 seeded_frames(sources::AbstractVector{Pair{String, Vector{Type}}}, mod::Module)::Vector{Inferred} =
-    entry_frames(unique(reduce(vcat, last.(sources); init = Type[])), mod)
+    entry_frames(unique(collect(Type, Iterators.flatten(last.(sources)))), mod)
 
 """The path of `site` relative to `root`; empty for a site with no file."""
 function display_path(root::AbstractString, site::Site)::String
@@ -439,18 +440,20 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
         return relaunch(root, args) # COV_EXCL_LINE
     end
     mod = nothing
+    own_methods = Method[]
     frames = nothing
     sources = Pair{String, Vector{Type}}[]
     if loads
         mod = load_package(root)
+        own_methods = defined_methods(mod)
         if any(reads_signatures, enabled_rules(config))
-            sources = seed_sources(config, root, options.entries, mod, err)
+            sources = seed_sources(config, root, options.entries, mod, err; own_methods)
         end
         if !isempty(sources)
             frames = seeded_frames(sources, mod)
         end
     end
-    findings, skipped = run_rules(config, root; mod, frames, fix = options.fix, update_baseline = options.update_baseline)
+    findings, skipped = run_rules(config, root; mod, frames, fix = options.fix, update_baseline = options.update_baseline, own_methods)
     print_findings(out, root, findings, something(options.format, "human"))
     if !isnothing(frames)
         println(err, seed_summary(sources, frames, Sys.maxrss()))

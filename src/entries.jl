@@ -29,19 +29,13 @@ a function of a loaded module (`Base.show`, AD rules) count too.
 function defined_methods(package::Package)::Vector{Method} # lint: abstract-local  reflects on values of unknown type
     values = vcat(package_bindings(package), loaded_functions())
     world = Base.get_world_counter()
-    found = reduce(
-        vcat,
-        vcat(binding_methods.(values, Function), call_methods.(values, world), binding_methods.(values, Type));
-        init = Method[],
-    )
+    found = collect(Method, Iterators.flatten([binding_methods.(values, Function); call_methods.(values, world); binding_methods.(values, Type)]))
     return unique(found[belongs.(getfield.(found, :module), (package,))])
 end
 
 """Every function bound in `Base`, `Core` or a loaded module: where a package may add methods."""
-loaded_functions()::AbstractVector = reduce(
-    vcat,
-    filter(Base.Fix2(isa, Function), module_bindings(loaded)) for loaded in unique([Base; Core; collect(values(Base.loaded_modules))]);
-    init = [],
+loaded_functions()::AbstractVector = collect(
+    Any, Iterators.flatten(filter(Base.Fix2(isa, Function), module_bindings(loaded)) for loaded in unique([Base; Core; collect(values(Base.loaded_modules))])),
 )
 
 # The helpers below take each binding as a call argument: a closure capturing a type or function
@@ -63,26 +57,35 @@ function call_methods(@nospecialize(value::Any), world::Integer)::Vector{Method}
 end
 
 """
-    compiled_signatures(mod)
+    defined_methods(mod)
 
-The concrete signatures the running process has specialized `mod`'s methods on: those a package
+The `defined_methods` of the `Package` of `mod`; none for `nothing`, when no package is loaded.
+"""
+defined_methods(mod::Module)::Vector{Method} = defined_methods(Package(mod))
+defined_methods(::Nothing)::Vector{Method} = Method[]
+
+"""
+    compiled_signatures(mod; own_methods = defined_methods(mod))
+
+The concrete signatures the running process has specialized `mod`'s methods (`own_methods`) on: those a package
 image's precompile workload compiled, and those compiled since loading.
 """
-compiled_signatures(mod::Module)::Vector{Type} = unique(
+compiled_signatures(mod::Module; own_methods::AbstractVector{Method} = defined_methods(mod))::Vector{Type} = unique(
     Type[
         instance.specTypes
-            for method in defined_methods(Package(mod))
+            for method in own_methods
             for instance in Base.specializations(method)
             if Base.isdispatchtuple(instance.specTypes)
     ],
 )
 
 """
-    declared_signatures(mod)
+    declared_signatures(mod; own_methods = defined_methods(mod))
 
-The signatures of `mod`'s methods whose declared argument types are all concrete already.
+The signatures of `mod`'s methods (`own_methods`) whose declared argument types are all concrete already.
 """
-declared_signatures(mod::Module)::Vector{Type} = Type[method.sig for method in defined_methods(Package(mod)) if Base.isdispatchtuple(method.sig)]
+declared_signatures(mod::Module; own_methods::AbstractVector{Method} = defined_methods(mod))::Vector{Type} =
+    Type[method.sig for method in own_methods if Base.isdispatchtuple(method.sig)]
 
 """
     test_trace(root, output; unset = ())
@@ -168,10 +171,10 @@ function configured_signatures(path::AbstractString, name::Symbol)::Vector{Type}
 end
 
 """
-    source_signatures(mod, source; root = nothing, output = devnull, unset = ())
+    source_signatures(mod, source; root = nothing, output = devnull, unset = (), own_methods = defined_methods(mod))
 
 The entry signatures of `mod` from one of `SOURCES`: `:compiled` (`compiled_signatures`),
-`:declared` (`declared_signatures`) or `:tests` (the `trace_signatures` of the package at `root`'s
+`:declared` (`declared_signatures`), both read from `mod`'s methods `own_methods`, or `:tests` (the `trace_signatures` of the package at `root`'s
 `test_trace`, its test output written to `output`, the variables `unset` removed from its environment).
 """
 function source_signatures(
@@ -180,11 +183,12 @@ function source_signatures(
         root::Union{Nothing, AbstractString} = nothing,
         output::IO = devnull,
         unset::Tuple{Vararg{String}} = (),
+        own_methods::AbstractVector{Method} = defined_methods(mod),
     )::Vector{Type}
     if source === :compiled
-        return compiled_signatures(mod)
+        return compiled_signatures(mod; own_methods)
     elseif source === :declared
-        return declared_signatures(mod)
+        return declared_signatures(mod; own_methods)
     elseif source === :tests
         if isnothing(root)
             throw(ArgumentError("the :tests source runs the package's tests and needs its root"))
@@ -197,7 +201,8 @@ end
 """
     entry_signatures(mod; sources = (:compiled, :declared), root = nothing, output = devnull, unset = ())
 
-The union of the `source_signatures` of `mod` from each of `sources`, each signature once.
+The union of the `source_signatures` of `mod` from each of `sources`, each signature once. The
+sources share one `defined_methods` of `mod`.
 """
 function entry_signatures(
         mod::Module;
@@ -206,7 +211,8 @@ function entry_signatures(
         output::IO = devnull,
         unset::Tuple{Vararg{String}} = (),
     )::Vector{Type}
-    return unique(reduce(vcat, [source_signatures(mod, source; root, output, unset) for source in sources]; init = Type[]))
+    own_methods = defined_methods(mod)
+    return unique(collect(Type, Iterators.flatten([source_signatures(mod, source; root, output, unset, own_methods) for source in sources])))
 end
 
 end

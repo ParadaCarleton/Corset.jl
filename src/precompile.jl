@@ -26,10 +26,11 @@ end
         )
         config = with_overrides(load_config(root), true, ["fatou" => :allow, "jscpd" => :allow], nothing)
         WorkloadPackage.bump(1)
-        sources = seed_sources(config, root, nothing, WorkloadPackage, devnull)
+        own_methods = defined_methods(WorkloadPackage)
+        sources = seed_sources(config, root, nothing, WorkloadPackage, devnull; own_methods)
         frames = seeded_frames(sources, WorkloadPackage)
         seed_summary(sources, frames, 0)
-        findings, _ = run_rules(config, root; mod = WorkloadPackage, frames)
+        findings, _ = run_rules(config, root; mod = WorkloadPackage, frames, own_methods)
         for format in ("human", "concise")
             print_findings(devnull, root, findings, format)
         end

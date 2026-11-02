@@ -537,25 +537,34 @@ function capture_detail(kind::Symbol, @nospecialize(capture::Any))::String
     if kind === :unstable
         return "captures $capture, a type inference left abstract"
     end
+    if kind === :plain
+        return "captures $capture, which `strict_captures` forbids: pass it as an argument"
+    end
     return "captures $capture, not plain immutable data"
 end
 
 """The faults of closure instance `instance`, as `kind => detail` pairs (`capture_kind`, `capture_detail`)."""
-function instance_faults(@nospecialize(instance::Any))::Vector{Pair{Symbol, String}}
+function instance_faults(@nospecialize(instance::Any), strict::Bool)::Vector{Pair{Symbol, String}}
     if !(instance isa DataType && isconcretetype(instance))
         return [:unstable => "built where the types of its captures are unknown"]
     end
     captures = field_types(instance)
     kinds = capture_kind.(captures)
-    return [kind => capture_detail(kind, capture) for (kind, capture) in zip(kinds, captures) if kind !== :plain]
+    return [fault_kind(kind) => capture_detail(kind, capture) for (kind, capture) in zip(kinds, captures) if kind !== :plain || strict]
 end
 
+"""The faults of closure instance `instance` when plain captures are allowed (`strict_captures` off)."""
+instance_faults(@nospecialize(instance::Any))::Vector{Pair{Symbol, String}} = instance_faults(instance, false)
+
+"""The kind a capture of kind `kind` is reported under: plain data, forbidden in strict mode, is `:impure`."""
+fault_kind(kind::Symbol)::Symbol = ifelse(kind === :plain, :impure, kind)
+
 """
-The faults of closure `type`, as `kind => detail` pairs: a `Core.Box` or no compiled instance (its captures
+The faults of closure `type`, as `kind => detail` pairs (plain captures count when `strict`): a `Core.Box` or no compiled instance (its captures
 unverified) is `:impure`; otherwise the `instance_faults` of every instance. None for a closure that
 captures nothing, or only `plain_capture` data in every instance.
 """
-function closure_faults(type::DataType, world::Integer)::Vector{Pair{Symbol, String}}
+function closure_faults(type::DataType, world::Integer, strict::Bool)::Vector{Pair{Symbol, String}}
     declared = field_types(type)
     if isempty(declared)
         return Pair{Symbol, String}[]
@@ -567,7 +576,7 @@ function closure_faults(type::DataType, world::Integer)::Vector{Pair{Symbol, Str
     if isempty(instances)
         return [:impure => "no compiled instance, so its captures are unverified; cover it in the precompile workload"]
     end
-    return unique(reduce(vcat, instance_faults.(instances); init = Pair{Symbol, String}[]))
+    return unique(reduce(vcat, instance_faults.(instances, strict); init = Pair{Symbol, String}[]))
 end
 
 """The details of the `faults` (`closure_faults`) of kind `kind`, joined; empty when there are none."""
@@ -590,7 +599,7 @@ function anonymous_function_sites(repository::Repository, mod::Module, kind::Sym
     methods = defined_methods(package)
     namers = closure_namers(package, methods)
     types = live_closure_types(package, methods)
-    details = kind_detail.(closure_faults.(types, world), kind)
+    details = kind_detail.(closure_faults.(types, world, repository.strict_captures), kind)
     faulty = .!isempty.(details)
     definers = closure_definer.([type.name for type in types[faulty]], (namers,))
     return closure_site.((repository,), types[faulty], definers, world, details[faulty])

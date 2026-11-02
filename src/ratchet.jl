@@ -11,7 +11,21 @@ const SYNTAX = Base.JuliaSyntax # lint: non-public-access  the registered JuliaS
 # allows it at any number of sites; an integer allows that many sites. `TOML.print` drops comments.
 
 """
-    Repository(root; baseline = nothing, one_letter_exempt = (), skipped_directories = (), file_line_limit = 1500)
+A pattern a project forbids in its source text, found by the `forbidden-pattern` rule: each line of a
+file under the checked directories that matches `pattern`, unless it also matches `unless` or sits in a
+file named in `skip_files` (paths from the repository root). `message` tells the reader why it is forbidden.
+"""
+struct ForbiddenPattern
+    name::String
+    pattern::Regex
+    message::String
+    unless::Union{Regex, Nothing}
+    skip_files::Tuple{Vararg{String}}
+end
+
+"""
+    Repository(root; baseline = nothing, one_letter_exempt = (), skipped_directories = (), file_line_limit = 1500,
+        struct_field_limit = 12, strict_captures = false, forbidden_patterns = ())
 
 The tree the rules read, and the settings that relax them. The defaults are the strict reading: every
 finding of every rule fails. `root` is the tree whose source the rules read (made absolute).
@@ -23,6 +37,10 @@ finding of every rule fails. `root` is the tree whose source the rules read (mad
 - `skipped_directories`: directory names `repository_sources` leaves out wherever they sit, such as
   `("vendor",)`. Hidden directories (a leading `.`) are always left out.
 - `file_line_limit`: the most lines a source file may hold before the `file-length` rule reports it.
+- `struct_field_limit`: the most fields a struct may hold before the `wide-struct` rule reports it.
+- `strict_captures`: whether the anonymous-function rules also report a capture of plain immutable data
+  (an `Int`, a tuple of them), for a project whose functions read only their arguments.
+- `forbidden_patterns`: the `ForbiddenPattern`s the `forbidden-pattern` rule reads.
 """
 struct Repository
     root::String
@@ -30,6 +48,9 @@ struct Repository
     one_letter_exempt::Tuple{Vararg{Symbol}}
     skipped_directories::Tuple{Vararg{String}}
     file_line_limit::Int
+    struct_field_limit::Int
+    strict_captures::Bool
+    forbidden_patterns::Tuple{Vararg{ForbiddenPattern}}
 end
 Repository(
     root::AbstractString;
@@ -37,15 +58,30 @@ Repository(
     one_letter_exempt::Tuple{Vararg{Symbol}} = (),
     skipped_directories::Tuple{Vararg{String}} = (),
     file_line_limit::Integer = DEFAULT_FILE_LINE_LIMIT,
+    struct_field_limit::Integer = DEFAULT_STRUCT_FIELD_LIMIT,
+    strict_captures::Bool = false,
+    forbidden_patterns::Tuple{Vararg{ForbiddenPattern}} = (),
 )::Repository = Repository(
     abspath(root),
     baseline,
     one_letter_exempt,
     skipped_directories,
     checked_line_limit(file_line_limit, "file_line_limit"),
+    checked_field_limit(struct_field_limit, "struct_field_limit"),
+    strict_captures,
+    forbidden_patterns,
 )
 
 const DEFAULT_FILE_LINE_LIMIT = 1500
+const DEFAULT_STRUCT_FIELD_LIMIT = 12
+
+"""`limit`, a `struct_field_limit` set by `source`; one below 1 throws, since it would report every struct."""
+function checked_field_limit(limit::Integer, source::AbstractString)::Int
+    if limit < 1
+        throw(UsageError("$source is $limit; a struct may hold at least one field"))
+    end
+    return limit
+end
 
 """`limit`, a `file_line_limit` set by `source`; one below 1 throws, since it would report every file."""
 function checked_line_limit(limit::Integer, source::AbstractString)::Int

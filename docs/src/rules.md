@@ -140,7 +140,7 @@ A limit on field count (`wide-struct`) takes one line: `fieldcount(T) > limit` o
 ```julia
 files = repository_sources(REPO, ("src",))
 locations = struct_locations(Corset.Source.(files))
-sites = [struct_site(nameof(T), locations) for T in module_structs(MyPackage) if !isempty(abstract_fields(T))]
+sites = [struct_site(T, locations) for T in module_structs(MyPackage) if !isempty(abstract_fields(T))]
 ratchet!(REPO, "abstract-field", sites)
 ```
 

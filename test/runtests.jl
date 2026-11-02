@@ -158,7 +158,7 @@ end
         source = only(context.sources)
         file_rules = [rule for rule in Corset.RULES if rule isa Corset.FileRule]
         @test sum(length(Corset.check(rule, context, source)) for rule in file_rules) > 0
-        @test Corset.declared(context) == Dict(:Point => (source.path, 1))
+        @test Corset.declared(context) == [Corset.StructDeclaration(:Point, source.path, 1)]
         sites = [Site("Point", source.path, 1, ""), Site("f", source.path, 4, "")]
         @test first(Corset.unopted(sites, "rule", Corset.source_comments(context))) == [last(sites)]
     end
@@ -254,21 +254,42 @@ end
         @test repeated_prefix(structs[:SolverControls]) == "solver"
         @test isnothing(repeated_prefix(structs[:Plain]))
         path = joinpath(root, "fixture.jl")
-        @test struct_site(:Holder, struct_locations([Source(path)])) == Site("Holder", path, findfirst(==("struct Holder"), readlines(path)), "")
+        @test struct_site(structs[:Holder], struct_locations([Source(path)])) == Site("Holder", path, findfirst(==("struct Holder"), readlines(path)), "")
     end
 
     @testset "a struct is placed at its `struct` line, below its docstring" begin
         path = snippet_file("struct-line")
         lines = readlines(path)
         locations = struct_locations([Source(path)])
-        @test locations == Dict(
-            :Documented => (path, findfirst(startswith("struct Documented"), lines)),
-            :Counter => (path, findfirst(endswith("struct Counter"), lines)),
-            :Plain => (path, findfirst(startswith("struct Plain"), lines)),
-            Symbol("Odd Name") => (path, findfirst(startswith("struct var\"Odd Name\""), lines)),
+        @test Set(locations) == Set(
+            Corset.StructDeclaration.(
+                [:Documented, :Counter, :Plain, Symbol("Odd Name")],
+                path,
+                findfirst.([startswith("struct Documented"), endswith("struct Counter"), startswith("struct Plain"), startswith("struct var\"Odd Name\"")], (lines,)),
+            ),
         )
-        sites = [struct_site(name, locations) for name in (:Documented, :Counter)]
+        @test issorted(locations; by = Corset.declared_name)
+        snippet = Module(:Snippet)
+        Base.include(snippet, path)
+        sites = [struct_site(Base.unwrap_unionall(getglobal(snippet, name)), locations) for name in (:Documented, :Counter)]
         @test offenders!(Repository(dirname(path)), "wide-struct", sites) == ["Counter"]
+    end
+
+    @testset "two structs of one name: each is placed in the file that defines its constructors" begin
+        root = write_tree(mktempdir(), ["src/a.jl" => "struct Same\n    a::Int\nend\n", "test/b.jl" => "\n\nstruct Same\n    a::Int\nend\n"])
+        files = joinpath.(root, ["src/a.jl", "test/b.jl"])
+        for (file, line) in zip(files, (1, 3))
+            owner = Module(:Owner)
+            Base.include(owner, file)
+            for order in (files, reverse(files))
+                @test struct_site(owner.Same, struct_locations(Source.(order))) == Site("Same", file, line, "")
+            end
+        end
+        unplaced = Module(:Unplaced)
+        Core.eval(unplaced, :(struct Same end))
+        @test_throws r"struct Same is declared in .*a\.jl.*b\.jl" struct_site(unplaced.Same, struct_locations(Source.(files)))
+        @test struct_site(unplaced.Same, struct_locations(Source.(files[1:1]))) == Site("Same", first(files), 1, "")
+        @test struct_site(unplaced.Same, struct_locations(Source[])) == Site("Same", "", 0, "")
     end
 
     @testset "jet: JET reports as sites" begin

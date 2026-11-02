@@ -106,7 +106,7 @@ macro rule(kind, name, group, summary, definition)
 end
 
 """Every struct the package defines with the file and line it is declared at, for placing a struct rule's sites."""
-declared(context::Context)::Dict{Symbol, Tuple{String, Int}} = struct_locations(context.sources)
+declared(context::Context)::Vector{StructDeclaration} = struct_locations(context.sources)
 
 """The scope a `FileRule` resolves type names in: the loaded package, or `Base` when none is loaded."""
 scope(context::Context)::Module = something(context.mod, Base)
@@ -145,7 +145,7 @@ unstable_anonymous_functions(context.mod)
 overspecialized_anonymous_functions(context.mod)
 
 """The sites of the struct `types`, each placed at its declaration in `context`'s sources."""
-struct_sites(types::AbstractVector{DataType}, context::Context)::Vector{Site} = struct_site.(nameof.(types), (declared(context),))
+struct_sites(types::AbstractVector{DataType}, context::Context)::Vector{Site} = struct_site.(types, (declared(context),))
 
 @rule ModuleRule "abstract-field" :default "struct fields of an abstract type or of a container of one" context ->
 struct_sites(filter(!isempty ∘ abstract_fields, module_structs(context.mod)), context)

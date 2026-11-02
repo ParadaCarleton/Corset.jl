@@ -932,12 +932,25 @@ function struct_lines(node::SYNTAX.SyntaxNode)::Vector{Pair{Symbol, Int}}
     return nested
 end
 
-"""Where each struct of the parsed `sources` is declared: its name with the file and line of its `struct` keyword, so a `# lint:` comment on that line opts the struct out even when a docstring sits above it."""
-function struct_locations(sources::AbstractVector{Source})::Dict{Symbol, Tuple{String, Int}}
-    return Dict{Symbol, Tuple{String, Int}}(
-        name => (source.path, line) for source in sources for (name, line) in struct_lines(source.tree)
-    )
+"""A `struct` declaration in the source: the struct's `name`, and the `file` and `line` of its `struct` keyword."""
+struct StructDeclaration
+    name::Symbol
+    file::String
+    line::Int
 end
+
+"""The name `declaration` declares, the order `struct_locations` sorts by."""
+declared_name(declaration::StructDeclaration)::Symbol = declaration.name
+
+"""
+Where each struct of the parsed `sources` is declared, sorted by name: at its `struct` keyword, so a
+`# lint:` comment on that line opts the struct out even when a docstring sits above it. Two structs of
+one name in different files are both kept.
+"""
+struct_locations(sources::AbstractVector{Source})::Vector{StructDeclaration} = sort!(
+    StructDeclaration[StructDeclaration(name, source.path, line) for source in sources for (name, line) in struct_lines(source.tree)];
+    by = declared_name,
+)
 
 const CONCRETE_CONTAINERS = (:Vector, :Matrix, :Array, :Dict)
 const RESIZERS = (
@@ -1482,8 +1495,30 @@ function jscpd_sites( # lint: abstract-local  JSON report tables are untyped
     end
 end
 
-"""A `Site` keyed `name` at the declaration of struct `name`."""
-function struct_site(name::Symbol, locations::Dict{Symbol, Tuple{String, Int}})::Site
-    file, line = get(locations, name, ("", 0))
-    return Site(string(name), file, line, "")
+"""The files that define the constructors of struct `type`: where Julia evaluated its declaration."""
+constructor_files(type::DataType)::Set{String} = Set{String}(string(method.file) for method in methods(type.name.wrapper))
+
+"""
+    struct_site(type, locations)
+
+A `Site` keyed by the name of struct `type`, at its declaration among `locations` (`struct_locations`):
+the one in a file that defines its constructors, else the only declaration of its name. With no
+declaration of its name the site has no file; with several and none in a constructor's file, it throws.
+"""
+function struct_site(type::DataType, locations::AbstractVector{StructDeclaration})::Site
+    name = nameof(type)
+    named = locations[searchsorted(locations, StructDeclaration(name, "", 0); by = declared_name)]
+    files = constructor_files(type)
+    own = [declaration for declaration in named if declaration.file in files]
+    if length(own) == 1
+        named = own
+    end
+    if isempty(named)
+        return Site(string(name), "", 0, "")
+    end
+    if length(named) > 1
+        error("struct $name is declared in $(join([declaration.file for declaration in named], ", ")); none defines its constructors")
+    end
+    declaration = only(named)
+    return Site(string(name), declaration.file, declaration.line, "")
 end

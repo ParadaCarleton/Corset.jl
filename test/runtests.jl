@@ -250,6 +250,15 @@ end
         @test float64_ops(fixture.narrow, (Float32,)) == 0
     end
 
+    @testset "float64_line: a double operand of a listed operation, matched as whole words" begin
+        for line in ("%2 = sitofp i64 %0 to double", "%2 = uitofp i64 %0 to double", "%2 = fneg double %1", "%3 = call double @julia_f_1(double %0)")
+            @test Corset.float64_line(line)
+        end
+        for line in ("%3 = call i64 @julia_double_it_12(i64 %0)", "%2 = load double, ptr @julia_callback_3", "%2 = fneg float %1")
+            @test !Corset.float64_line(line)
+        end
+    end
+
     @testset "nothing-return: a declared Union{Nothing, …} result" begin
         @test site_keys(found_in(nothing_returns, "nothing-return")) == ["maybe"]
     end

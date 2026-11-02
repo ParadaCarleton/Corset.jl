@@ -228,7 +228,7 @@ end
 
 """
 The parsed Julia file `source` read for import placement; `editable` marks a file the rule checks and
-rewrites. Given a `path`, the file is read and parsed here: an include outside the checked directories.
+rewrites.
 """
 function import_file(source::Source, editable::Bool)::ImportFile
     (; path, text, tree) = source
@@ -243,8 +243,6 @@ function import_file(source::Source, editable::Bool)::ImportFile
         module_block.(includes, (modules,)), editable, opens_module(tree),
     )
 end
-
-import_file(path::AbstractString, editable::Bool)::ImportFile = import_file(Source(Repository(dirname(path)), path), editable)
 
 """Whether `statement` imports `name`."""
 statement_imports(statement::ImportStatement, name::AbstractString)::Bool = any(==(name), [item.name for item in statement.items])
@@ -266,7 +264,7 @@ function unit_files(path::AbstractString, known::AbstractDict{String, ImportFile
     file::ImportFile = if haskey(known, path)
         known[path]
     else
-        import_file(path, false)
+        import_file(Source(Repository(dirname(path)), path), false)
     end
     unit = UnitFile(file, scope)
     below::Vector{String} = vcat(seen, [path])

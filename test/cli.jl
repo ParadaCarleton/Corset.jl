@@ -317,6 +317,15 @@ end
     @test captured_main(["check", root, "--no-load", "--allow", "where-return"]) == ("", 0)
     @test occursin("float64", first(captured_main(["rules", root, "--pedantic"])))
     @test captured_main(["check", root, "--no-load", "--allow", "no-such-rule"])[2] == 2
+    redirect_stderr(devnull) do
+        @test captured_main(["check", root, "--no-load", "--entries", "bogus"])[2] == 2
+        @test captured_main(["check", root, "--no-load", "--entries", "tests"])[2] == 2
+        for flags in (["--format", "json"], ["--format", "human"], ["--deny-warnings"], ["--update-baseline"], ["--entries", "workload"], ["--candidate-limit", "3"])
+            @test captured_main(["check", root, "--diff", flags...]) == ("", 2)
+        end
+    end
+    configured = package_tree("name = \"Demo\"\n[preferences.Corset]\nentry_points = \"entries.jl:signatures\"\n", SOURCE_TREE)
+    @test_throws ErrorException Corset.check_flags(Corset.command_options(Corset.parse_args(["check", "--entries", "workload"], Corset.argument_settings())), load_config(configured))
     @test_throws ErrorException Corset.load_package(
         package_tree(
             "version = \"1\"\n",

@@ -1048,6 +1048,7 @@ end
     @test (@timed Base.invokelatest(reflect_all, generated_module(20))).compile_time < 0.25
 end
 
+include("entries.jl")
 include("cli.jl")
 
 @testset "undefined_names: a name nothing defines is reported, and so is an unlowered testset" begin

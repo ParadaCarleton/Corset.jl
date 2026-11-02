@@ -7,3 +7,11 @@ Modules = [Corset]
 Public = false
 Pages = ["entry_walk.jl", "candidates.jl", "mutation.jl", "dispatch.jl", "float_widening.jl", "jet.jl", "float64_scan.jl", "non_public_access.jl"]
 ```
+
+## Entry signatures
+
+`Corset.Entries` finds the concrete call signatures a walk starts from. It reads only a `Module`, paths and types.
+
+```@autodocs
+Modules = [Corset.Entries]
+```

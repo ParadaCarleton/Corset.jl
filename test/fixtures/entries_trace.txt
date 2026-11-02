@@ -1,0 +1,9 @@
+precompile(Tuple{typeof(EntryDemo.twice), Int64})
+#= 1.2 ms =# precompile(Tuple{typeof(EntryDemo.twice), Float32})
+precompile(Tuple{typeof(EntryDemo.twice), Int64})
+precompile(Tuple{typeof(EntryDemo.twice), Main.TypeOnlyTheTestsDefine})
+precompile(Tuple{typeof(Base.identity), Int64})
+precompile(Tuple{typeof(EntryDemo.twice), Any})
+precompile(Tuple{typeof(EntryDemo.twice), Int64}, 1)
+precompile(Tuple{
+# recompile

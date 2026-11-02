@@ -4,7 +4,6 @@
 using .Entries: defined_methods, module_bindings
 
 const COMPILER = Base.Compiler
-const SYNTAX = Base.JuliaSyntax # lint: non-public-access  the registered JuliaSyntax lags the parser Julia 1.13 ships
 
 """Definitions, not state: a `DataType` is itself `ismutable`."""
 is_definition(value::Any)::Bool = value isa Union{Type, Function, Module}

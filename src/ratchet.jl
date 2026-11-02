@@ -4,6 +4,8 @@
 using Test: @test
 using TOML: TOML
 
+const SYNTAX = Base.JuliaSyntax # lint: non-public-access  the registered JuliaSyntax lags the parser Julia 1.13 ships
+
 # The baseline file holds one table per rule, named as in the rule's opt-out comment. A string
 # is a named offender's note ("unassigned" waits on a decision, "kept: …" is deliberate) and
 # allows it at any number of sites; an integer allows that many sites. `TOML.print` drops comments.
@@ -57,6 +59,60 @@ name is lowercase words joined by `-`.
 """
 const OPT_OUT = r"#\s*lint:\s*([a-z0-9]+(?:-[a-z0-9]+)*?)(?:-(file|begin|end))?(?![\w-])"
 
+"""One `# lint:` comment: the `rule` it names, its `form` (`:line`, `:file`, `:begin` or `:end`) and its `line`."""
+struct OptOutComment
+    rule::String
+    form::Symbol
+    line::Int
+end
+
+const COMMENT_KIND = SYNTAX.@K_str "Comment"
+
+"""
+    opt_out_comments(path, text = read(path, String))
+
+The `# lint:` comments (`OPT_OUT`) of the Julia source `text` of file `path`: matches inside comment
+tokens only, so a string or docstring that quotes one opts nothing out. A `-begin` with no `-end` of
+its rule below it throws. A path that is no file (a method a macro defined has the file `none`) has none.
+"""
+function opt_out_comments(path::AbstractString)::Vector{OptOutComment}
+    if !isfile(path)
+        return OptOutComment[]
+    end
+    return opt_out_comments(path, read(path, String))
+end
+
+function opt_out_comments(path::AbstractString, text::AbstractString)::Vector{OptOutComment}
+    source = SYNTAX.SourceFile(text)
+    tokens = [token.range for token in SYNTAX.tokenize(text) if SYNTAX.kind(token) == COMMENT_KIND]
+    comments = [
+        OptOutComment(found[1], opt_out_form(found[2]), SYNTAX.source_line(source, Int(first(range)) + found.offset - 1))
+            for range in tokens for found in eachmatch(OPT_OUT, SubString(text, first(range), thisind(text, last(range))))
+    ]
+    unclosed = comments[open_begin.((comments,), comments)]
+    if !isempty(unclosed)
+        error("$path:$(first(unclosed).line): `# lint: $(first(unclosed).rule)-begin` has no `# lint: $(first(unclosed).rule)-end` below it")
+    end
+    return comments
+end
+
+"""The form an `OPT_OUT` suffix (`file`, `begin`, `end` or none) gives its comment."""
+opt_out_form(suffix::AbstractString)::Symbol = Symbol(suffix)
+opt_out_form(::Nothing)::Symbol = :line
+
+"""Whether `comment` is a `-begin` that no `-end` of its rule among `comments` closes, on its line or below."""
+open_begin(comments::AbstractVector{OptOutComment}, comment::OptOutComment)::Bool =
+    comment.form === :begin && isnothing(closing_line(comments, comment))
+
+"""The line of the first `-end` among `comments` that closes `opening`, a `-begin`: same rule, on its line or below."""
+function closing_line(comments::AbstractVector{OptOutComment}, opening::OptOutComment)::Union{Int, Nothing}
+    lines = [comment.line for comment in comments if comment.form === :end && comment.rule == opening.rule && comment.line >= opening.line]
+    if isempty(lines)
+        return nothing
+    end
+    return minimum(lines)
+end
+
 """Which lines of one file a rule skips: all of them when `whole_file`, else `lines`."""
 struct OptOuts
     whole_file::Bool
@@ -65,37 +121,18 @@ end
 
 """
     opt_outs(path, rule)
+    opt_outs(comments, rule)
 
-The lines of `path` that the `# lint:` comments (`OPT_OUT`) take out of `rule`. A `-begin` without
-an `-end` runs to the end of the file. A path that is no file (a method a macro defined has the file
-`none`) has none.
+The lines that the `# lint:` comments of `path` (`opt_out_comments`), or `comments`, take out of `rule`:
+each comment's own line, and every line from a `-begin` to the `-end` that closes it.
 """
-function opt_outs(path::AbstractString, rule::AbstractString)::OptOuts
-    whole_file = false
-    lines = Set{Int}()
-    if !isfile(path)
-        return OptOuts(whole_file, lines)
-    end
-    inside = false
-    for (number, text) in enumerate(eachline(path))
-        if inside
-            push!(lines, number)
-        end
-        for found in eachmatch(OPT_OUT, text)
-            if found[1] != rule
-                continue
-            end
-            push!(lines, number)
-            if found[2] == "file"
-                whole_file = true
-            elseif found[2] == "begin"
-                inside = true
-            elseif found[2] == "end"
-                inside = false
-            end
-        end
-    end
-    return OptOuts(whole_file, lines)
+opt_outs(path::AbstractString, rule::AbstractString)::OptOuts = opt_outs(opt_out_comments(path), rule)
+
+function opt_outs(comments::AbstractVector{OptOutComment}, rule::AbstractString)::OptOuts
+    named = [comment for comment in comments if comment.rule == rule]
+    spans = [comment.line:something(closing_line(named, comment)) for comment in named if comment.form === :begin]
+    lines = Set{Int}(Iterators.flatten((getfield.(named, :line), spans...)))
+    return OptOuts(any(getfield.(named, :form) .=== :file), lines)
 end
 
 """The Julia files below `directory`, in no particular order; hidden directories, those named in `skipped` and links to directories are not entered."""
@@ -178,18 +215,14 @@ end
 
 """The sites of `sites` that no `# lint:` comment naming `rule` opts out, and how many were opted out."""
 function unopted(sites::AbstractVector{S}, rule::AbstractString)::Tuple{Vector{Site}, Int} where {S <: Site}
-    skips = Dict{String, OptOuts}()
-    kept = Site[]
-    for site in sites
-        if !haskey(skips, site.file)
-            skips[site.file] = opt_outs(site.file, rule)
-        end
-        if !(skips[site.file].whole_file || any(in(skips[site.file].lines), site.line:site.last_line))
-            push!(kept, site)
-        end
-    end
+    files = unique(getfield.(sites, :file))
+    skips = Dict{String, OptOuts}(files .=> opt_outs.(opt_out_comments.(files), rule))
+    kept = sites[.!opted.(getindex.((skips,), getfield.(sites, :file)), sites)]
     return kept, length(sites) - length(kept)
 end
+
+"""Whether `skips` (one file's `OptOuts`) covers a line of `site`."""
+opted(skips::OptOuts, site::Site)::Bool = skips.whole_file || any(in(skips.lines), site.line:site.last_line)
 
 """The number of `sites` under each key."""
 function tally(sites::AbstractVector{S})::Dict{String, Int} where {S <: Site}

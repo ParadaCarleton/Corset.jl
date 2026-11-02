@@ -113,6 +113,18 @@ end
         @test isempty(offenders!(Repository(root), "rule", [Site("whole", joinpath(root, "whole.jl"), 2, "")]))
     end
 
+    @testset "only a comment opts out: `# lint:` inside a string or docstring is text" begin
+        text = "doc = \"put `# lint: rule-file` on a line\"\nx = 1\n\"\"\"\n# lint: rule\n\"\"\"\ny = 2\n#= a block comment\n   # lint: rule =#\nz = 3 # lint: rule\n"
+        root = write_tree(mktempdir(), ["source.jl" => text])
+        sites = [Site("line $line", joinpath(root, "source.jl"), line, "") for line in 1:9]
+        @test offenders!(Repository(root), "rule", sites) == ["line $line" for line in 1:7]
+    end
+
+    @testset "a `-begin` with no `-end` below it throws, naming its file and line" begin
+        root = write_tree(mktempdir(), ["open.jl" => "x = 1\n# lint: rule-begin\ny = 2\n# lint: other-end\n"])
+        @test_throws r"open\.jl:2: `# lint: rule-begin` has no `# lint: rule-end`" offenders!(Repository(root), "rule", [Site("x", joinpath(root, "open.jl"), 3, "")])
+    end
+
     @testset "with a baseline each key is held to its entry, and entries fall" begin
         root = mktempdir()
         baseline = joinpath(root, "baseline.toml")

@@ -56,8 +56,11 @@ At a runtime dispatch the rule lists the candidate methods (`candidate_limit`, d
 `unmarked_mutations(repo, inferred; search = CandidateSearch(inferred; candidate_limit))`). When every
 candidate is listed and none writes the argument, the dispatch writes nothing. A candidate that writes it
 makes the write definite, and the detail names the candidate. A `ccall` of a C function whose writes are
-known (`jl_genericmemory_copyto`, which `copyto!` and `vcat` of boxed elements call) reads its source;
-only its destination may be written. An argument passed to any other `ccall`, or to a
+known (`jl_genericmemory_copyto`, which `copyto!` and `vcat` of boxed elements call, and `memmove`, `memcpy`,
+`memset`, `strlen`, `memcmp`, `memchr`, `strcmp`, `strncmp`) reads its sources; only its destination may be written.
+A `Ptr` operand counts as the argument it points into (`pointer(x)`, the conversion `ccall` applies to `x`),
+and `unsafe_store!` through such a pointer writes the argument. A `Cstring` operand is read.
+An argument passed to any other `ccall`, or to a
 dispatch with more candidates than the budget, a candidate inference cannot type, or a candidate that
 itself dispatches on the argument, is reported as one that may be written. `runtime-dispatch` reports the same dispatch.
 A method the package adds to another module's non-`!` function (`Base.length`, `Base.iterate` on a stateful iterator) is checked too: "adds a writing method to `Base.length`, which callers expect not to write". A write to any Julia object counts, an `IOBuffer`, a lock or a `Channel` included. Arguments that cannot

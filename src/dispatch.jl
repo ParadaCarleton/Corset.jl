@@ -48,27 +48,48 @@ end
 """Whether `frame`'s method is defined in a file under the repository's root."""
 in_repository(repository::Repository, frame::Inferred)::Bool = in_repository(repository, frame.method)
 
+"""The files of the methods of `inferred` that are in `repository`'s own files."""
+frame_files(repository::Repository, inferred::AbstractVector{Inferred})::Vector{String} =
+    unique([string(item.method.file) for item in filter(Base.Fix1(in_repository, repository), inferred)])
+
+"""
+The `# lint:` comments of every `frame_files` file of `inferred`, by path: those `known` holds, and
+the rest read once here, so the rules that audit frames share one read per file.
+"""
+function frame_comments(
+        repository::Repository, inferred::AbstractVector{Inferred}, known::AbstractDict{String, Vector{OptOutComment}},
+    )::Dict{String, Vector{OptOutComment}}
+    files = frame_files(repository, inferred)
+    return Dict{String, Vector{OptOutComment}}(files .=> file_comments.((known,), files))
+end
+
 """
 The `inferred` frames whose method is in `repository`'s own files and whose first line carries no
-`# lint: rule` opt-out, which so covers the whole method.
+`# lint: rule` opt-out, which so covers the whole method. `comments` holds the `# lint:` comments of
+files already read, by path (`frame_comments`); any other file is read.
 """
-function audited_frames(repository::Repository, inferred::AbstractVector{Inferred}, rule::AbstractString)::Vector{Inferred}
+function audited_frames(
+        repository::Repository, inferred::AbstractVector{Inferred}, rule::AbstractString, comments::AbstractDict{String, Vector{OptOutComment}},
+    )::Vector{Inferred}
     own = filter(Base.Fix1(in_repository, repository), inferred)
-    files = unique([string(item.method.file) for item in own])
-    return own[.!opted_out.(own, (Dict(files .=> opt_outs.(files, rule)),))]
+    files = frame_files(repository, own)
+    return own[.!opted_out.(own, (Dict(files .=> opt_outs.(file_comments.((comments,), files), rule)),))]
 end
 
 """Whether the first line of `item`'s method is among the opted-out lines `skipped` holds for its file."""
 opted_out(item::Inferred, skipped::AbstractDict{String, OptOuts})::Bool = item.method.line in skipped[string(item.method.file)].lines
 
 """
-    runtime_dispatches(repository, inferred)
+    runtime_dispatches(repository, inferred; comments = Dict())
 
 Each call the compiler leaves to run-time dispatch (`dispatches`) in a frame of `inferred` that
-`audited_frames` keeps, one site per method and source line.
+`audited_frames` keeps under `comments`, one site per method and source line.
 """
-runtime_dispatches(repository::Repository, inferred::AbstractVector{Inferred})::Vector{Site} =
-    one_per_line(reduce(vcat, dispatch_sites.((repository,), audited_frames(repository, inferred, "runtime-dispatch")); init = Site[]))
+runtime_dispatches(
+    repository::Repository, inferred::AbstractVector{Inferred};
+    comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
+)::Vector{Site} =
+    one_per_line(reduce(vcat, dispatch_sites.((repository,), audited_frames(repository, inferred, "runtime-dispatch", comments)); init = Site[]))
 
 """The `runtime_dispatches` sites of `item`, one per dispatching statement, placed at its line in the method."""
 function dispatch_sites(repository::Repository, item::Inferred)::Vector{Site}
@@ -78,12 +99,15 @@ function dispatch_sites(repository::Repository, item::Inferred)::Vector{Site}
 end
 
 """
-    widened_returns(repository, inferred)
+    widened_returns(repository, inferred; comments = Dict())
 
-Each method of `inferred` (as `audited_frames` keeps them) whose inferred result does not compile
+Each method of `inferred` (as `audited_frames` keeps them under `comments`) whose inferred result does not compile
 concretely (`compiled_concretely`), one site at its first line however many specializations ran.
 """
-function widened_returns(repository::Repository, inferred::AbstractVector{Inferred})::Vector{Site}
-    widened = [item for item in audited_frames(repository, inferred, "widened-return") if !compiled_concretely(item.code.rettype)]
+function widened_returns(
+        repository::Repository, inferred::AbstractVector{Inferred};
+        comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
+    )::Vector{Site}
+    widened = [item for item in audited_frames(repository, inferred, "widened-return", comments) if !compiled_concretely(item.code.rettype)]
     return one_per_line(Site[Site(method_key(repository, item.method), string(item.method.file), item.method.line, "returns $(item.code.rettype)") for item in widened])
 end

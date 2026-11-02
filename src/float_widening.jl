@@ -159,9 +159,9 @@ carries_floats(type::Type, budget::FloatBudget)::Bool =
     typeintersect(type, Union{budget.floats...}) !== Union{} || !isempty(intersect(held_floats(type, 0), budget.floats))
 
 """
-    float_widenings(repository, inferred; search = CandidateSearch(inferred))
+    float_widenings(repository, inferred; search = CandidateSearch(inferred), comments = Dict())
 
-Each statement of an audited frame (`audited_frames`) whose float result is wider than every float its
+Each statement of an audited frame (`audited_frames` under `comments`) whose float result is wider than every float its
 method receives in its arguments (`x::Float32 * 2.0`, `float(n)` in a `Float32` method), one site per
 method and line. A frame with no float argument, or one as wide as `Float64`, is skipped. A runtime
 dispatch is judged by its `call_candidates` in `search` (`dispatch_widening`).
@@ -170,8 +170,9 @@ function float_widenings(
         repository::Repository,
         inferred::AbstractVector{Inferred};
         search::CandidateSearch = CandidateSearch(inferred),
+        comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
     )::Vector{Site}
-    return one_per_line(reduce(vcat, frame_widenings.((repository,), audited_frames(repository, inferred, "float-widening"), (search,)); init = Site[]))
+    return one_per_line(reduce(vcat, frame_widenings.((repository,), audited_frames(repository, inferred, "float-widening", comments), (search,)); init = Site[]))
 end
 
 """The `float_widenings` sites of `item`, one per widening statement."""

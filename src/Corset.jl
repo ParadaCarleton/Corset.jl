@@ -16,6 +16,7 @@ export Repository,
     float64_ops,
     undefined_names
 
+include("usage_error.jl")
 include("ratchet.jl")
 include("membership.jl")
 include("entries.jl")

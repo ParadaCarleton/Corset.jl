@@ -345,13 +345,14 @@ place_site(details::AbstractDict{Tuple{String, String, Int, Int}, String}, place
 Each named local variable (not an argument) of `repository`'s own methods whose inferred type is
 `abstract_local_type`, one site per variable however many specializations ran. A method a macro generated in another package's file
 (`@concrete`'s constructors) and a compiler's unnamed slot are not the repository's variables. An opt-out
-on a method's first line covers all its locals (`audited_frames`).
+on a method's first line covers all its locals (`audited_frames`, under `comments`).
 """
 function abstract_locals(
         repository::Repository,
-        inferred::AbstractVector{Inferred},
+        inferred::AbstractVector{Inferred};
+        comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
     )::Vector{Site}
-    return one_per_line(reduce(vcat, abstract_local_sites.((repository,), audited_frames(repository, inferred, "abstract-local")); init = Site[]))
+    return one_per_line(reduce(vcat, abstract_local_sites.((repository,), audited_frames(repository, inferred, "abstract-local", comments)); init = Site[]))
 end
 
 """The `abstract_locals` sites of `item`, one per abstract named local."""
@@ -821,12 +822,13 @@ end
     Source(repository, path)
 
 The Julia file `path` of `repository`, read and parsed once for every rule that reads source: its
-`name` in keys (`file_key`), its syntax `tree`, its expressions as `Located`s (`located`), and its
-`# lint:` `comments` (`opt_out_comments`), and its count of `lines`.
+`name` in keys (`file_key`), its `text`, its syntax `tree`, its expressions as `Located`s (`located`),
+its `# lint:` `comments` (`opt_out_comments`), and its count of `lines`.
 """
 struct Source
     path::String
     name::String
+    text::String
     tree::SYNTAX.SyntaxNode
     located::Vector{Located}
     comments::Vector{OptOutComment}
@@ -838,7 +840,7 @@ function Source(repository::Repository, path::AbstractString)::Source
     tree = SYNTAX.parseall(SYNTAX.SyntaxNode, text; filename = path)
     located = Located[]
     locate!(located, Expr(tree), 0, Symbol("<top level>"), 0)
-    return Source(path, file_key(repository, path), tree, located, opt_out_comments(path, text), countlines(IOBuffer(text)))
+    return Source(path, file_key(repository, path), text, tree, located, opt_out_comments(path, text), countlines(IOBuffer(text)))
 end
 """Functions declaring a `Union{Nothing, …}` return: a "can't compute here" answer, one site per definition."""
 function nothing_returns(source::Source)::Vector{Site}

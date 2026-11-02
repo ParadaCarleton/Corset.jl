@@ -165,7 +165,7 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
             end
         end
     end
-    comments = source_comments(context)
+    comments = context.comments
     findings = Finding[]
     for rule in runnable
         append!(

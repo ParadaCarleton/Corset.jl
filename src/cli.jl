@@ -105,7 +105,7 @@ end
 function project_root(path::AbstractString)::String
     project = Base.current_project(abspath(path))
     if isnothing(project)
-        error("no Project.toml found at or above $(abspath(path))")
+        throw(UsageError("no Project.toml found at or above $(abspath(path))"))
     end
     return dirname(project)
 end
@@ -123,9 +123,7 @@ function with_overrides(
     levels::Dict{String, Symbol} = merge(config.levels, Dict{String, Symbol}(overrides))
     unknown::Vector{String} = sort!(setdiff(collect(keys(levels)), collect(rule_name.(RULES))))
     if !isempty(unknown)
-        error(
-            "no such rule: $(join(unknown, ", ")); `corset rules` lists them",
-        )
+        throw(UsageError("no such rule: $(join(unknown, ", ")); `corset rules` lists them"))
     end
     return Config(
         config.directories,
@@ -201,9 +199,7 @@ reads_package(config::Config)::Bool = any(
 function load_package(root::AbstractString)::Module
     name::Union{String, Nothing} = get(TOML.parsefile(joinpath(root, "Project.toml")), "name", nothing)
     if isnothing(name)
-        error(
-            "$root/Project.toml names no package; run with --no-load to skip the rules that read one",
-        )
+        throw(UsageError("$root/Project.toml names no package; run with --no-load to skip the rules that read one"))
     end
     return Base.require(Main, Symbol(name))
 end
@@ -247,10 +243,10 @@ function entry_sources(entries::Union{Nothing, AbstractString})::Vector{Symbol}
     names = Symbol.(split(something(entries, "workload"), ','))
     unknown = setdiff(names, keys(ENTRY_SOURCES))
     if !isempty(unknown)
-        error("--entries names no source $(join(unknown, ", ")); the sources are $(join(keys(ENTRY_SOURCES), ", "))")
+        throw(UsageError("--entries names no source $(join(unknown, ", ")); the sources are $(join(keys(ENTRY_SOURCES), ", "))"))
     end
     if :none in names && length(names) > 1
-        error("--entries none seeds nothing; it cannot join $(join(setdiff(names, (:none,)), ", "))")
+        throw(UsageError("--entries none seeds nothing; it cannot join $(join(setdiff(names, (:none,)), ", "))"))
     end
     return unique(Symbol[source for name in names for source in ENTRY_SOURCES[name]])
 end
@@ -261,7 +257,7 @@ since those replace the sources.
 """
 function checked_entries(config::Config, entries::Union{Nothing, AbstractString})::Vector{Symbol}
     if !isnothing(config.entry_points) && !isnothing(entries)
-        error("entry_points in the configuration replaces --entries; drop one")
+        throw(UsageError("entry_points in the configuration replaces --entries; drop one"))
     end
     return entry_sources(entries)
 end
@@ -291,10 +287,10 @@ typed rules need the package), or an unknown `--entries` source throws.
 function checked_options(options::CheckOptions, config::Config)::CheckOptions
     ignored = diff_ignored(options)
     if !isempty(ignored)
-        error("--diff only prints the fixers' rewrites and ignores $(join(ignored, ", ")); drop them")
+        throw(UsageError("--diff only prints the fixers' rewrites and ignores $(join(ignored, ", ")); drop them"))
     end
     if options.no_load && !isnothing(options.entries)
-        error("--no-load skips the typed rules, which read --entries; drop one")
+        throw(UsageError("--no-load skips the typed rules, which read --entries; drop one"))
     end
     checked_entries(config, options.entries)
     return options
@@ -417,7 +413,7 @@ end
 """`corset check --diff`: print the changes `--fix` would make to `io`; the exit code is 1 when there are any."""
 function print_fix_diff(io::IO, config::Config, root::AbstractString, fix::Bool)::Int # COV_EXCL_LINE
     if fix
-        error("--diff writes nothing and --fix writes the changes; pass one")
+        throw(UsageError("--diff writes nothing and --fix writes the changes; pass one"))
     end
     changes = fix_diff(config, root)
     print(io, changes)
@@ -470,7 +466,7 @@ end
 broken_pipe(error_::Any)::Bool = error_ isa Base.IOError && error_.code == Base.UV_EPIPE
 
 """The message `corset` prints for a usage or configuration error."""
-error_message(error_::ErrorException)::String = error_.msg
+error_message(error_::Union{UsageError, Entries.SourceError})::String = error_.msg
 error_message(error_::ArgParseError)::String = error_.text
 error_message(error_::TOML.ParserError)::String = sprint(showerror, error_)
 
@@ -478,8 +474,9 @@ error_message(error_::TOML.ParserError)::String = sprint(showerror, error_)
     run_command(args, out, err)
 
 The `corset` command on the streams `out` and `err`. Returns the exit code: 0 when clean, 1 when a
-finding fails the run, 2 on a usage or configuration error, 3 when Corset itself fails (its error and
-backtrace go to `err`). An interrupt is rethrown.
+finding fails the run, 2 on a usage or configuration error (`UsageError`, `Entries.SourceError`, a bad
+argument or a malformed TOML file), 3 on any other exception, which is Corset's own failure (its error
+and backtrace go to `err`). An interrupt is rethrown.
 """
 function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Int
     try
@@ -487,7 +484,7 @@ function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::
     catch error_
         if broken_pipe(error_)
             return 0
-        elseif error_ isa Union{ErrorException, ArgParseError, TOML.ParserError}
+        elseif error_ isa Union{UsageError, Entries.SourceError, ArgParseError, TOML.ParserError}
             println(err, "corset: ", error_message(error_))
             return 2
         elseif error_ isa InterruptException

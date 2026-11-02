@@ -9,6 +9,13 @@ using ..Membership: Package, belongs, module_bindings, package_bindings
 
 export entry_signatures
 
+"""A source that cannot give signatures through no fault of this module: failing tests, or a bad `configured_signatures` file."""
+struct SourceError <: Exception
+    msg::String
+end
+
+Base.showerror(io::IO, error_::SourceError)::Nothing = print(io, error_.msg)
+
 """The sources `source_signatures` and `entry_signatures` accept."""
 const SOURCES = (:compiled, :declared, :tests)
 
@@ -89,7 +96,7 @@ function test_trace(root::AbstractString, output::IO; unset::Tuple{Vararg{String
     environment = Dict{String, String}(name => setting for (name, setting) in ENV if !(name in unset))
     command = `$(Base.julia_cmd()) --startup-file=no --project=$root -e "import Pkg; Pkg.test(; julia_args = ARGS)" -- --trace-compile=$trace`
     if !success(pipeline(setenv(ignorestatus(command), environment); stdout = output, stderr = output))
-        error("the tests at $root failed; fix them, or drop `tests` from the entry sources")
+        throw(SourceError("the tests at $root failed; fix them, or drop `tests` from the entry sources"))
     end
     return trace
 end
@@ -155,7 +162,7 @@ function configured_signatures(path::AbstractString, name::Symbol)::Vector{Type}
     Base.include(holder, path)
     signatures = Base.invokelatest(getfield(holder, name))
     if !(signatures isa AbstractVector && all(Base.Fix2(isa, Type), signatures))
-        error("$name in $path returned a $(typeof(signatures)); it must return a vector of signature types")
+        throw(SourceError("$name in $path returned a $(typeof(signatures)); it must return a vector of signature types"))
     end
     return Type[signatures...]
 end

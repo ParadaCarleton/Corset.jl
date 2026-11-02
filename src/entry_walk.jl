@@ -38,7 +38,7 @@ The method instances `ir`, an optimized method body, calls that a walk of `packa
 `target_modules` scope), and the inlined callees defined in `package`. Another module's inlined
 callee needs no frame: its own calls are already in `ir`.
 """
-function frame_callees(ir::COMPILER.IRCode, package::Package)::Vector{Core.MethodInstance} # lint: unmarked-mutation  copies callees out of `ir` and writes nothing
+function frame_callees(ir::COMPILER.IRCode, package::Package)::Vector{Core.MethodInstance}
     expressions = [statement for statement in ir.stmts.stmt if statement isa Expr]
     invoked = [invoked_instance(first(statement.args)) for statement in expressions if statement.head in (:invoke, :invoke_modify)]
     inlined = reduce(vcat, inlined_instances.(ir.debuginfo.edges); init = Core.MethodInstance[])

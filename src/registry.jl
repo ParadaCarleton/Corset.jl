@@ -7,8 +7,9 @@ using InteractiveUtils: subtypes
     Context(repository, directories, mod; inferred = Inferred[], candidates = CandidateSearch(inferred))
 
 Everything a rule reads: the repository, the source directories that exist, the loaded package, its
-inferred frames, the `CandidateSearch` the typed rules share, and the `Source` of every Julia file
-under `directories`, each parsed once here and read by every rule.
+inferred frames, the `CandidateSearch` the typed rules share, the `Source` of every Julia file
+under `directories`, each parsed once here and read by every rule, and the `# lint:` `comments` of
+those files and of the frames' files (`frame_comments`), by path.
 """
 struct Context
     repository::Repository
@@ -17,18 +18,17 @@ struct Context
     inferred::Vector{Inferred}
     candidates::CandidateSearch
     sources::Vector{Source}
+    comments::Dict{String, Vector{OptOutComment}}
 end
 
 function Context(
         repository::Repository, directories::Tuple{Vararg{AbstractString}}, mod::Union{Module, Nothing};
         inferred::AbstractVector{Inferred} = Inferred[], candidates::CandidateSearch = CandidateSearch(inferred),
     )::Context
-    return Context(repository, directories, mod, inferred, candidates, Source.((repository,), repository_sources(repository, directories)))
+    sources = Source.((repository,), repository_sources(repository, directories))
+    parsed = Dict{String, Vector{OptOutComment}}(source.path => source.comments for source in sources)
+    return Context(repository, directories, mod, inferred, candidates, sources, merge(parsed, frame_comments(repository, inferred, parsed)))
 end
-
-"""The `# lint:` comments of each file `context` parsed, by path."""
-source_comments(context::Context)::Dict{String, Vector{OptOutComment}} =
-    Dict{String, Vector{OptOutComment}}(source.path => source.comments for source in context.sources)
 
 """
 A check with a name, a group (`:default` or `:pedantic`) and a one-line summary. The subtypes say
@@ -118,7 +118,7 @@ hidden_inputs(context.repository, context.mod)
 non_public_accesses(context.mod)
 
 @rule ModuleRule "abstract-local" :default "local variables whose inferred type is abstract or a union" context ->
-abstract_locals(context.repository, context.inferred)
+abstract_locals(context.repository, context.inferred; context.comments)
 
 @rule ModuleRule "bang" :pedantic "functions that always return nothing and have no ! in the name" context ->
 unmarked_effects(context.repository, context.inferred)
@@ -127,13 +127,13 @@ unmarked_effects(context.repository, context.inferred)
 unmarked_mutations(context.repository, context.inferred; search = context.candidates)
 
 @rule ModuleRule "runtime-dispatch" :pedantic "calls left to run-time dispatch in the frames the signatures compile" context ->
-runtime_dispatches(context.repository, context.inferred)
+runtime_dispatches(context.repository, context.inferred; context.comments)
 
 @rule ModuleRule "float-widening" :pedantic "statements whose float result is wider than every float argument of their method" context ->
-float_widenings(context.repository, context.inferred; search = context.candidates)
+float_widenings(context.repository, context.inferred; search = context.candidates, context.comments)
 
 @rule ModuleRule "widened-return" :pedantic "methods whose inferred result a caller cannot compile against concretely" context ->
-widened_returns(context.repository, context.inferred)
+widened_returns(context.repository, context.inferred; context.comments)
 
 @rule ModuleRule "impure-anonymous-function" :default "anonymous functions that capture mutable state, rebind a capture, or were never compiled" context ->
 impure_anonymous_functions(context.repository, context.mod)
@@ -196,7 +196,7 @@ long_file_sites(context.repository, source)
 where_return_sites(source)
 
 @rule TreeRule "misplaced-import" :default "imports their file does not use, or that only other files use" context ->
-misplaced_imports(context.repository, context.directories)
+misplaced_imports(context.repository, context.sources)
 
 @rule TreeRule "fatou" :pedantic "findings of fatou lint (fatou on PATH)" context ->
 fatou_sites(context.repository, context.directories)

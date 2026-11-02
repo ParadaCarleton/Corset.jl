@@ -65,8 +65,8 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
         @test limited.candidate_limit == 9
         @test with_overrides(limited, false, Pair{String, Symbol}[], nothing).candidate_limit == 9
         @test with_overrides(limited, false, Pair{String, Symbol}[], 0).candidate_limit == 0
-        @test_throws ErrorException with_overrides(limited, false, Pair{String, Symbol}[], -1)
-        @test_throws ErrorException load_config(package_tree("name = \"D\"\n[preferences.Corset]\ncandidate_limit = -2\n", Pair[]))
+        @test_throws Corset.UsageError with_overrides(limited, false, Pair{String, Symbol}[], -1)
+        @test_throws Corset.UsageError load_config(package_tree("name = \"D\"\n[preferences.Corset]\ncandidate_limit = -2\n", Pair[]))
         @test Corset.command_options(Corset.parse_args(["check", "--candidate-limit", "7"], Corset.argument_settings())).candidate_limit == 7
     end
 
@@ -76,34 +76,34 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
         limited = load_config(tree)
         @test limited.file_line_limit == 40
         @test Corset.repository(limited, tree).file_line_limit == 40
-        @test_throws ErrorException load_config(package_tree("name = \"D\"\n[preferences.Corset]\nfile_line_limit = 0\n", Pair[]))
+        @test_throws Corset.UsageError load_config(package_tree("name = \"D\"\n[preferences.Corset]\nfile_line_limit = 0\n", Pair[]))
     end
 
     @testset "a typo fails loud" begin
-        @test_throws ErrorException load_config(
+        @test_throws Corset.UsageError load_config(
             package_tree(
                 "name = \"D\"\n[preferences.Corset]\npedantc = true\n",
                 Pair[],
             )
         )
-        @test_throws ErrorException load_config(
+        @test_throws Corset.UsageError load_config(
             package_tree(
                 "name = \"D\"\n[preferences.Corset.levels]\nno-such-rule = \"deny\"\n",
                 Pair[],
             )
         )
-        @test_throws ErrorException load_config(
+        @test_throws Corset.UsageError load_config(
             package_tree(
                 "name = \"D\"\n[preferences.Corset.levels]\nfloat64 = \"loud\"\n",
                 Pair[],
             )
         )
-        @test_throws ErrorException with_overrides(config, false, ["no-such-rule" => :deny], nothing)
+        @test_throws Corset.UsageError with_overrides(config, false, ["no-such-rule" => :deny], nothing)
     end
 
     @testset "a configured directory that does not exist fails loud; a missing default src does not" begin
         misspelled = package_tree("name = \"D\"\n[preferences.Corset]\ndirectories = [\"scr\"]\n", SOURCE_TREE)
-        @test_throws ErrorException load_config(misspelled)
+        @test_throws Corset.UsageError load_config(misspelled)
         redirect_stderr(devnull) do
             @test captured_main(["check", misspelled, "--no-load"])[2] == 2
         end
@@ -112,20 +112,20 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
         @test load_config(nested).directories == ("src", "ext/Foo")
     end
 
-    @test_throws ErrorException project_root(mktempdir())
+    @test_throws Corset.UsageError project_root(mktempdir())
 end
 
 @testset "corset: entry signatures for the typed rules" begin
     @test Corset.entry_sources(nothing) == [:compiled, :declared]
     @test Corset.entry_sources("workload,tests,workload") == [:compiled, :declared, :tests]
     @test isempty(Corset.entry_sources("none"))
-    @test_throws ErrorException Corset.entry_sources("nowhere")
-    @test_throws ErrorException Corset.entry_sources("none,tests")
+    @test_throws Corset.UsageError Corset.entry_sources("nowhere")
+    @test_throws Corset.UsageError Corset.entry_sources("none,tests")
     @test Corset.command_options(Corset.parse_args(["check", "--entries", "tests"], Corset.argument_settings())).entries == "tests"
 
     @test Corset.entry_point("test/entries.jl:signatures") == ("test/entries.jl" => :signatures)
-    @test_throws ErrorException Corset.entry_point("entries.jl")
-    @test_throws ErrorException Corset.entry_point("entries.jl:")
+    @test_throws Corset.UsageError Corset.entry_point("entries.jl")
+    @test_throws Corset.UsageError Corset.entry_point("entries.jl:")
 
     mod = Corset.WorkloadPackage
     mod.bump(1)
@@ -149,7 +149,7 @@ end
     config = load_config(configured)
     @test config.entry_points == ("entries.jl" => :signatures)
     @test Corset.seed_sources(config, configured, nothing, mod, devnull) == ["entry_points" => Type[Tuple{typeof(identity), Symbol}]]
-    @test_throws ErrorException Corset.seed_sources(config, configured, "workload", mod, devnull)
+    @test_throws Corset.UsageError Corset.seed_sources(config, configured, "workload", mod, devnull)
 end
 
 @testset "corset: every rule has a unique name and a known group" begin
@@ -265,18 +265,11 @@ end
     end
 
     @testset "module rules run on a loaded package" begin
-        # Corset's baseline allows the workload's finding; check without it.
-        config = with_overrides(load_config(pkgdir(Corset)), false, ["hidden-input" => :deny], nothing)
-        unbaselined = Corset.Config(
-            config.directories, nothing, config.one_letter_exempt, config.skipped_directories, config.pedantic,
-            config.levels, config.candidate_limit, config.entry_points, config.file_line_limit,
-        )
-        findings, skipped = run_rules(
-            unbaselined,
-            pkgdir(Corset);
-            mod = Corset.WorkloadPackage,
-            frames = entry_frames(concrete_signatures(Corset.WorkloadPackage), Corset.WorkloadPackage),
-        )
+        root = package_tree("name = \"Counted\"\n", ["src/Counted.jl" => "module Counted\ncounter = 0\nbump(x::Int) = x + counter\nend\n"])
+        holder = Module(:Holder)
+        Base.include(holder, joinpath(root, "src", "Counted.jl"))
+        config = with_overrides(load_config(root), false, ["hidden-input" => :deny], nothing)
+        findings, skipped = run_rules(config, root; mod = holder.Counted, frames = entry_frames(concrete_signatures(holder.Counted), holder.Counted))
         @test ("hidden-input", :deny) in
             [(finding.rule, finding.level) for finding in findings]
         @test isempty(skipped)
@@ -331,8 +324,8 @@ end
         end
     end
     configured = package_tree("name = \"Demo\"\n[preferences.Corset]\nentry_points = \"entries.jl:signatures\"\n", SOURCE_TREE)
-    @test_throws ErrorException Corset.checked_options(Corset.command_options(Corset.parse_args(["check", "--entries", "workload"], Corset.argument_settings())), load_config(configured))
-    @test_throws ErrorException Corset.load_package(
+    @test_throws Corset.UsageError Corset.checked_options(Corset.command_options(Corset.parse_args(["check", "--entries", "workload"], Corset.argument_settings())), load_config(configured))
+    @test_throws Corset.UsageError Corset.load_package(
         package_tree(
             "version = \"1\"\n",
             Pair[],
@@ -368,7 +361,7 @@ end
 end
 
 @testset "corset: JET sites need the caller's JET" begin
-    @test_throws ErrorException Corset.loaded_jet(Dict{Base.PkgId, Module}())
+    @test_throws Corset.UsageError Corset.loaded_jet(Dict{Base.PkgId, Module}())
     @test Corset.loaded_jet() isa Module
 end
 
@@ -384,6 +377,12 @@ Base.write(stream::FailingStream, ::String)::Nothing = throw(stream.failure)
     report = IOBuffer()
     @test Corset.run_command(["rules", root], FailingStream(DomainError(1)), report) == 3
     @test startswith(String(take!(report)), "corset: internal error: DomainError")
+    @test Corset.run_command(["rules", root], FailingStream(ErrorException("bug")), report) == 3
+    @test startswith(String(take!(report)), "corset: internal error: bug")
+    @test Corset.run_command(["rules", root], FailingStream(Corset.UsageError("misuse")), report) == 2
+    @test String(take!(report)) == "corset: misuse\n"
+    @test Corset.run_command(["rules", root], FailingStream(Corset.Entries.SourceError("no tests")), report) == 2
+    @test String(take!(report)) == "corset: no tests\n"
     @test_throws InterruptException Corset.run_command(["rules", root], FailingStream(InterruptException()), devnull)
 end
 

@@ -1,5 +1,4 @@
 [abstract-field]
-Holder = 1
 
 [abstract-local]
 "src/candidates.jl call_candidates" = 1
@@ -55,7 +54,6 @@ Holder = 1
 [float64]
 
 [hidden-input]
-COUNTER = 1
 
 [impure-anonymous-function]
 "src/entries.jl compiled_signatures" = 1
@@ -189,7 +187,7 @@ widening_detail = 1
 "src/check.jl module_rule_names" = 1
 "src/cli.jl CheckOptions" = 1
 "src/cli.jl command_options" = 3
-"src/cli.jl error_message" = 2
+"src/cli.jl error_message" = 1
 "src/cli.jl level_overrides" = 1
 "src/cli.jl load_package" = 1
 "src/cli.jl main" = 1
@@ -217,7 +215,7 @@ widening_detail = 1
 "src/float_widening.jl wider" = 1
 "src/float_widening.jl widest" = 1
 "src/imports.jl import_file" = 1
-"src/imports.jl include_paths" = 1
+"src/imports.jl include_path" = 1
 "src/membership.jl child_modules" = 1
 "src/membership.jl module_bindings" = 1
 "src/membership.jl package_bindings" = 1
@@ -228,7 +226,7 @@ widening_detail = 1
 "src/non_public_access.jl non_public_accesses" = 1
 "src/non_public_access.jl qualified_uses" = 3
 "src/ratchet.jl repository_sources" = 1
-"src/registry.jl check" = 3
+"src/registry.jl check" = 2
 "src/rules.jl abstract_fields" = 1
 "src/rules.jl abstract_local_sites" = 3
 "src/rules.jl callee_name" = 2
@@ -264,66 +262,41 @@ widening_detail = 1
 
 [unmarked-mutation]
 "src/check.jl fix_diff" = 1
-"src/cli.jl error_message" = 2
+"src/cli.jl error_message" = 1
 "src/cli.jl main" = 1
-"src/cli.jl run_command" = 1
-"src/cli.jl seed_summary" = 1
-"src/cli.jl seeded_frames" = 1
-"src/dispatch.jl dispatch_sites" = 1
-"src/entry_walk.jl entry_frames" = 1
 "src/entry_walk.jl followed" = 1
 "src/float_widening.jl callee_label" = 1
 "src/float_widening.jl carries_floats" = 1
 "src/float_widening.jl dispatch_widening" = 1
-"src/float_widening.jl float_budget" = 1
 "src/float_widening.jl frame_widenings" = 1
 "src/float_widening.jl returned_operands" = 1
-"src/float_widening.jl statement_operands" = 2
-"src/imports.jl addition_edit" = 1
+"src/float_widening.jl statement_operands" = 1
 "src/imports.jl import_statement" = 1
-"src/imports.jl move_targets" = 1
-"src/imports.jl single_unit" = 1
 "src/mutation.jl declared_io" = 1
 "src/mutation.jl mutation_sites" = 1
-"src/mutation.jl reached_writers" = 1
 "src/mutation.jl view_sources" = 1
-"src/mutation.jl writer_note" = 1
-"src/ratchet.jl logged_over" = 1
 "src/registry.jl check" = 1
-"src/registry.jl struct_sites" = 1
 "src/rules.jl abstract_local_sites" = 1
 "src/rules.jl annotated_arguments" = 1
 "src/rules.jl callee_name" = 2
 "src/rules.jl calls_argument" = 1
 "src/rules.jl caught_slots" = 1
-"src/rules.jl closure_namers" = 1
 "src/rules.jl closure_site" = 1
-"src/rules.jl concrete_arguments" = 1
 "src/rules.jl created_closures" = 1
 "src/rules.jl defined_name" = 1
 "src/rules.jl definition_line" = 1
 "src/rules.jl definition_lines" = 1
 "src/rules.jl function_owner" = 1
 "src/rules.jl instance_callees" = 1
-"src/rules.jl is_concrete_container" = 1
-"src/rules.jl is_range_guard" = 1
 "src/rules.jl is_unmarked_method" = 1
-"src/rules.jl kind_detail" = 1
-"src/rules.jl lacks_annotation" = 1
 "src/rules.jl live_closures" = 1
 "src/rules.jl lowered" = 1
-"src/rules.jl mentions_nothing" = 1
 "src/rules.jl method_hidden_inputs" = 1
 "src/rules.jl method_namings" = 1
 "src/rules.jl name_sites" = 1
-"src/rules.jl named_closures" = 1
-"src/rules.jl names_concrete_type" = 1
-"src/rules.jl one_letter_names" = 1
 "src/rules.jl one_letter_sites" = 1
 "src/rules.jl range_guards" = 1
 "src/rules.jl returns_argument_call" = 1
-"src/rules.jl unmarked_effects" = 1
-"src/rules.jl where_variables" = 1
 
 [unstable-anonymous-function]
 

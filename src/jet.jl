@@ -10,7 +10,7 @@ const JET_ID = Base.PkgId(Base.UUID("c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"), "JE
 function loaded_jet(modules::AbstractDict{Base.PkgId, Module} = Base.loaded_modules)::Module
     jet::Union{Nothing, Module} = get(modules, JET_ID, nothing)
     if isnothing(jet)
-        error("`@call_sites` and `@opt_sites` use the caller's JET: add `using JET` before them")
+        throw(UsageError("`@call_sites` and `@opt_sites` use the caller's JET: add `using JET` before them"))
     end
     return jet
 end

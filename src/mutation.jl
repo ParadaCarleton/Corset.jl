@@ -16,6 +16,9 @@ const MEMORY_VIEWS = (Core.memoryrefnew, Core.memoryrefget)
 # Builtins that call a generic function chosen at run time.
 const CALLING_BUILTINS = (Core._apply_iterate, Core.invoke)
 
+# C functions whose writes are known: the argument positions each may write. Its other arguments are read.
+const FOREIGN_WRITES = (; jl_genericmemory_copyto = (1,))
+
 """The escape analysis of `ir`, a method body of `nargs` arguments, in the current world."""
 function escape_state(ir::COMPILER.IRCode, nargs::Integer)::ESCAPE.EscapeState
     interpreter = COMPILER.NativeInterpreter()
@@ -182,7 +185,8 @@ function statement_writes(
     if statement.head === :invoke
         return invoked_writes(statement, estate, walk, stack, search)
     elseif statement.head === :foreigncall
-        return ArgumentWrites(Int[], Int[], writable_operands(statement.args[6:(5 + length(statement.args[3]))], ir, estate))
+        operands = statement.args[6:(5 + length(statement.args[3]))]
+        return ArgumentWrites(Int[], Int[], writable_operands(operands[foreign_positions(first(statement.args), length(operands))], ir, estate))
     elseif statement.head !== :call
         return NO_WRITES
     end
@@ -194,6 +198,29 @@ function statement_writes(
     end
     return NO_WRITES
 end
+
+"""
+The positions, among `count` arguments, that a `:foreigncall` of the C function `name` (`(:f,)` or
+`(:f, lib)`, its symbol quoted) may write: those `FOREIGN_WRITES` lists for its function, which reads
+the rest; every position for any other function or a function pointer.
+"""
+function foreign_positions(name::Expr, count::Integer)::Vector{Int}
+    if name.head !== :tuple
+        return foreign_positions(nothing, count)
+    end
+    return foreign_positions(first(name.args), count)
+end
+
+foreign_positions(name::QuoteNode, count::Integer)::Vector{Int} = foreign_positions(name.value, count)
+
+function foreign_positions(name::Symbol, count::Integer)::Vector{Int}
+    if !(name in keys(FOREIGN_WRITES))
+        return foreign_positions(nothing, count)
+    end
+    return collect(Int, getfield(FOREIGN_WRITES, name))
+end
+
+foreign_positions(::Any, count::Integer)::Vector{Int} = collect(1:count)
 
 """
 The `ArgumentWrites` of runtime-dispatch `statement`, read from its `call_candidates`. An operand a

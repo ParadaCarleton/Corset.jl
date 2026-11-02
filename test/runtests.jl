@@ -133,6 +133,7 @@ end
 
     @testset "a `-begin` with no `-end` below it throws, naming its file and line" begin
         root = write_tree(mktempdir(), ["open.jl" => "x = 1\n# lint: rule-begin\ny = 2\n# lint: other-end\n"])
+        @test_throws Corset.UsageError offenders!(Repository(root), "rule", [Site("x", joinpath(root, "open.jl"), 3, "")])
         @test_throws r"open\.jl:2: `# lint: rule-begin` has no `# lint: rule-end`" offenders!(Repository(root), "rule", [Site("x", joinpath(root, "open.jl"), 3, "")])
     end
 
@@ -170,16 +171,29 @@ end
     end
 
     @testset "a Context parses each file once: its rules and opt-outs read no file after" begin
-        text = "struct Point # lint: rule\n    x::Float64\nend\nf(x) = x\n"
+        text = "struct Point # lint: rule\n    x::Float64\nend\nf(x) = x\nusing A: B\n"
         root = write_tree(mktempdir(), ["src/point.jl" => text])
         context = Corset.Context(Repository(root), ("src",), nothing)
         rm(joinpath(root, "src"); recursive = true)
         source = only(context.sources)
         file_rules = [rule for rule in Corset.RULES if rule isa Corset.FileRule]
         @test sum(length(Corset.check(rule, context, source)) for rule in file_rules) > 0
+        misplaced = only(rule for rule in Corset.RULES if Corset.rule_name(rule) == "misplaced-import")
+        @test site_keys(Corset.check(misplaced, context)) == ["src/point.jl B"]
         @test Corset.declared(context) == [Corset.StructDeclaration(:Point, source.path, 1)]
         sites = [Site("Point", source.path, 1, ""), Site("f", source.path, 4, "")]
-        @test first(Corset.unopted(sites, "rule", Corset.source_comments(context))) == [last(sites)]
+        @test first(Corset.unopted(sites, "rule", context.comments)) == [last(sites)]
+    end
+
+    @testset "a Context reads the opt-outs of its frames' files once, for every typed rule" begin
+        root = write_tree(mktempdir(), ["opted.jl" => "opted(items) = first(items) + 1 # lint: runtime-dispatch\n"])
+        opted = Module(:Opted)
+        Base.include(opted, joinpath(root, "opted.jl"))
+        inferred = entry_frames(Type[Tuple{typeof(opted.opted), Array{Any, 1}}], opted)
+        context = Corset.Context(Repository(root), (), nothing; inferred)
+        rm(joinpath(root, "opted.jl"))
+        @test isempty(runtime_dispatches(context.repository, inferred; context.comments))
+        @test !isempty(runtime_dispatches(context.repository, inferred))
     end
 
     @testset "a note outlives its last site: the run logs it stale and keeps it; a count falls to none" begin
@@ -220,6 +234,24 @@ end
         offending = @test_logs (:info, r"1 site\(s\) opted out") (:error, r"Base\.JuliaSyntax = 1 ") offenders!(Repository(dirname(path)), "non-public-access", sites)
         @test offending == ["Base.JuliaSyntax", "Base.uniontypes"]
         @test "Base.JuliaSyntax" in site_keys(non_public_accesses(Corset))
+    end
+
+    @testset "non-public-access: a module whose submodule is in another file reads the file of its `module` block" begin
+        tree = write_tree(
+            mktempdir(), [
+                "outer.jl" => "module Outer\ninclude(\"inner.jl\")\nouter() = Base.uniontypes(Int)\nend\n",
+                "inner.jl" => "module Inner\ninner() = Base.uniontypes(Int)\nend\n",
+                "split.jl" => "Base.include(@__MODULE__, \"part.jl\")\nwhole() = 1\n", "part.jl" => "part() = 1\n",
+            ]
+        )
+        holder = Module(:Holder)
+        Base.include(holder, joinpath(tree, "outer.jl"))
+        @test Corset.entry_file(holder.Outer) == joinpath(tree, "outer.jl")
+        @test Corset.entry_file(holder.Outer.Inner) == joinpath(tree, "inner.jl")
+        @test [(basename(site.file), site.line) for site in non_public_accesses(holder.Outer)] == [("outer.jl", 3), ("inner.jl", 2)]
+        split = Module(:Split)
+        Base.include(split, joinpath(tree, "split.jl"))
+        @test_throws Corset.UsageError Corset.entry_file(split)
     end
 
     @testset "abstract-local: a local variable that infers no concrete type" begin
@@ -399,7 +431,7 @@ end
         @test Corset.long_file_sites(Repository(dirname(path); file_line_limit = 3), parsed(path)) == Site[]
         @test Corset.long_file_sites(Repository(dirname(path); file_line_limit = 2), parsed(path)) ==
             [Site("three.jl", path, 0, "3 lines, over 2")]
-        @test_throws ErrorException Repository(dirname(path); file_line_limit = 0)
+        @test_throws Corset.UsageError Repository(dirname(path); file_line_limit = 0)
     end
 
     @testset "fatou: findings of the real `fatou lint` (from mise.toml)" begin
@@ -411,7 +443,7 @@ end
         path = ENV["PATH"]
         try
             ENV["PATH"] = mktempdir()
-            @test_throws ErrorException fatou_sites(Repository(tree), ("src",))
+            @test_throws Corset.UsageError fatou_sites(Repository(tree), ("src",))
         finally
             ENV["PATH"] = path
         end
@@ -433,7 +465,7 @@ end
                 ENV["PATH"] = "$broken:$path"
                 @test_throws ErrorException jscpd_sites(Repository(tree), (".",))
                 ENV["PATH"] = mktempdir()
-                @test_throws ErrorException jscpd_sites(Repository(tree), (".",))
+                @test_throws Corset.UsageError jscpd_sites(Repository(tree), (".",))
             finally
                 ENV["PATH"] = path
             end
@@ -615,6 +647,17 @@ end
         documented = "\"\"\"Doc.\"\"\"\nbaremodule Sub\nusing B: b\ng() = a + b\nend\n"
         result = placed(["main.jl" => "module M\nusing A: a\ninclude(\"sub.jl\")\nend\n", "sub.jl" => documented])
         @test result == Dict("main.jl" => "module M\ninclude(\"sub.jl\")\nend\n", "sub.jl" => documented)
+    end
+    @testset "a file included inside a `module` block takes only that block's imports" begin
+        child = "g() = a\n"
+        result = placed(["main.jl" => "using A: a\nmodule Inner\ninclude(\"child.jl\")\nend\nf() = 1\n", "child.jl" => child])
+        @test result == Dict("main.jl" => "module Inner\ninclude(\"child.jl\")\nend\nf() = 1\n", "child.jl" => child)
+        nested = placed(["main.jl" => "module M\nusing A: a\ninclude(\"top.jl\")\nend\n", "top.jl" => "module N\ninclude(\"deep.jl\")\nend\n", "deep.jl" => child])
+        @test nested["deep.jl"] == child
+        siblings = placed(["main.jl" => "module M\ninclude(\"x.jl\")\ninclude(\"y.jl\")\nend\n", "x.jl" => "using A: a\n", "y.jl" => child])
+        @test siblings == Dict("main.jl" => "module M\ninclude(\"x.jl\")\ninclude(\"y.jl\")\nend\n", "x.jl" => "", "y.jl" => "using A: a\n$child")
+        twice = ["main.jl" => "include(\"c.jl\")\nmodule M\ninclude(\"c.jl\")\nend\n", "c.jl" => "using A: a\n"]
+        @test isempty(misplaced_imports(Repository(write_tree(mktempdir(), twice)), (".",)))
     end
     @testset "a moved import lands after the file's last top-level import, outside its module blocks" begin
         inner = "module Inner\nusing B: b\nh() = b\nend\n"
@@ -916,6 +959,8 @@ end
         Tuple{typeof(length), Mutation.Box}, Tuple{typeof(iterate), Mutation.Box}, Tuple{typeof(show), IOBuffer, Mutation.Box},
         Tuple{typeof(Mutation.guarded), ReentrantLock}, Tuple{typeof(Mutation.zero_first), vector},
         Tuple{typeof(Mutation.negated), Mutation.Box}, Tuple{typeof(Mutation.last_zeroed), vector, vector},
+        Tuple{typeof(Mutation.viapointer), vector}, Tuple{typeof(Mutation.copied), Vector{String}},
+        Tuple{typeof(Mutation.joined), Vector{String}, Vector{String}}, Tuple{typeof(Mutation.copied_into), Vector{String}, Vector{String}},
     ]
     inferred = entry_frames(seeds, Mutation)
     sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred)
@@ -975,6 +1020,12 @@ end
     @testset "an argument passed to a runtime dispatch or a ccall may be written, never clean" begin
         @test details["opaquecall"] == "argument `x` reaches a runtime dispatch (`runtime-dispatch`) and may be written"
         @test details["viaccall"] == "argument `x` reaches a `ccall` and may be written"
+        @test details["viapointer"] == "argument `x` reaches a `ccall` and may be written"
+    end
+    @testset "jl_genericmemory_copyto may write its destination and reads its source" begin
+        @test !haskey(details, "copied") && !haskey(details, "joined")
+        @test details["copied_into"] == "argument `names` reaches a `ccall` and may be written"
+        @test Corset.foreign_positions(Expr(:call, :pointer), 2) == [1, 2]
     end
     @testset "Base.sort and Base.replace copy before they write" begin
         for signature in (Tuple{typeof(sort), vector}, Tuple{typeof(replace), vector, Pair{Int, Int}})

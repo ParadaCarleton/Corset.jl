@@ -182,7 +182,18 @@ end
         @test site_keys(Corset.check(misplaced, context)) == ["src/point.jl B"]
         @test Corset.declared(context) == [Corset.StructDeclaration(:Point, source.path, 1)]
         sites = [Site("Point", source.path, 1, ""), Site("f", source.path, 4, "")]
-        @test first(Corset.unopted(sites, "rule", Corset.source_comments(context))) == [last(sites)]
+        @test first(Corset.unopted(sites, "rule", context.comments)) == [last(sites)]
+    end
+
+    @testset "a Context reads the opt-outs of its frames' files once, for every typed rule" begin
+        root = write_tree(mktempdir(), ["opted.jl" => "opted(items) = first(items) + 1 # lint: runtime-dispatch\n"])
+        opted = Module(:Opted)
+        Base.include(opted, joinpath(root, "opted.jl"))
+        inferred = entry_frames(Type[Tuple{typeof(opted.opted), Array{Any, 1}}], opted)
+        context = Corset.Context(Repository(root), (), nothing; inferred)
+        rm(joinpath(root, "opted.jl"))
+        @test isempty(runtime_dispatches(context.repository, inferred; context.comments))
+        @test !isempty(runtime_dispatches(context.repository, inferred))
     end
 
     @testset "a note outlives its last site: the run logs it stale and keeps it; a count falls to none" begin

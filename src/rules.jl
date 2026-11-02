@@ -345,13 +345,14 @@ place_site(details::AbstractDict{Tuple{String, String, Int, Int}, String}, place
 Each named local variable (not an argument) of `repository`'s own methods whose inferred type is
 `abstract_local_type`, one site per variable however many specializations ran. A method a macro generated in another package's file
 (`@concrete`'s constructors) and a compiler's unnamed slot are not the repository's variables. An opt-out
-on a method's first line covers all its locals (`audited_frames`).
+on a method's first line covers all its locals (`audited_frames`, under `comments`).
 """
 function abstract_locals(
         repository::Repository,
-        inferred::AbstractVector{Inferred},
+        inferred::AbstractVector{Inferred};
+        comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
     )::Vector{Site}
-    return one_per_line(reduce(vcat, abstract_local_sites.((repository,), audited_frames(repository, inferred, "abstract-local")); init = Site[]))
+    return one_per_line(reduce(vcat, abstract_local_sites.((repository,), audited_frames(repository, inferred, "abstract-local", comments)); init = Site[]))
 end
 
 """The `abstract_locals` sites of `item`, one per abstract named local."""

@@ -59,7 +59,8 @@ function entry_file(mod::Module)::String
         return block_file
     end
     methods_ = defined_methods(Package(mod))
-    files = filter(isfile, unique(string.(getfield.(methods_[getfield.(methods_, :module) .=== (mod,)], :file))))
+    own = methods_[parentmodule.(methods_) .=== (mod,)]
+    files = filter(isfile, unique(String[string(method.file) for method in own]))
     if length(files) != 1
         throw(UsageError("the methods of $mod are in $(length(files)) files ($(join(files, ", "))); pass the file that defines it"))
     end

@@ -106,16 +106,16 @@ end
     fix_where_returns!(repository, directories)
 
 Rewrite the Julia files of `directories` with `fix_where_returns`. Returns the sites it fixed: those
-no `# lint: where-return` comment opts out.
+no `# lint: where-return` comment opts out. Every text is computed before any file is written, and
+`write_all!` stages the writes, so a failure leaves every file as it was.
 """
 function fix_where_returns!(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site}
-    sites = Site[]
-    for path in repository_sources(repository, directories)
-        found, _ = unopted(where_return_sites(Source(repository, path)), WHERE_RETURN_RULE)
-        if !isempty(found)
-            write(path, fix_where_returns(path))
-            append!(sites, found)
-        end
-    end
+    sites = reduce(vcat, unopted_where_returns.((repository,), repository_sources(repository, directories)); init = Site[])
+    fixed = unique(String[site.file for site in sites])
+    write_all!(fixed, fix_where_returns.(fixed))
     return sites
 end
+
+"""The `where_return_sites` of the file `path` of `repository` that no `# lint: where-return` comment opts out."""
+unopted_where_returns(repository::Repository, path::AbstractString)::Vector{Site} =
+    first(unopted(where_return_sites(Source(repository, path)), WHERE_RETURN_RULE))

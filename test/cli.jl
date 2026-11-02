@@ -305,6 +305,7 @@ end
     @test exit_code(Finding[], true) == 0
 
     @test occursin("where-return", sprint(print_rules, load_config(root)))
+    @test occursin("silent-existence-filter deny", sprint(print_rules, load_config(root)))
 end
 
 @testset "corset: the command" begin

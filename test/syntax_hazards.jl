@@ -33,3 +33,9 @@ end
     @test sites[end - 1].detail == "scans `holder.items` once per element of `holder.items`; group it once (a Dict, or sort and searchsorted)"
     @test Corset.level(Corset.load_config(mktempdir()), Corset.QuadraticScanRule()) === :warn
 end
+
+@testset "non-atomic-write: several files written in turn, unstaged" begin
+    @test kept_lines(Corset.non_atomic_writes, "non-atomic-write") == [2:2, 7:7, 8:8, 10:10, 17:17, 18:18]
+    @test length(found_in(Corset.non_atomic_writes, "non-atomic-write")) == 7
+    @test Corset.level(Corset.load_config(mktempdir()), Corset.NonAtomicWriteRule()) === :warn
+end

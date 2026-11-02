@@ -256,3 +256,90 @@ scan that same collection per element (`count`, `filter`, `findfirst`, `in`, …
 length. Keyed by file and the function they sit in.
 """
 quadratic_scans(source::Source)::Vector{Site} = reduce(vcat, scan_sites.((source,), source.located); init = Site[])
+
+"""The `open` modes that write to the file."""
+const WRITE_MODES = ("w", "a", "w+", "a+", "r+")
+
+"""The `open` keywords that write to the file when `true`."""
+const WRITE_KEYWORDS = (:write, :append, :truncate)
+
+"""Every name in parsed expression `node`."""
+mentioned(node::Symbol)::Vector{Symbol} = [node]
+mentioned(node::Expr)::Vector{Symbol} = reduce(vcat, mentioned.(node.args); init = Symbol[]) # lint: runtime-dispatch  Expr nodes hold untyped arguments
+mentioned(::Any)::Vector{Symbol} = Symbol[]
+
+"""The names the iteration `headers` bind per element: `x` in `x in xs`, `index` and `item` in `(index, item) in enumerate(xs)`."""
+header_variables(headers::AbstractVector)::Vector{Symbol} = # lint: runtime-dispatch  Expr nodes hold untyped arguments
+    reduce(vcat, [mentioned(first(spec.args)) for spec in reduce(vcat, iteration_specs.(headers); init = Expr[])]; init = Symbol[])
+
+"""The names an element loop `node` (as `element_loop` reads it) binds per element: its iteration variables, or its anonymous function's arguments."""
+function loop_variables(node::Expr)::Vector{Symbol} # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+    if node.head === :for
+        return header_variables(node.args[1:1])
+    end
+    if node.head === :generator
+        return header_variables(node.args[2:end])
+    end
+    if node.head === :do
+        return mentioned(first(node.args[2].args))
+    end
+    if is_broadcast(node)
+        return mentioned(first(first(node.args).args))
+    end
+    return mentioned(first(first(call_arguments(node)).args))
+end
+
+"""Whether `open` call `node` opens its file to write: a mode `"w"`, `"a"`, `"w+"`, `"a+"` or `"r+"`, or `write`, `append` or `truncate` set to `true`."""
+function opens_to_write(node::Expr)::Bool # lint: abstract-local # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+    keywords = reduce(vcat, [argument.args for argument in node.args if Meta.isexpr(argument, :parameters)]; init = node.args[1:0])
+    return any(in(WRITE_MODES), filter(Base.Fix2(isa, String), call_arguments(node))) ||
+        any(keyword -> Meta.isexpr(keyword, :kw) && first(keyword.args) in WRITE_KEYWORDS && last(keyword.args) === true, keywords)
+end
+
+"""Whether parsed expression `node` writes a file whose path mentions one of `variables`: `write(path, text)`, or `open(path, "w")`."""
+function writes_per_element(variables::AbstractVector{Symbol}, node::Expr)::Bool # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+    if node.head !== :call || isempty(call_arguments(node))
+        return false
+    end
+    if callee(node) === :write
+        return !isdisjoint(mentioned(first(call_arguments(node))), variables)
+    end
+    return callee(node) === :open && opens_to_write(node) &&
+        !isdisjoint(reduce(vcat, mentioned.(call_arguments(node)); init = Symbol[]), variables)
+end
+
+"""
+Whether parsed expression `node` writes several files one after another: `write.(paths, texts)`,
+`foreach(write, paths, texts)`, or a loop whose body writes or opens to write a path built from its
+iteration variable.
+"""
+function writes_in_turn(node::Expr)::Bool # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+    if is_broadcast(node) && callee(node) === :write
+        return true
+    end
+    if node.head === :call && callee(node) in (:foreach, :map) && get(call_arguments(node), 1, nothing) === :write
+        return true
+    end
+    body = last(element_loop(node))
+    return !isempty(body) && any(Base.Fix1(writes_per_element, loop_variables(node)), body)
+end
+
+"""The lines of the functions among `located` that stage their writes: they call `mv` or `rename`, so each write can go to a temporary file first."""
+staging_functions(located::AbstractVector{Located})::Vector{Int} =
+    unique([item.enclosing_line for item in located if callee(item.node) in (:mv, :rename)])
+
+"""Whether `item` writes several files in turn inside a function whose line is none of `staged` (`staging_functions`)."""
+writes_unstaged(staged::AbstractVector{Int}, item::Located)::Bool = writes_in_turn(item.node) && !(item.enclosing_line in staged)
+
+"""
+Writes of several files one after another, keyed by file and the function they sit in: a failure
+halfway leaves some files rewritten and the rest not. A function that calls `mv` or `rename` stages
+its writes and passes: compute every text, write each to a temporary file, then rename them all.
+"""
+function non_atomic_writes(source::Source)::Vector{Site}
+    (; path, name, located) = source
+    return [
+        Site("$name $(item.enclosing)", path, item.line, "writes several files in turn; write temporary files, then rename them all")
+            for item in filter(Base.Fix1(writes_unstaged, staging_functions(located)), located)
+    ]
+end

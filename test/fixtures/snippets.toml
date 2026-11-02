@@ -264,3 +264,40 @@ plain(items::Vector{Int})::Vector{Int} = map(abs, items)
 kept(items::Vector{Int}; limit::Int)::Vector{Int} = filter(<(limit), items)
 opted(items::Vector{Int})::Vector{Bool} = [item in items for item in items] # lint: quadratic-scan  items holds at most three
 '''
+
+[non-atomic-write]
+source = '''
+function looped(paths::Vector{String}, texts::Vector{String})::Nothing
+    for (path, text) in zip(paths, texts)
+        write(path, text)
+    end
+    return nothing
+end
+broadcast(paths::Vector{String}, texts::Vector{String})::Nothing = (write.(paths, texts); nothing)
+each(paths::Vector{String}, texts::Vector{String})::Nothing = foreach(write, paths, texts)
+function opened(names::Vector{String})::Nothing
+    for name in names
+        open(joinpath("out", name), "w") do io
+            println(io, name)
+        end
+    end
+    return nothing
+end
+appended(names::Vector{String})::Vector{Int} = [open(io -> write(io, name), name; append = true) for name in names]
+mapped(names::Vector{String})::Vector{Int} = map(name -> write("$name.txt", name), names)
+function streamed(io::IO, names::Vector{String})::Nothing
+    for name in names
+        write(io, name)
+    end
+    return nothing
+end
+read_each(names::Vector{String})::Vector{String} = [read(open(name, "r"), String) for name in names]
+function staged(paths::Vector{String}, texts::Vector{String})::Nothing
+    temporary = string.(paths, ".tmp")
+    write.(temporary, texts)
+    mv.(temporary, paths; force = true)
+    return nothing
+end
+single(path::String, text::String)::Int = write(path, text)
+opted(paths::Vector{String}, texts::Vector{String})::Nothing = (write.(paths, texts); nothing) # lint: non-atomic-write  scratch files
+'''

@@ -996,6 +996,10 @@ end
         Tuple{typeof(Mutation.viapointer), vector}, Tuple{typeof(Mutation.copied), Vector{String}},
         Tuple{typeof(Mutation.joined), Vector{String}, Vector{String}}, Tuple{typeof(Mutation.copied_into), Vector{String}, Vector{String}},
         Tuple{typeof(Mutation.missing_paths), String, Vector{String}},
+        Tuple{typeof(Mutation.zero_filled), Vector{UInt8}}, Tuple{typeof(Mutation.stored), Vector{UInt8}},
+        Tuple{typeof(Mutation.stepped), Vector{UInt8}, Int}, Tuple{typeof(Mutation.stored_through), Vector{UInt8}},
+        Tuple{typeof(Mutation.string_cleared), String}, Tuple{typeof(Mutation.measured), Vector{UInt8}},
+        Tuple{typeof(Mutation.passed_pointer), Ptr{UInt8}},
     ]
     inferred = entry_frames(seeds, Mutation)
     sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred)
@@ -1061,6 +1065,22 @@ end
         @test !haskey(details, "copied") && !haskey(details, "joined")
         @test details["copied_into"] == "argument `names` reaches a `ccall` and may be written"
         @test Corset.foreign_positions(Expr(:call, :pointer), 2) == [1, 2]
+    end
+    @testset "a C call or unsafe_store! through a pointer into an argument writes it" begin
+        @test details["zero_filled"] == "argument `buffer` reaches a `ccall` and may be written"
+        for name in ("stored", "stepped", "stored_through")
+            @test details[name] == "writes argument `buffer` but its name has no `!`"
+        end
+    end
+    @testset "strlen reads its pointer; a String and a passed Ptr are no argument memory" begin
+        for name in ("measured", "string_cleared", "passed_pointer")
+            @test !haskey(details, name)
+        end
+        @test Corset.traced_operands(Core.PiNode(Core.SSAValue(1), Ptr{UInt8})) == [Core.SSAValue(1)]
+        edges = collect(Any, (Core.SSAValue(1), Core.SSAValue(2)))
+        @test Corset.traced_operands(Core.PhiNode(Int32[1, 2], edges)) == edges
+        @test isempty(Corset.traced_operands(Core.PhiNode(Int32[1, 2], similar(edges))))
+        @test isempty(Corset.traced_operands(GlobalRef(Base, :nothing)))
     end
     @testset "a logical-mask copy of the paths isdir reads writes none of them" begin
         @test !haskey(details, "missing_paths")

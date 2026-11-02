@@ -818,6 +818,8 @@ end
         countdown = only(item for item in inferred if item.method.name === :countdown)
         @test Corset.argument_writes(countdown, walk, (countdown.code.parent,), search).cut
         @test !haskey(walk.summaries, (countdown.code.parent, search.limit))
+        estate = Corset.escape_state(far.ir, far.method.nargs)
+        @test Corset.invoked_writes(Expr(:invoke, "no instance", identity), estate, walk, (), search) === Corset.NO_WRITES
     end
     @testset "Base.:! is no `!` name; a varargs callee writes every operand it gathers" begin
         @test !haskey(details, "negated")

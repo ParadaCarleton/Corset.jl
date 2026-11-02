@@ -171,13 +171,15 @@ end
     end
 
     @testset "a Context parses each file once: its rules and opt-outs read no file after" begin
-        text = "struct Point # lint: rule\n    x::Float64\nend\nf(x) = x\n"
+        text = "struct Point # lint: rule\n    x::Float64\nend\nf(x) = x\nusing A: B\n"
         root = write_tree(mktempdir(), ["src/point.jl" => text])
         context = Corset.Context(Repository(root), ("src",), nothing)
         rm(joinpath(root, "src"); recursive = true)
         source = only(context.sources)
         file_rules = [rule for rule in Corset.RULES if rule isa Corset.FileRule]
         @test sum(length(Corset.check(rule, context, source)) for rule in file_rules) > 0
+        misplaced = only(rule for rule in Corset.RULES if Corset.rule_name(rule) == "misplaced-import")
+        @test site_keys(Corset.check(misplaced, context)) == ["src/point.jl B"]
         @test Corset.declared(context) == [Corset.StructDeclaration(:Point, source.path, 1)]
         sites = [Site("Point", source.path, 1, ""), Site("f", source.path, 4, "")]
         @test first(Corset.unopted(sites, "rule", Corset.source_comments(context))) == [last(sites)]

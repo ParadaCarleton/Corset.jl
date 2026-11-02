@@ -196,7 +196,7 @@ long_file_sites(context.repository, source)
 where_return_sites(source)
 
 @rule TreeRule "misplaced-import" :default "imports their file does not use, or that only other files use" context ->
-misplaced_imports(context.repository, context.directories)
+misplaced_imports(context.repository, context.sources)
 
 @rule TreeRule "fatou" :pedantic "findings of fatou lint (fatou on PATH)" context ->
 fatou_sites(context.repository, context.directories)

@@ -821,12 +821,13 @@ end
     Source(repository, path)
 
 The Julia file `path` of `repository`, read and parsed once for every rule that reads source: its
-`name` in keys (`file_key`), its syntax `tree`, its expressions as `Located`s (`located`), and its
-`# lint:` `comments` (`opt_out_comments`), and its count of `lines`.
+`name` in keys (`file_key`), its `text`, its syntax `tree`, its expressions as `Located`s (`located`),
+its `# lint:` `comments` (`opt_out_comments`), and its count of `lines`.
 """
 struct Source
     path::String
     name::String
+    text::String
     tree::SYNTAX.SyntaxNode
     located::Vector{Located}
     comments::Vector{OptOutComment}
@@ -838,7 +839,7 @@ function Source(repository::Repository, path::AbstractString)::Source
     tree = SYNTAX.parseall(SYNTAX.SyntaxNode, text; filename = path)
     located = Located[]
     locate!(located, Expr(tree), 0, Symbol("<top level>"), 0)
-    return Source(path, file_key(repository, path), tree, located, opt_out_comments(path, text), countlines(IOBuffer(text)))
+    return Source(path, file_key(repository, path), text, tree, located, opt_out_comments(path, text), countlines(IOBuffer(text)))
 end
 """Functions declaring a `Union{Nothing, …}` return: a "can't compute here" answer, one site per definition."""
 function nothing_returns(source::Source)::Vector{Site}

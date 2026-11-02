@@ -198,17 +198,21 @@ function opens_module(tree::SYNTAX.SyntaxNode)::Bool
     return !isempty(kinds) && all(==(MODULE_KIND), kinds)
 end
 
-"""Julia file `path` parsed for import placement; `editable` marks a file the rule checks and rewrites."""
-function import_file(path::AbstractString, editable::Bool)::ImportFile
-    text = read(path, String)
-    tree = SYNTAX.parseall(SYNTAX.SyntaxNode, text; filename = path)
+"""
+The parsed Julia file `source` read for import placement; `editable` marks a file the rule checks and
+rewrites. Given a `path`, the file is read and parsed here: an include outside the checked directories.
+"""
+function import_file(source::Source, editable::Bool)::ImportFile
+    (; path, text, tree) = source
     lines = split(text, '\n')
     modules = [SYNTAX.byte_range(node) for node in module_nodes(tree)]
     nodes = import_nodes(tree)
-    skipped = opt_outs(path, MISPLACED_IMPORT_RULE)
+    skipped = opt_outs(source.comments, MISPLACED_IMPORT_RULE)
     statements = ImportStatement[import_statement.(nodes, text, (lines,), inside_module.(nodes, (modules,)), (skipped,))...]
     return ImportFile(normpath(path), text, Set(name_tokens(tree)), statements, include_paths(tree, dirname(path)), editable, opens_module(tree))
 end
+
+import_file(path::AbstractString, editable::Bool)::ImportFile = import_file(Source(Repository(dirname(path)), path), editable)
 
 """Whether `node` starts inside one of the byte ranges `modules`."""
 inside_module(node::SYNTAX.SyntaxNode, modules::AbstractVector{<:UnitRange})::Bool = any(in.(first(SYNTAX.byte_range(node)), modules))
@@ -226,7 +230,7 @@ outside `known` is parsed as a file the rule reads but never rewrites; an unread
 function unit_files(path::AbstractString, known::AbstractDict{String, ImportFile}, seen::AbstractVector{String})::Vector{ImportFile}
     if path in seen
         return ImportFile[]
-    elseif path == "" || !isfile(path)
+    elseif !haskey(known, path) && (path == "" || !isfile(path))
         return [ImportFile("", "", Set{String}(), ImportStatement[], String[], false, false)]
     end
     file::ImportFile = if haskey(known, path)
@@ -311,17 +315,22 @@ import_sites(repository::Repository, moves::AbstractVector{ImportMove})::Vector{
 """The site of `move` in `repository`, keyed by file and name, at the import's line."""
 import_site(repository::Repository, move::ImportMove)::Site = Site("$(file_key(repository, move.file)) $(move.item.name)", move.file, move.statement.line, "")
 
-"""The Julia files of `directories` in `repository`, parsed for import placement."""
-import_files(repository::Repository, directories::Tuple{Vararg{String}})::Vector{ImportFile} =
-    [import_file(path, true) for path in repository_sources(repository, directories)]
+"""The parsed Julia files of `directories` in `repository`."""
+directory_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Source} =
+    Source.((repository,), repository_sources(repository, directories))
 
 """
     misplaced_imports(repository, directories)
+    misplaced_imports(repository, sources)
 
-One site per import item in `directories` that its file does not use: one that no file of its module
-uses, or that other files of the module use. `place_imports!` fixes them.
+One site per import item in `directories` (or the parsed files `sources`) that its file does not use:
+one that no file of its module uses, or that other files of the module use. `place_imports!` fixes them.
 """
-misplaced_imports(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site} = import_sites(repository, import_moves(import_files(repository, directories)))
+misplaced_imports(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site} =
+    misplaced_imports(repository, directory_sources(repository, directories))
+
+misplaced_imports(repository::Repository, sources::AbstractVector{Source})::Vector{Site} =
+    import_sites(repository, import_moves(import_file.(sources, true)))
 
 """The first byte of the line holding byte `index` of `bytes`."""
 line_start(bytes::AbstractVector{UInt8}, index::Integer)::Int = something(findprev(==(UInt8('\n')), bytes, index - 1), 0) + 1
@@ -418,7 +427,7 @@ Rewrite the Julia files of `directories` so every import sits in the files that 
 `misplaced_imports` site is deleted, or moved into the module's files that use it. Returns the sites.
 """
 function place_imports!(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site}
-    files = import_files(repository, directories)
+    files = import_file.(directory_sources(repository, directories), true)
     moves = import_moves(files)
     touched = Set(reduce(vcat, [vcat([move.file], move.targets) for move in moves]; init = String[]))
     rewritten = files[in.([file.path for file in files], (touched,))]

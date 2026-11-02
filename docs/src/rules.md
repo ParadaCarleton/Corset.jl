@@ -164,13 +164,15 @@ Each takes a file path and `located_source(file)`, the parsed file.
 
 ## Rules with fixers
 
-Two rules come with a function that repairs what they find.
+Two rules come with a function that repairs what they find. A fixer leaves every site a `# lint:`
+comment opts out, in the line, block and file forms.
 
 ### `misplaced-import`: `misplaced_imports(repo, directories)`
 
 Imports that their file does not use, or that only other files of the module use. An import item
 belongs in the files that use its name. `place_imports!(repo, directories)` deletes the unused ones
-and moves the rest, and returns the sites it handled.
+and moves the rest, and returns the sites it handled. A file that holds only `module` blocks belongs
+to another module, so no import moves into it. The fixer computes every file before it writes any.
 
 ### `where-return`: `where_return_sites(file)`
 

@@ -163,3 +163,54 @@ struct var"Odd Name"
     held::Int
 end
 '''
+
+[broad-catch]
+source = '''
+function swallowed(path::String)::String
+    try
+        return read(path, String)
+    catch
+        return ""
+    end
+end
+function mapped(path::String)::Int
+    try
+        read(path, String)
+    catch error_
+        println(error_)
+        return 1
+    end
+    return 0
+end
+function rethrown(path::String)::String
+    try
+        return read(path, String)
+    catch error_
+        if error_ isa SystemError
+            return ""
+        end
+        Base.rethrow()
+    end
+end
+function thrown(path::String)::String
+    try
+        return read(path, String)
+    catch error_
+        throw(error_)
+    end
+end
+function cleaned(path::String)::Nothing
+    try
+        write(path, "x")
+    finally
+        rm(path)
+    end
+end
+function opted(path::String)::String
+    try
+        return read(path, String)
+    catch # lint: broad-catch  any failure means no cache
+        return ""
+    end
+end
+'''

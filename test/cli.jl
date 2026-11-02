@@ -155,7 +155,7 @@ end
 @testset "corset: every rule has a unique name and a known group" begin
     names = rule_name.(RULES)
     @test allunique(names)
-    @test all(group in (:default, :pedantic) for group in rule_group.(RULES))
+    @test all(group in (:default, :deny, :pedantic) for group in rule_group.(RULES))
 end
 
 @testset "corset: running the rules" begin

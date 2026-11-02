@@ -31,7 +31,7 @@ function Context(
 end
 
 """
-A check with a name, a group (`:default` or `:pedantic`) and a one-line summary. The subtypes say
+A check with a name, a group (`:default`, `:deny` or `:pedantic`) and a one-line summary. The subtypes say
 what it reads: `ModuleRule` the loaded package, `TreeRule` the source directories as a whole,
 `FileRule` one parsed file at a time.
 """
@@ -43,7 +43,7 @@ abstract type FileRule <: Rule end
 """The name of `rule` in baselines, opt-out comments and configuration."""
 function rule_name end
 
-"""`:default` for a rule that finds likely defects, `:pedantic` for one that enforces a style."""
+"""`:default` for a rule that finds likely defects, `:deny` for one whose every site is a defect, `:pedantic` for one that enforces a style."""
 function rule_group end
 
 """One line saying what `rule` finds."""
@@ -194,6 +194,9 @@ long_file_sites(context.repository, source)
 
 @rule FileRule "where-return" :default "short-form definitions whose where binds the return annotation" (context, source) ->
 where_return_sites(source)
+
+@rule FileRule "broad-catch" :deny "catch blocks that handle every exception alike, rethrowing none" (context, source) ->
+broad_catches(source)
 
 @rule TreeRule "misplaced-import" :default "imports their file does not use, or that only other files use" context ->
 misplaced_imports(context.repository, context.sources)

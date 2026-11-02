@@ -164,6 +164,7 @@ Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 | `c-type` | `c_type_sites(source)` | `Cint`, `Cdouble` and the other C-interop types outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | `Int`, `Float64` or `String`; convert at the `ccall` |
 | `one-letter` | `one_letter_sites(repo, source)` | one-letter variable names (exempt: `_` and `Repository.one_letter_exempt`) | name the variable |
 | `file-length` | `long_file_sites(repo, source)` | source files longer than `Repository.file_line_limit` lines (default 1500) | split the file by topic |
+| `broad-catch` | `broad_catches(source)` | deny level: `catch` blocks that neither call `rethrow()` nor `throw` what they caught, so a missing file and an internal `error()` end alike; placed from the `try` line to the block's first line | test the exception with `isa`, handle the expected types and `rethrow()` the rest |
 
 ## Rules with fixers
 

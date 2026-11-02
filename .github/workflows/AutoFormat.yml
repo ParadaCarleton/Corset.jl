@@ -25,12 +25,10 @@ jobs:
         with:
           version: "1"
           format_files: true
-      # GITHUB_TOKEN pushes start no workflows, so dispatch the pull_request workflows on the new head.
-      - name: Commit, push and dispatch CI
+      - name: Commit and push
+        id: push
         env:
-          GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.head_ref }}
-          OLD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if git diff --quiet; then
             echo "Runic changed nothing."
@@ -40,10 +38,32 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "Format with Runic"
           git push origin "HEAD:refs/heads/$HEAD_REF"
-          for workflow in CI.yml Downgrade.yml Documentation.yml SpellCheck.yml; do
-            gh workflow run "$workflow" --ref "$HEAD_REF"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # The bot's push opens the pull_request runs gated as `action_required`; approving them runs CI on the new head.
+      # Skip this workflow's own run: it would join this concurrency group and cancel this job.
+      - name: Approve CI on the new head and cancel the stale head's runs
+        if: steps.push.outputs.sha
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_SHA: ${{ steps.push.outputs.sha }}
+          OLD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gated=".[] | select(.conclusion == \"action_required\" and .workflowName != \"$GITHUB_WORKFLOW\") | .databaseId"
+          seen=0
+          for attempt in $(seq 30); do
+            sleep 10
+            for run_id in $(gh run list --commit "$NEW_SHA" --event pull_request --json databaseId,conclusion,workflowName --jq "$gated"); do
+              gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/approve"
+              echo "Approved run $run_id"
+            done
+            count=$(gh run list --commit "$NEW_SHA" --event pull_request --json databaseId --jq length)
+            if [ "$count" -gt 0 ] && [ "$count" -eq "$seen" ]; then break; fi
+            seen=$count
           done
-          # Cancel the stale head's other runs; a run may finish before its cancel lands.
+          if [ "$seen" -eq 0 ]; then
+            echo "::error::No pull_request runs appeared on $NEW_SHA; push an empty commit to start CI."
+            exit 1
+          fi
           gh run list --commit "$OLD_SHA" --json databaseId,status \
             --jq ".[] | select(.status != \"completed\" and .databaseId != $GITHUB_RUN_ID) | .databaseId" \
             | xargs -r -n1 gh run cancel || true

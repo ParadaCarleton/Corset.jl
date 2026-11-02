@@ -141,6 +141,15 @@ end
         @test TOML.parsefile(baseline)["rule"] == Dict("counted" => 1, "noted" => "kept: deliberate")
     end
 
+    @testset "32k sites group by place and by key in under 5 s, each group's details sorted" begin
+        sites = [Site("file$(index % 50).jl f$(index ÷ 2)", "/r/src/file$(index % 50).jl", index ÷ 2, "local `x$index`::Any") for index in 1:32_000]
+        Corset.one_per_line(sites[1:10])
+        Corset.detail_lines(sites[1:10])
+        @test (@elapsed Corset.one_per_line(sites)) + (@elapsed Corset.detail_lines(sites)) < 5
+        @test length(Corset.one_per_line(sites)) == 32_000
+        @test Corset.detail_lines([sites; Site("file2.jl f1", "", 0, "local `w`::Any")])["file2.jl f1"] == "local `w`::Any; local `x2`::Any"
+    end
+
     @testset "a note outlives its last site: the run logs it stale and keeps it" begin
         root = mktempdir()
         baseline = joinpath(root, "baseline.toml")

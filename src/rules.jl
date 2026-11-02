@@ -342,14 +342,9 @@ One site per key, file and lines of `sites`, in first-seen order, its detail the
 so neither the specialization order nor a second variable on the line changes what the log says.
 """
 function one_per_line(sites::AbstractVector{Site})::Vector{Site}
-    places = unique([(site.key, site.file, site.line, site.last_line) for site in sites])
-    return place_site.((sites,), places)
-end
-
-"""The one site of `sites` at `place` (key, file and lines), its detail theirs sorted and joined."""
-function place_site(sites::AbstractVector{Site}, place::Tuple{String, String, Int, Int})::Site
-    placed = sites[[(site.key, site.file, site.line, site.last_line) for site in sites] .== (place,)]
-    return Site(place..., join(sort!(unique([site.detail for site in placed])), "; "))
+    places = [(site.key, site.file, site.line, site.last_line) for site in sites]
+    details = grouped_details(places, String[site.detail for site in sites])
+    return [Site(place..., details[place]) for place in unique(places)]
 end
 
 """

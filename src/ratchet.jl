@@ -131,8 +131,8 @@ opt_outs(path::AbstractString, rule::AbstractString)::OptOuts = opt_outs(opt_out
 function opt_outs(comments::AbstractVector{OptOutComment}, rule::AbstractString)::OptOuts
     named = [comment for comment in comments if comment.rule == rule]
     spans = [comment.line:something(closing_line(named, comment)) for comment in named if comment.form === :begin]
-    lines = Set{Int}(Iterators.flatten((getfield.(named, :line), spans...)))
-    return OptOuts(any(getfield.(named, :form) .=== :file), lines)
+    lines = Set{Int}(Iterators.flatten((Int[comment.line for comment in named], spans...)))
+    return OptOuts(any(comment.form === :file for comment in named), lines)
 end
 
 """The Julia files below `directory`, in no particular order; hidden directories, those named in `skipped` and links to directories are not entered."""
@@ -178,16 +178,23 @@ function write_baseline!(baseline::Baseline, path::AbstractString)::String
     return mv(staged, path; force = true)
 end
 
+"""
+    grouped_details(groups, details)
+
+The distinct `details` in each of `groups`, sorted and joined with `"; "`; the two vectors pair up
+element by element. One sort, and a binary search per group.
+"""
+function grouped_details(groups::AbstractVector{G}, details::AbstractVector{String})::Dict{G, String} where {G}
+    entries = sort!(unique(zip(groups, details)))
+    owners = first.(entries)
+    return Dict{G, String}(group => join(last.(entries[searchsorted(owners, group)]), "; ") for group in unique(groups))
+end
+
 """The `detail`s of the sites under each key, sorted and joined; a key none of whose sites has one is absent."""
 function detail_lines(sites::AbstractVector{S})::Dict{String, String} where {S <: Site}
     described = [site for site in sites if !isempty(site.detail)]
-    keys_ = unique([site.key for site in described])
-    return Dict{String, String}(keys_ .=> key_details.((described,), keys_))
+    return grouped_details(String[site.key for site in described], String[site.detail for site in described])
 end
-
-"""The `detail`s of the `sites` under `key`, sorted and joined."""
-key_details(sites::AbstractVector{<:Site}, key::String)::String =
-    join(sort!(unique([site.detail for site in sites if site.key == key])), "; ")
 
 """The parenthesized detail that follows `key` in the log, empty when `key` has none."""
 function detail_suffix(details::AbstractDict{String, String}, key::String)::String
@@ -215,9 +222,9 @@ end
 
 """The sites of `sites` that no `# lint:` comment naming `rule` opts out, and how many were opted out."""
 function unopted(sites::AbstractVector{S}, rule::AbstractString)::Tuple{Vector{Site}, Int} where {S <: Site}
-    files = unique(getfield.(sites, :file))
+    files = unique(String[site.file for site in sites])
     skips = Dict{String, OptOuts}(files .=> opt_outs.(opt_out_comments.(files), rule))
-    kept = sites[.!opted.(getindex.((skips,), getfield.(sites, :file)), sites)]
+    kept = sites[.!opted.(getindex.((skips,), String[site.file for site in sites]), sites)]
     return kept, length(sites) - length(kept)
 end
 

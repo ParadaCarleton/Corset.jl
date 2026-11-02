@@ -72,7 +72,8 @@ end
 
 The `Config` of the project at `root`: the `[preferences.Corset]` table of its Project.toml overlaid by
 the `[Corset]` table of its LocalPreferences.toml, key by key. An unknown key, an unknown rule name or a
-level other than `allow`, `warn` or `deny` throws, so a typo cannot silently switch a rule off.
+level other than `allow`, `warn` or `deny`, or a set directory that does not exist, throws, so a typo cannot
+silently switch a rule off or skip a directory.
 """
 function load_config(root::AbstractString)::Config
     prefs = overlay(
@@ -96,7 +97,7 @@ function load_config(root::AbstractString)::Config
         end
     end
     return Config(
-        Tuple(something(prefs.directories, ["src"])),
+        configured_directories(root, prefs.directories),
         prefs.baseline,
         Tuple(Symbol.(something(prefs.one_letter_exempt, String[]))),
         Tuple(something(prefs.skipped_directories, String[])),
@@ -106,6 +107,17 @@ function load_config(root::AbstractString)::Config
         entry_point(prefs.entry_points),
         checked_line_limit(something(prefs.file_line_limit, DEFAULT_FILE_LINE_LIMIT), "[preferences.Corset] file_line_limit"),
     )
+end
+
+"""The `directories` setting: `src` when unset, which may be absent. A set directory missing under `root` throws."""
+configured_directories(::AbstractString, ::Nothing)::Tuple{String} = ("src",)
+
+function configured_directories(root::AbstractString, directories::AbstractVector{String})::Tuple{Vararg{String}}
+    absent = filter(!isdir ∘ Base.Fix1(joinpath, root), directories)
+    if !isempty(absent)
+        error("[preferences.Corset] directories names $(join(repr.(absent), ", ")), missing under $root")
+    end
+    return Tuple(directories)
 end
 
 """The `file => function` of an `entry_points` setting `\"file.jl:function\"`; `nothing` when unset. Any other shape throws."""

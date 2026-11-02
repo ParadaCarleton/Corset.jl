@@ -74,7 +74,7 @@ where-return = "allow"
 
 Keys:
 
-- `directories`: Folders containing Julia source code to check (default: `["src"]`).
+- `directories`: Folders containing Julia source code to check (default: `["src"]`). A listed folder that does not exist is an error; a missing default `src` is skipped.
 - `baseline`: Path to the baseline TOML file, relative to the project root.
 - `pedantic`: Boolean to enable all pedantic rules by default.
 - `skipped_directories`: Directory names omitted wherever they sit.

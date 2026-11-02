@@ -101,6 +101,17 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
         @test_throws ErrorException with_overrides(config, false, ["no-such-rule" => :deny], nothing)
     end
 
+    @testset "a configured directory that does not exist fails loud; a missing default src does not" begin
+        misspelled = package_tree("name = \"D\"\n[preferences.Corset]\ndirectories = [\"scr\"]\n", SOURCE_TREE)
+        @test_throws ErrorException load_config(misspelled)
+        redirect_stderr(devnull) do
+            @test captured_main(["check", misspelled, "--no-load"])[2] == 2
+        end
+        @test load_config(package_tree("name = \"D\"\n", Pair[])).directories == ("src",)
+        nested = package_tree("name = \"D\"\n[preferences.Corset]\ndirectories = [\"src\", \"ext/Foo\"]\n", [SOURCE_TREE; "ext/Foo/Foo.jl" => "module Foo\nend\n"])
+        @test load_config(nested).directories == ("src", "ext/Foo")
+    end
+
     @test_throws ErrorException project_root(mktempdir())
 end
 

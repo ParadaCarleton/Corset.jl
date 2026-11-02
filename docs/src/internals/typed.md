@@ -10,8 +10,16 @@ Pages = ["entry_walk.jl", "candidates.jl", "mutation.jl", "dispatch.jl", "float_
 
 ## Entry signatures
 
-`Corset.Entries` finds the concrete call signatures a walk starts from. It reads only a `Module`, paths and types.
+`Corset.Entries` finds the concrete call signatures a walk starts from. It reads only a `Module`, paths, types and `Corset.Membership`.
 
 ```@autodocs
 Modules = [Corset.Entries]
+```
+
+## Package membership
+
+`Corset.Membership` decides which loaded modules belong to a package: its submodules and its loaded extensions.
+
+```@autodocs
+Modules = [Corset.Membership]
 ```

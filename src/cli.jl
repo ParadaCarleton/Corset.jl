@@ -331,16 +331,16 @@ end
 
 """
 The line that says how many signatures each of `sources` gave, how many seeds their union holds, how
-many signatures the walk `frames` inferred, and the process's peak resident memory `peak` in bytes.
+many of the package's frames the walk kept (`frames`), and the process's peak resident memory `peak` in bytes.
 """
-function seed_summary(sources::AbstractVector{Pair{String, Vector{Type}}}, frames::AbstractDict{Type}, peak::Integer)::String
+function seed_summary(sources::AbstractVector{Pair{String, Vector{Type}}}, frames::AbstractVector{Inferred}, peak::Integer)::String
     counts = join(["$name $(length(signatures))" for (name, signatures) in sources], ", ")
     seeds = length(unique(reduce(vcat, last.(sources); init = Type[])))
-    return "entry signatures: $counts; $seeds seeds, $(length(frames)) signatures inferred; peak RSS $(peak ÷ 2^20) MiB"
+    return "entry signatures: $counts; $seeds seeds, $(length(frames)) frames kept; peak RSS $(peak ÷ 2^20) MiB"
 end
 
 """The `entry_frames` of `mod` the typed rules read, walked once from the union of `sources`."""
-seeded_frames(sources::AbstractVector{Pair{String, Vector{Type}}}, mod::Module)::Dict{Type, Vector{Inferred}} =
+seeded_frames(sources::AbstractVector{Pair{String, Vector{Type}}}, mod::Module)::Vector{Inferred} =
     entry_frames(unique(reduce(vcat, last.(sources); init = Type[])), mod)
 
 """The path of `site` relative to `root`; empty for a site with no file."""
@@ -448,7 +448,7 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
             frames = seeded_frames(sources, mod)
         end
     end
-    findings, skipped = run_rules(config, root; mod, signatures = frames, fix = options.fix, update_baseline = options.update_baseline)
+    findings, skipped = run_rules(config, root; mod, frames, fix = options.fix, update_baseline = options.update_baseline)
     print_findings(out, root, findings, something(options.format, "human"))
     if !isnothing(frames)
         println(err, seed_summary(sources, frames, Sys.maxrss()))

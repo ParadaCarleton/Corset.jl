@@ -39,8 +39,8 @@ end
     scope = Entries.trace_scope(demo)
     @test isnothing(Entries.traced_type(scope, "precompile(Tuple{typeof(EntryDemo.twice), Main.TypeOnlyTheTestsDefine})"))
     @test_throws InterruptException Entries.traced_type(scope, "precompile(Tuple{throw(InterruptException())})")
-    @test !Entries.defines(demo, nothing)
-    @test !Entries.defines(demo, Tuple{typeof(demo.twice), Number})
+    @test !Entries.defines(Corset.Package(demo), nothing)
+    @test !Entries.defines(Corset.Package(demo), Tuple{typeof(demo.twice), Number})
 end
 
 @testset "Entries: the tests source traces a package's test run" begin

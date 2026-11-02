@@ -19,7 +19,7 @@ pkg> add Corset
 Write a module with two problems.
 
 ```@setup first
-using Corset: Repository, offenders!, hidden_inputs, abstract_locals, inferred_methods
+using Corset: Repository, offenders!, hidden_inputs, abstract_locals, entry_frames
 root = mktempdir()
 mkpath(joinpath(root, "src"))
 write(joinpath(root, "src", "Demo.jl"), """
@@ -63,7 +63,7 @@ offenders!(repo, "hidden-input", hidden_inputs(repo, Demo))
 ```
 
 ```@example first
-offenders!(repo, "abstract-local", abstract_locals(repo, inferred_methods(Demo, [Tuple{typeof(Demo.total), Vector{Int}}])))
+offenders!(repo, "abstract-local", abstract_locals(repo, entry_frames([Tuple{typeof(Demo.total), Vector{Int}}], Demo)))
 ```
 
 Each returned string is a key: the name of one offender. [`offenders!`](@ref) returns the keys
@@ -73,14 +73,14 @@ and logs them; [`ratchet!`](@ref) does the same and fails a test if there are an
 
 ```julia
 using Test
-using Corset: Repository, ratchet!, hidden_inputs, abstract_locals, inferred_methods
+using Corset: Repository, ratchet!, hidden_inputs, abstract_locals, entry_frames
 using MyPackage
 
 const REPO = Repository(pkgdir(MyPackage))
 
 @testset "code rules" begin
     ratchet!(REPO, "hidden-input", hidden_inputs(REPO, MyPackage))
-    ratchet!(REPO, "abstract-local", abstract_locals(REPO, inferred_methods(MyPackage, SIGNATURES)))
+    ratchet!(REPO, "abstract-local", abstract_locals(REPO, entry_frames(SIGNATURES, MyPackage)))
 end
 ```
 

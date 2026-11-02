@@ -1,0 +1,16 @@
+# A package with a nested module, an inlined helper and a Base callee that calls back into it.
+module Nested
+    struct Hidden
+        held::Any
+    end
+    const TALLY = Ref(0)
+    @noinline deep(x)::Int = (TALLY[] += 1; length(x))
+end
+struct Cell
+    held::Vector{Int}
+end
+helper(x) = (x[1] = 1; nothing)
+outer(x) = helper(x)
+reaches_nested(x) = Nested.deep(x)
+@noinline Base.length(cell::Cell) = length(cell.held)
+lengths(cells) = map(length, cells)

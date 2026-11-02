@@ -5,38 +5,37 @@ type-inference walk can start from. Each source is one function of a `Module` an
 """
 module Entries
 
+using ..Membership: Package, belongs, module_bindings, package_bindings
+
 export entry_signatures
 
 """The sources `source_signatures` and `entry_signatures` accept."""
 const SOURCES = (:compiled, :declared, :tests)
 
 """
-    defined_methods(mod)
+    defined_methods(package)
 
-The methods `mod` defines on its own functions and types, closures included: each
-function's methods, and each type's constructors and call methods. Methods `mod` adds to
+The methods the modules of `package` define on their own functions and types, closures included:
+each function's methods, and each type's constructors and call methods. Methods `package` adds to
 a function of a loaded module (`Base.show`, AD rules) count too.
 """
-function defined_methods(mod::Module)::Vector{Method} # lint: abstract-local  reflects on values of unknown type
-    values = vcat(module_bindings(mod), loaded_functions())
+function defined_methods(package::Package)::Vector{Method} # lint: abstract-local  reflects on values of unknown type
+    values = vcat(package_bindings(package), loaded_functions())
     world = Base.get_world_counter()
     found = reduce(
         vcat,
         vcat(binding_methods.(values, Function), call_methods.(values, world), binding_methods.(values, Type));
         init = Method[],
     )
-    return unique(found[[method.module for method in found] .=== (mod,)])
+    return unique(found[belongs.(getfield.(found, :module), (package,))])
 end
 
-"""Every function bound in `Base`, `Core` or a loaded module: where `mod` may add methods."""
+"""Every function bound in `Base`, `Core` or a loaded module: where a package may add methods."""
 loaded_functions()::AbstractVector = reduce(
     vcat,
     filter(Base.Fix2(isa, Function), module_bindings(loaded)) for loaded in unique([Base; Core; collect(values(Base.loaded_modules))]);
     init = [],
 )
-
-"""The values bound to the names of `mod`, unexported and compiler-made names included."""
-module_bindings(mod::Module)::AbstractVector = getfield.((mod,), filter(Base.Fix1(isdefined, mod), names(mod; all = true)))
 
 # The helpers below take each binding as a call argument: a closure capturing a type or function
 # specializes on it, and one compile per binding of the checked package dominated a run.
@@ -65,7 +64,7 @@ image's precompile workload compiled, and those compiled since loading.
 compiled_signatures(mod::Module)::Vector{Type} = unique(
     Type[
         instance.specTypes
-            for method in defined_methods(mod)
+            for method in defined_methods(Package(mod))
             for instance in Base.specializations(method)
             if Base.isdispatchtuple(instance.specTypes)
     ],
@@ -76,7 +75,7 @@ compiled_signatures(mod::Module)::Vector{Type} = unique(
 
 The signatures of `mod`'s methods whose declared argument types are all concrete already.
 """
-declared_signatures(mod::Module)::Vector{Type} = Type[method.sig for method in defined_methods(mod) if Base.isdispatchtuple(method.sig)]
+declared_signatures(mod::Module)::Vector{Type} = Type[method.sig for method in defined_methods(Package(mod)) if Base.isdispatchtuple(method.sig)]
 
 """
     test_trace(root, output; unset = ())
@@ -99,12 +98,13 @@ end
     trace_signatures(mod, trace)
 
 The signatures in the `precompile(Tuple{...})` lines of the `--trace-compile` file `trace` that
-select a method `mod` defines. A line whose type does not evaluate in this process (a type the
+select a method of `mod`'s package (`belongs`). A line whose type does not evaluate in this process (a type the
 test files define) is dropped.
 """
 function trace_signatures(mod::Module, trace::AbstractString)::Vector{Type}
     scope = trace_scope(mod)
-    return unique(Type[signature for signature in traced_type.((scope,), readlines(trace)) if defines(mod, signature)])
+    package = Package(mod)
+    return unique(Vector{Type}(filter(Base.Fix1(defines, package), traced_type.((scope,), readlines(trace)))))
 end
 
 """A module that binds every loaded package by name, and `mod`, so a trace line's qualified type names resolve."""
@@ -135,13 +135,13 @@ function traced_type(scope::Module, line::AbstractString)::Any # lint: abstract-
     end
 end
 
-"""Whether `signature` is a concrete call signature that selects a method `mod` defines."""
-function defines(mod::Module, signature::Any)::Bool
+"""Whether `signature` is a concrete call signature that selects a method of `package`."""
+function defines(package::Package, signature::Any)::Bool
     if !(signature isa Type && signature <: Tuple && Base.isdispatchtuple(signature))
         return false
     end
     matches = Base._methods_by_ftype(signature, -1, Base.get_world_counter())
-    return matches isa AbstractVector && any(match.method.module === mod for match in matches)
+    return matches isa AbstractVector && any(belongs.(getfield.(getfield.(matches, :method), :module), (package,)))
 end
 
 """

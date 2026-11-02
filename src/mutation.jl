@@ -16,8 +16,8 @@ const MEMORY_VIEWS = (Core.memoryrefnew, Core.memoryrefget)
 # Builtins that call a generic function chosen at run time.
 const CALLING_BUILTINS = (Core._apply_iterate, Core.invoke)
 
-# C functions whose writes are known: the argument positions each writes. Its other arguments are read.
-const FOREIGN_WRITES = Dict{Symbol, Vector{Int}}(:jl_genericmemory_copyto => [1])
+# C functions whose writes are known: the argument positions each may write. Its other arguments are read.
+const FOREIGN_WRITES = (; jl_genericmemory_copyto = (1,))
 
 """The escape analysis of `ir`, a method body of `nargs` arguments, in the current world."""
 function escape_state(ir::COMPILER.IRCode, nargs::Integer)::ESCAPE.EscapeState
@@ -185,7 +185,8 @@ function statement_writes(
     if statement.head === :invoke
         return invoked_writes(statement, estate, walk, stack, search)
     elseif statement.head === :foreigncall
-        return foreign_writes(first(statement.args), statement.args[6:(5 + length(statement.args[3]))], ir, estate)
+        operands = statement.args[6:(5 + length(statement.args[3]))]
+        return ArgumentWrites(Int[], Int[], writable_operands(operands[foreign_positions(first(statement.args), length(operands))], ir, estate))
     elseif statement.head !== :call
         return NO_WRITES
     end
@@ -199,29 +200,27 @@ function statement_writes(
 end
 
 """
-The `ArgumentWrites` of a `:foreigncall` of the C function `name` (`(:f,)` or `(:f, lib)`, its
-symbol quoted) on `operands`: a `FOREIGN_WRITES` function writes the operands at its listed positions
-and reads the rest; any other function, or a function pointer, may write every `writable_operands` one.
+The positions, among `count` arguments, that a `:foreigncall` of the C function `name` (`(:f,)` or
+`(:f, lib)`, its symbol quoted) may write: those `FOREIGN_WRITES` lists for its function, which reads
+the rest; every position for any other function or a function pointer.
 """
-function foreign_writes(name::Expr, operands::AbstractVector, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::ArgumentWrites
+function foreign_positions(name::Expr, count::Integer)::Vector{Int}
     if name.head !== :tuple
-        return foreign_writes(nothing, operands, ir, estate)
+        return foreign_positions(nothing, count)
     end
-    return foreign_writes(first(name.args), operands, ir, estate)
+    return foreign_positions(first(name.args), count)
 end
 
-foreign_writes(name::QuoteNode, operands::AbstractVector, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::ArgumentWrites =
-    foreign_writes(name.value, operands, ir, estate)
+foreign_positions(name::QuoteNode, count::Integer)::Vector{Int} = foreign_positions(name.value, count)
 
-function foreign_writes(name::Symbol, operands::AbstractVector, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::ArgumentWrites
-    if !haskey(FOREIGN_WRITES, name)
-        return foreign_writes(nothing, operands, ir, estate)
+function foreign_positions(name::Symbol, count::Integer)::Vector{Int}
+    if !(name in keys(FOREIGN_WRITES))
+        return foreign_positions(nothing, count)
     end
-    return ArgumentWrites(writable_operands(operands[FOREIGN_WRITES[name]], ir, estate), Int[], Int[])
+    return collect(Int, getfield(FOREIGN_WRITES, name))
 end
 
-foreign_writes(::Any, operands::AbstractVector, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::ArgumentWrites =
-    ArgumentWrites(Int[], Int[], writable_operands(operands, ir, estate))
+foreign_positions(::Any, count::Integer)::Vector{Int} = collect(1:count)
 
 """
 The `ArgumentWrites` of runtime-dispatch `statement`, read from its `call_candidates`. An operand a

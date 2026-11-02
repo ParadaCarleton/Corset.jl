@@ -1022,12 +1022,10 @@ end
         @test details["viaccall"] == "argument `x` reaches a `ccall` and may be written"
         @test details["viapointer"] == "argument `x` reaches a `ccall` and may be written"
     end
-    @testset "jl_genericmemory_copyto writes its destination and reads its source" begin
+    @testset "jl_genericmemory_copyto may write its destination and reads its source" begin
         @test !haskey(details, "copied") && !haskey(details, "joined")
-        @test details["copied_into"] == "writes argument `names` but its name has no `!`"
-        far = only(item for item in inferred if item.method.name === :far_outer)
-        estate = Corset.escape_state(far.ir, far.method.nargs)
-        @test Corset.foreign_writes(Expr(:call, :pointer), [Core.Argument(2)], far.ir, estate).foreign == [2]
+        @test details["copied_into"] == "argument `names` reaches a `ccall` and may be written"
+        @test Corset.foreign_positions(Expr(:call, :pointer), 2) == [1, 2]
     end
     @testset "Base.sort and Base.replace copy before they write" begin
         for signature in (Tuple{typeof(sort), vector}, Tuple{typeof(replace), vector, Pair{Int, Int}})

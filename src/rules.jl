@@ -1,7 +1,8 @@
 # Code rules checked on a loaded module and on its repository's Julia source: lowered code,
 # bindings, types and parsed text. Each rule reports its sites through `ratchet!`.
 
-using .Entries: defined_methods, module_bindings
+using .Entries: defined_methods
+using .Membership: Package, belongs, package_bindings
 
 const COMPILER = Base.Compiler
 const SYNTAX = Base.JuliaSyntax # lint: non-public-access  the registered JuliaSyntax lags the parser Julia 1.13 ships
@@ -62,15 +63,15 @@ callee_name(callee::UnionAll)::Union{Core.TypeName, Nothing} = callee_name(Base.
 callee_name(callee::DataType)::Core.TypeName = callee.name
 callee_name(::Any)::Nothing = nothing
 
-"""The closure types of `mod` that lowered statements `code` name, by type name."""
-function named_closures(code::Core.CodeInfo, mod::Module)::Vector{Core.TypeName}
-    reads = filter(Base.Fix2(names_closure, mod), reduce(vcat, global_reads.(code.code); init = GlobalRef[]))
-    return Core.TypeName[Base.unwrap_unionall(called_type(value)).name for value in getfield.((mod,), [read.name for read in reads])]
+"""The closure types of `package` that lowered statements `code` name, by type name."""
+function named_closures(code::Core.CodeInfo, package::Package)::Vector{Core.TypeName}
+    reads = filter(Base.Fix2(names_closure, package), reduce(vcat, global_reads.(code.code); init = GlobalRef[]))
+    return Core.TypeName[Base.unwrap_unionall(called_type(getfield(read.mod, read.name))).name for read in reads]
 end
 
-"""Whether global `read` names an `is_unnamed_function_type` of `mod`."""
-names_closure(read::GlobalRef, mod::Module)::Bool =
-    read.mod === mod && isdefined(mod, read.name) && is_unnamed_function_type(called_type(getfield(mod, read.name)))
+"""Whether global `read` names an `is_unnamed_function_type` of `package`."""
+names_closure(read::GlobalRef, package::Package)::Bool =
+    belongs(read.mod, package) && isdefined(read.mod, read.name) && is_unnamed_function_type(called_type(getfield(read.mod, read.name)))
 
 """The type a lowered statement names through binding `value`: the type itself, or a function instance's type (a keyword body)."""
 called_type(value::Type)::Type = value
@@ -90,39 +91,39 @@ function is_unnamed_function_type(value::Any)::Bool # lint: abstract-local  refl
     return !(isdefined(type, :instance) && !startswith(string(nameof(type.instance)), "#"))
 end
 
-"""The names of every `is_unnamed_function_type` bound in `mod`, live or left over."""
-closure_type_names(mod::Module)::Set{Core.TypeName} = Set{Core.TypeName}(
-    Base.unwrap_unionall(value).name for value in module_bindings(mod) if is_unnamed_function_type(value)
+"""The names of every `is_unnamed_function_type` bound in `package`, live or left over."""
+closure_type_names(package::Package)::Set{Core.TypeName} = Set{Core.TypeName}(
+    Base.unwrap_unionall(value).name for value in package_bindings(package) if is_unnamed_function_type(value)
 )
 
 """
-    live_closures(mod, methods)
+    live_closures(package, methods)
 
 The closure types (by name) that the current code of `methods` can create: those the lowered code
 of a method that is not itself a closure names, and those a live closure's own code names. A
 closure whose defining method was redefined in this process (by Revise, in a worker reused across
 trees) is a leftover type that no current code reaches, and is not the source's.
 """
-function live_closures(mod::Module, methods::AbstractVector{Method})::Set{Core.TypeName} # lint: abstract-local  lowered IR statements are untyped
-    closure_names = closure_type_names(mod)
+function live_closures(package::Package, methods::AbstractVector{Method})::Set{Core.TypeName} # lint: abstract-local  lowered IR statements are untyped
+    closure_names = closure_type_names(package)
     created = Dict{Core.TypeName, Set{Core.TypeName}}()
     roots = Set{Core.TypeName}()
     for method in methods
         name = callee_name(method)
         if name in closure_names
-            created[name] = union(get(created, name, Set{Core.TypeName}()), created_closures(method, mod))
+            created[name] = union(get(created, name, Set{Core.TypeName}()), created_closures(method, package))
         else
-            roots = union(roots, created_closures(method, mod))
+            roots = union(roots, created_closures(method, package))
         end
     end
     return fixed_reach(roots, created)
 end
 
-"""Closure types (by name) that the lowered code of `method` creates."""
-function created_closures(method::Method, mod::Module)::Vector{Core.TypeName}
+"""Closure types (by name) of `package` that the lowered code of `method` creates."""
+function created_closures(method::Method, package::Package)::Vector{Core.TypeName}
     code = lowered(method)
     if code isa Core.CodeInfo
-        return named_closures(code, mod)
+        return named_closures(code, package)
     end
     return Core.TypeName[]
 end
@@ -139,13 +140,14 @@ end
 """
     module_methods(mod)
 
-The `defined_methods` of `mod` that its current code reaches: every method except a closure's that
-is not `live_closures`.
+The `defined_methods` of `mod`'s package that its current code reaches: every method except a
+closure's that is not `live_closures`.
 """
 function module_methods(mod::Module)::Vector{Method}
-    methods = defined_methods(mod)
-    live = live_closures(mod, methods)
-    return methods[reached.(methods, (closure_type_names(mod),), (live,))]
+    package = Package(mod)
+    methods = defined_methods(package)
+    live = live_closures(package, methods)
+    return methods[reached.(methods, (closure_type_names(package),), (live,))]
 end
 
 """Whether current code reaches `method`: it is no closure's (`closure_names`), or its closure is `live`."""
@@ -219,41 +221,27 @@ end
 The `Inferred` of every method `signature` selects. Each is inferred once: the unoptimized code is kept
 and the optimizer runs on a copy. A method inference cannot type (a generated method) is left out.
 """
-function typed_frames(signature::Type)::Vector{Inferred}
-    interpreter = COMPILER.NativeInterpreter()
-    matches = COMPILER._findall_matches(interpreter, signature)::COMPILER.MethodLookupResult
-    return Inferred[frame for frame in typed_frame.((interpreter,), matches.matches) if !isnothing(frame)]
+typed_frames(signature::Type)::Vector{Inferred} =
+    Inferred[frame for frame in typed_frame.(selected_instances(signature)) if !isnothing(frame)]
+
+"""The method instances inference specializes for each method `signature` selects."""
+function selected_instances(signature::Type)::Vector{Core.MethodInstance}
+    matches = COMPILER._findall_matches(COMPILER.NativeInterpreter(), signature)::COMPILER.MethodLookupResult
+    return COMPILER.specialize_method.(matches.matches)
 end
 
-"""The `Inferred` of method match `match`, or `nothing` when inference cannot type it."""
-function typed_frame(interpreter::COMPILER.NativeInterpreter, match::Core.MethodMatch)::Union{Nothing, Inferred}
-    frame = COMPILER.typeinf_frame(interpreter, match, false)
+"""The `Inferred` of method instance `instance`, or `nothing` when inference cannot type it."""
+function typed_frame(instance::Core.MethodInstance)::Union{Nothing, Inferred}
+    interpreter = COMPILER.NativeInterpreter()
+    frame = COMPILER.typeinf_frame(interpreter, instance, false)
     if isnothing(frame)
         return nothing
     end
     code = copy(frame.src)
     ir = COMPILER.run_passes_ipo_safe(frame.src, COMPILER.OptimizationState(frame, interpreter))
     return_type = COMPILER.widenconst(COMPILER.ignorelimited(frame.result.result))
-    return Inferred(match.method, code, ir, return_type === Nothing)
+    return Inferred(instance.def::Method, code, ir, return_type === Nothing)
 end
-
-"""
-    inferred_methods(mod, signatures)
-    inferred_methods(mod, frames)
-
-Each method `mod` defines (methods it adds to another module's function included) that inference reaches from `signatures`, typed over each
-signature that selects it; the result depends on `signatures` alone. Given the `frames` of
-`entry_frames`, it filters them and infers nothing.
-"""
-inferred_methods(mod::Module, signatures::AbstractVector{<:Type})::Vector{Inferred} =
-    module_frames(mod, reduce(vcat, typed_frames.(unique(signatures)); init = Inferred[]))
-
-inferred_methods(mod::Module, frames::AbstractDict{Type, Vector{Inferred}})::Vector{Inferred} =
-    module_frames(mod, reduce(vcat, collect(values(frames)); init = Inferred[]))
-
-"""The `frames` whose method `mod` defines, on its own function or on another module's (`Base.show`)."""
-module_frames(mod::Module, frames::AbstractVector{Inferred})::Vector{Inferred} =
-    frames[getfield.(getfield.(frames, :method), :module) .=== (mod,)]
 
 """The slots of `code` that a `catch` binds, which Julia always types `Any`."""
 function caught_slots(code::Core.CodeInfo)::Set{Int} # lint: abstract-local  lowered IR statements are untyped
@@ -455,12 +443,12 @@ function unmarked_effects( # lint: abstract-local  lowered IR statements are unt
 end
 
 """Each closure type that the lowered code of `methods` names, with a method that names it."""
-closure_namers(mod::Module, methods::AbstractVector{Method})::Dict{Core.TypeName, Method} = Dict{Core.TypeName, Method}(
-    reduce(vcat, method_namings.(methods, (mod,)); init = Pair{Core.TypeName, Method}[]),
+closure_namers(package::Package, methods::AbstractVector{Method})::Dict{Core.TypeName, Method} = Dict{Core.TypeName, Method}(
+    reduce(vcat, method_namings.(methods, (package,)); init = Pair{Core.TypeName, Method}[]),
 )
 
 """Each closure type `method`'s lowered code names (`created_closures`), paired with `method`."""
-method_namings(method::Method, mod::Module)::Vector{Pair{Core.TypeName, Method}} = created_closures(method, mod) .=> (method,)
+method_namings(method::Method, package::Package)::Vector{Pair{Core.TypeName, Method}} = created_closures(method, package) .=> (method,)
 
 """
 The method that creates closure type `name`: its namer in `namers` (`closure_namers`), followed out of
@@ -584,21 +572,23 @@ end
 """The details of the `faults` (`closure_faults`) of kind `kind`, joined; empty when there are none."""
 kind_detail(faults::AbstractVector{Pair{Symbol, String}}, kind::Symbol)::String = join(last.(faults[first.(faults) .=== kind]), "; ")
 
-"""The closure types the current code of `mod` can create (`live_closures`), unwrapped."""
-function live_closure_types(mod::Module)::Vector{DataType}
-    live = live_closures(mod, defined_methods(mod))
-    closures = DataType[Base.unwrap_unionall(value) for value in module_bindings(mod) if is_closure_type(value)]
+"""The closure types the current code of `package` can create (`live_closures`), unwrapped."""
+function live_closure_types(package::Package, methods::AbstractVector{Method})::Vector{DataType}
+    live = live_closures(package, methods)
+    closures = DataType[Base.unwrap_unionall(value) for value in package_bindings(package) if is_closure_type(value)]
     return closures[in.([type.name for type in closures], (live,))]
 end
 
 """
-Each `live_closure_types` closure of `mod` with a fault of kind `kind` (`closure_faults`), as a
+Each `live_closure_types` closure of `mod`'s package with a fault of kind `kind` (`closure_faults`), as a
 `closure_site` whose detail is the fault. A closure that captures nothing, like `x -> x.field`, passes.
 """
 function anonymous_function_sites(mod::Module, kind::Symbol)::Vector{Site}
     world = Base.get_world_counter()
-    namers = closure_namers(mod, defined_methods(mod))
-    types = live_closure_types(mod)
+    package = Package(mod)
+    methods = defined_methods(package)
+    namers = closure_namers(package, methods)
+    types = live_closure_types(package, methods)
     details = kind_detail.(closure_faults.(types, world), kind)
     faulty = .!isempty.(details)
     definers = closure_definer.([type.name for type in types[faulty]], (namers,))
@@ -614,10 +604,11 @@ unstable_anonymous_functions(mod::Module)::Vector{Site} = anonymous_function_sit
 """Anonymous functions of `mod` that capture a type or function, so each value compiles a new instance."""
 overspecialized_anonymous_functions(mod::Module)::Vector{Site} = anonymous_function_sites(mod, :overspecialized)
 
-"""Struct types `mod` defines, closures excluded; a type bound to two names counts once."""
+"""Struct types `mod`'s package defines, closures excluded; a type bound to two names counts once."""
 function module_structs(mod::Module)::Vector{DataType}
-    structs = DataType[Base.unwrap_unionall(value) for value in module_bindings(mod) if is_struct_binding(value)]
-    return unique(structs[parentmodule.(structs) .=== (mod,)])
+    package = Package(mod)
+    structs = DataType[Base.unwrap_unionall(value) for value in package_bindings(package) if is_struct_binding(value)]
+    return unique(structs[belongs.(parentmodule.(structs), (package,))])
 end
 
 """Whether binding `value` is a struct type, closures excluded."""

@@ -9,10 +9,10 @@ source files.
 ## Rules on a loaded module
 
 These see inferred types, bindings and closures. They need `using MyPackage`. The rules that read
-inferred types take their signatures from the caller: `inferred_methods(MyPackage, signatures)` infers the
-methods those signatures reach, so the result is the same on every run. `inferred_methods(MyPackage,
-entry_frames(seeds, MyPackage))` reads the frames an entry-point walk already inferred. The `corset`
-command line seeds that walk from `Corset.Entries` (see `--entries` in the CLI page). An opt-out on a method's first line covers
+inferred types take their signatures from the caller: `entry_frames(signatures, MyPackage)` infers the
+package's methods those signatures reach, so the result is the same on every run. Submodules and
+loaded extensions count as the package. The `corset` command line seeds that walk from
+`Corset.Entries` (see `--entries` in the CLI page). An opt-out on a method's first line covers
 every site these rules find in that method.
 
 ### `hidden-input`: `hidden_inputs(repository, mod)`
@@ -30,7 +30,7 @@ ExplicitImports.jl finds them. A qualified access has a site per use, so an opt-
 
 Repair: use a public name, or opt the line out with the reason the internal is needed.
 
-### `abstract-local`: `abstract_locals(repo, inferred_methods(mod, signatures))`
+### `abstract-local`: `abstract_locals(repo, entry_frames(signatures, mod))`
 
 Local variables whose inferred type is abstract or a union, one site per variable however many
 specializations ran. The usual causes are an accumulator that starts as `0` and receives floats, and
@@ -38,14 +38,14 @@ a variable assigned from a container of abstract type.
 
 Repair: initialize with the right type (`zero(eltype(xs))`) or annotate the local.
 
-### `bang`: `unmarked_effects(repo, inferred_methods(mod, signatures))`
+### `bang`: `unmarked_effects(repo, entry_frames(signatures, mod))`
 
 Functions that always return `nothing` and have no `!` in the name. A function with a `nothing`
 method beside methods that return values (a dispatch on "off") is not reported.
 
 Repair: add the `!`.
 
-### `unmarked-mutation`: `unmarked_mutations(repo, inferred_methods(mod, signatures))`
+### `unmarked-mutation`: `unmarked_mutations(repo, entry_frames(signatures, mod))`
 
 Functions without `!` in the name that write through an argument: `v[1] = 0`, `x.field = 1`,
 `push!(x.items, 1)`, or a write through an alias, a field or an element of the argument. The rule reads each
@@ -67,7 +67,7 @@ which stores `x` in `stackdict`, reports both.
 
 Repair: add the `!`, or copy the argument before writing to the copy.
 
-### `runtime-dispatch`: `runtime_dispatches(repo, inferred_methods(mod, entry_frames(seeds, mod)))`
+### `runtime-dispatch`: `runtime_dispatches(repo, entry_frames(seeds, mod))`
 
 Pedantic. Calls the optimizer leaves to run-time dispatch in each frame: a `:call` of a generic
 function, or of `Core._apply_iterate` or `Core.invoke`. A logging macro's hand-off to the current
@@ -77,7 +77,7 @@ an `:invoke` edge is read too. One site per method and source line.
 Repair: make the callee's argument types inferable, or put a function barrier around the untyped part.
 Opt out a deliberate barrier on the method's first line.
 
-### `widened-return`: `widened_returns(repo, inferred_methods(mod, entry_frames(seeds, mod)))`
+### `widened-return`: `widened_returns(repo, entry_frames(seeds, mod))`
 
 Pedantic. Methods whose inferred result a caller cannot compile against: anything but a concrete
 type, `Union{}`, a `Type{X}` constant, a union of at most four concrete types, or a fixed-length tuple
@@ -85,7 +85,7 @@ of such members.
 
 Repair: make the result type depend only on the argument types.
 
-### `float-widening`: `float_widenings(repo, inferred_methods(mod, entry_frames(seeds, mod)))`
+### `float-widening`: `float_widenings(repo, entry_frames(seeds, mod))`
 
 Pedantic. Statements whose float result is wider than every float the method receives in its
 arguments: `x::Float32 * 2.0`, `n / m` on `Int`s in a `Float32` method, `float(n)`, a `Float64`

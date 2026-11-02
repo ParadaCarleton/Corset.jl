@@ -16,22 +16,22 @@ pkg> add Corset
 
 ```julia
 using Test
-using Corset: Repository, ratchet!, hidden_inputs, abstract_locals, inferred_methods
+using Corset: Repository, ratchet!, hidden_inputs, abstract_locals, entry_frames
 using MyPackage
 
 const REPO = Repository(pkgdir(MyPackage); baseline = joinpath(@__DIR__, "code_baseline.toml"))
 
 @testset "code rules" begin
     ratchet!(REPO, "hidden-input", hidden_inputs(REPO, MyPackage))
-    ratchet!(REPO, "abstract-local", abstract_locals(REPO, inferred_methods(MyPackage, SIGNATURES)))
+    ratchet!(REPO, "abstract-local", abstract_locals(REPO, entry_frames(SIGNATURES, MyPackage)))
 end
 ```
 
-`SIGNATURES` is the fixed list of method signatures the rules type the package over (for example
-`Tuple{typeof(solve), Float32}`), so the result does not change with test order.
-`entry_frames(seeds, MyPackage)` builds the workload from entry-point call signatures: it walks their
-optimized IR along `:invoke` edges and returns every frame they compile, inferred once.
-`inferred_methods(MyPackage, entry_frames(seeds, MyPackage))` reads those frames without inferring again.
+`SIGNATURES` is the fixed list of entry-point call signatures the rules type the package over (for
+example `Tuple{typeof(solve), Float32}`), so the result does not change with test order.
+`entry_frames` walks their optimized IR along `:invoke` edges and inlined callees, and returns the
+frame of every method instance of the package they reach, inferred once. Submodules and loaded
+extensions count as the package.
 
 The baseline file allows today's offenders, fails on new ones and lowers itself as old ones are fixed.
 The [documentation](https://paradacarleton.github.io/Corset.jl/dev/) has the guide (baselines,

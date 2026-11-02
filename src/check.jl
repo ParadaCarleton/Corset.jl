@@ -113,6 +113,7 @@ function fix_diff(config::Config, root::AbstractString)::String
     directories = present_directories(original, config.directories)
     copies = mktempdir()
     for directory in directories
+        mkpath(dirname(joinpath(copies, directory)))
         cp(joinpath(original.root, directory), joinpath(copies, directory))
     end
     apply_fixes!(

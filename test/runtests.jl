@@ -257,6 +257,15 @@ end
         @test float64_ops(fixture.narrow, (Float32,)) == 0
     end
 
+    @testset "float64_line: a double operand of a listed operation, matched as whole words" begin
+        for line in ("%2 = sitofp i64 %0 to double", "%2 = uitofp i64 %0 to double", "%2 = fneg double %1", "%3 = call double @julia_f_1(double %0)")
+            @test Corset.float64_line(line)
+        end
+        for line in ("%3 = call i64 @julia_double_it_12(i64 %0)", "%2 = load double, ptr @julia_callback_3", "%2 = fneg float %1")
+            @test !Corset.float64_line(line)
+        end
+    end
+
     @testset "nothing-return: a declared Union{Nothing, …} result" begin
         @test site_keys(found_in(nothing_returns, "nothing-return")) == ["maybe"]
     end
@@ -830,8 +839,10 @@ end
         Tuple{typeof(Mutation.buffer_context), IOContext{IOBuffer}, Mutation.Box},
         Tuple{typeof(length), Mutation.Box}, Tuple{typeof(iterate), Mutation.Box}, Tuple{typeof(show), IOBuffer, Mutation.Box},
         Tuple{typeof(Mutation.guarded), ReentrantLock}, Tuple{typeof(Mutation.zero_first), vector},
+        Tuple{typeof(Mutation.negated), Mutation.Box}, Tuple{typeof(Mutation.last_zeroed), vector, vector},
     ]
-    sites = Corset.unmarked_mutations(Repository(@__DIR__), entry_frames(seeds, Mutation))
+    inferred = entry_frames(seeds, Mutation)
+    sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred)
     details = Dict(last(split(site.key)) => site.detail for site in sites)
     @testset "a write through an argument, an alias, a field, an element or a callee is reported" begin
         for name in ("direct", "aliased", "setprop", "viafield", "helper", "outer", "far_helper", "far_outer", "viaindex", "stashed")
@@ -858,7 +869,7 @@ end
         @test details["iterate"] == "adds a writing method to `Base.iterate`, which callers expect not to write: it writes argument `box`"
         @test !haskey(details, "show")
         render = only(Corset.typed_frames(Tuple{typeof(Mutation.render), IOBuffer, Mutation.Box}))
-        @test Corset.argument_writes(render, Dict{Core.MethodInstance, Corset.Inferred}(), (), Corset.CandidateSearch(Corset.Inferred[])).written == [2]
+        @test Corset.argument_writes(render, Corset.WriteWalk(Dict{Core.MethodInstance, Corset.Inferred}()), (), Corset.CandidateSearch(Corset.Inferred[])).written == [2]
         @test Corset.declared_io(render.method, 2) && !Corset.declared_io(render.method, 3) && !Corset.declared_io(render.method, 9)
     end
     @testset "fresh memory, reads, a rebound local and a `!` function are not reported" begin
@@ -866,13 +877,32 @@ end
             @test !haskey(details, name)
         end
     end
+    @testset "a summary is made once per instance and limit; one cut short by recursion is not kept" begin
+        walk = Corset.WriteWalk(Dict{Core.MethodInstance, Corset.Inferred}(item.code.parent => item for item in inferred))
+        search = Corset.CandidateSearch(inferred)
+        far = only(item for item in inferred if item.method.name === :far_outer)
+        summary = Corset.argument_writes(far, walk, (far.code.parent,), search)
+        @test summary.written == [2] && !summary.cut
+        @test haskey(walk.summaries, (far.code.parent, search.limit)) && length(walk.summaries) == 2
+        @test Corset.argument_writes(far, walk, (), search) === summary
+        @test !haskey(walk.summaries, (far.code.parent, 0))
+        countdown = only(item for item in inferred if item.method.name === :countdown)
+        @test Corset.argument_writes(countdown, walk, (countdown.code.parent,), search).cut
+        @test !haskey(walk.summaries, (countdown.code.parent, search.limit))
+        estate = Corset.escape_state(far.ir, far.method.nargs)
+        @test Corset.invoked_writes(Expr(:invoke, "no instance", identity), estate, walk, (), search) === Corset.NO_WRITES
+    end
+    @testset "Base.:! is no `!` name; a varargs callee writes every operand it gathers" begin
+        @test !haskey(details, "negated")
+        @test occursin("argument `b`", details["last_zeroed"])
+    end
     @testset "an argument passed to a runtime dispatch or a ccall may be written, never clean" begin
         @test details["opaquecall"] == "argument `x` reaches a runtime dispatch (`runtime-dispatch`) and may be written"
         @test details["viaccall"] == "argument `x` reaches a `ccall` and may be written"
     end
     @testset "Base.sort and Base.replace copy before they write" begin
         for signature in (Tuple{typeof(sort), vector}, Tuple{typeof(replace), vector, Pair{Int, Int}})
-            writes = Corset.argument_writes(only(Corset.typed_frames(signature)), Dict{Core.MethodInstance, Corset.Inferred}(), (), Corset.CandidateSearch(Corset.Inferred[]))
+            writes = Corset.argument_writes(only(Corset.typed_frames(signature)), Corset.WriteWalk(Dict{Core.MethodInstance, Corset.Inferred}()), (), Corset.CandidateSearch(Corset.Inferred[]))
             @test isempty(writes.written) && isempty(writes.dispatched) && isempty(writes.foreign)
         end
     end

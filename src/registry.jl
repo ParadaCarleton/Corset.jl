@@ -212,9 +212,6 @@ where_return_sites(source)
 @rule FileRule "broad-catch" :deny "catch blocks that handle every exception alike, rethrowing none" (context, source) ->
 broad_catches(source)
 
-@rule FileRule "silent-existence-filter" :deny "path filters that drop the paths that do not exist" (context, source) ->
-silent_existence_filters(source)
-
 @rule FileRule "quadratic-scan" :default "loops over a collection that scan the same collection per element" (context, source) ->
 quadratic_scans(source)
 

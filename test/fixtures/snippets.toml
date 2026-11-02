@@ -215,28 +215,6 @@ function opted(path::String)::String
 end
 '''
 
-[silent-existence-filter]
-source = '''
-present(paths::Vector{String})::Vector{String} = filter(isdir, paths)
-rooted(root::String, paths::Vector{String})::Vector{String} = filter(isdir ∘ Base.Fix1(joinpath, root), paths)
-qualified(paths::Vector{String})::Vector{String} = filter(Base.isfile, paths)
-lambda(paths::Vector{String})::Vector{String} = filter(path -> ispath(path), paths)
-function block(paths::Vector{String})::Vector{String}
-    return filter(paths) do path
-        isdirpath(path)
-    end
-end
-masked(paths::Vector{String})::Vector{String} = paths[isfile.(paths)]
-comprehended(paths::Vector{String})::Vector{String} = [path for path in paths if isfile(path) && !isempty(path)]
-generated(paths::Vector{String})::Int = sum(length(path) for path in paths if isdir(path); init = 0)
-missing_ones(paths::Vector{String})::Vector{String} = paths[.!isdir.(paths)]
-typed(paths::Vector{String})::Vector{String} = filter(endswith(".jl"), paths)
-counted(paths::Vector{String})::Int = count(isfile, paths)
-cleaned(paths::Vector{String})::Nothing = (rm.(filter(isfile, paths)); nothing)
-listed(paths::Vector{String})::Vector{String} = [path for path in paths if !isempty(path)]
-opted(paths::Vector{String})::Vector{String} = filter(isdir, paths) # lint: silent-existence-filter  optional directories
-'''
-
 [quadratic-scan]
 source = '''
 function looped(items::Vector{Int})::Int

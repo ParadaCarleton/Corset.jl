@@ -55,7 +55,7 @@ the rule a file-level `# lint:` comment names (`""` for none), and whether the f
 struct FileShape
     imports::Vector{ImportShape}
     uses::Vector{String}
-    wheres::Vector{WhereShape}
+    definitions::Vector{WhereShape}
     nested::Vector{NestedShape}
     file_opt_out::String
     read_only::Bool
@@ -149,13 +149,13 @@ where-return definitions, the `included` lines, then nested modules.
 """
 function body_lines(file::FileShape, label::String, available::AbstractSet{String}, included::AbstractVector{Pair{String, Bool}})::Vector{Pair{String, Bool}}
     rule = file.file_opt_out
-    wheres = Pair{String, Bool}[line for (position, shape) in enumerate(file.wheres) for line in where_lines(shape, "$(label)_$position", rule)]
+    definitions = Pair{String, Bool}[line for (position, shape) in enumerate(file.definitions) for line in where_lines(shape, "$(label)_$position", rule)]
     nested = Pair{String, Bool}[line for (position, shape) in enumerate(file.nested) for line in nested_lines(shape, "$(label)_$position", rule)]
     opt_out = Pair{String, Bool}[]
     if !isempty(rule)
         opt_out = ["# lint: $rule-file  generated" => true]
     end
-    return vcat(opt_out, imports_lines(file.imports, label, rule), use_lines(file.uses, available, label), wheres, included, nested)
+    return vcat(opt_out, imports_lines(file.imports, label, rule), use_lines(file.uses, available, label), definitions, included, nested)
 end
 
 """A generated file: its `path` under `src`, its `text`, its `pinned` lines in order, and whether it is `read_only`."""
@@ -192,7 +192,7 @@ unrepairable(shape::WhereShape)::Bool = !shape.binds && shape.opt_out in (:none,
 
 """The where-return definitions of `package` no opt-out keeps and no fixer repairs: those binding no argument."""
 unrepairable_wheres(package::PackageShape)::Int =
-    sum(Int[count(unrepairable, file.wheres) for file in vcat([package.root], package.included) if file.file_opt_out != "where-return"])
+    sum(Int[count(unrepairable, file.definitions) for file in vcat([package.root], package.included) if file.file_opt_out != "where-return"])
 
 """Whether byte `start` falls in one of the byte ranges `ranges`."""
 in_ranges(start::Integer, ranges::AbstractVector{<:UnitRange})::Bool = any(Base.Fix1(in, start), ranges)

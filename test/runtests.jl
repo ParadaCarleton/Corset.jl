@@ -974,6 +974,7 @@ end
         Tuple{typeof(Mutation.negated), Mutation.Box}, Tuple{typeof(Mutation.last_zeroed), vector, vector},
         Tuple{typeof(Mutation.viapointer), vector}, Tuple{typeof(Mutation.copied), Vector{String}},
         Tuple{typeof(Mutation.joined), Vector{String}, Vector{String}}, Tuple{typeof(Mutation.copied_into), Vector{String}, Vector{String}},
+        Tuple{typeof(Mutation.missing_paths), String, Vector{String}},
     ]
     inferred = entry_frames(seeds, Mutation)
     sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred)
@@ -1039,6 +1040,9 @@ end
         @test !haskey(details, "copied") && !haskey(details, "joined")
         @test details["copied_into"] == "argument `names` reaches a `ccall` and may be written"
         @test Corset.foreign_positions(Expr(:call, :pointer), 2) == [1, 2]
+    end
+    @testset "a logical-mask copy of the paths isdir reads writes none of them" begin
+        @test !haskey(details, "missing_paths")
     end
     @testset "Base.sort and Base.replace copy before they write" begin
         for signature in (Tuple{typeof(sort), vector}, Tuple{typeof(replace), vector, Pair{Int, Int}})

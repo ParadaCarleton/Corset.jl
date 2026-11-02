@@ -51,3 +51,4 @@ viapointer(x) = ccall(cglobal(:jl_typeof_str), Cstring, (Any,), x)
 copied(names) = copy(names)
 joined(first_names, last_names) = [first_names; last_names]
 copied_into(names, source) = (copyto!(names.ref.mem, source.ref.mem); nothing)
+missing_paths(root, paths) = paths[.!isdir.(joinpath.(root, paths))]

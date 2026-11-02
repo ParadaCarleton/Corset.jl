@@ -166,6 +166,7 @@ Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 | `file-length` | `long_file_sites(repo, source)` | source files longer than `Repository.file_line_limit` lines (default 1500) | split the file by topic |
 | `broad-catch` | `broad_catches(source)` | deny level: `catch` blocks that neither call `rethrow()` nor `throw` what they caught, so a missing file and an internal `error()` end alike; placed from the `try` line to the block's first line | test the exception with `isa`, handle the expected types and `rethrow()` the rest |
 | `silent-existence-filter` | `silent_existence_filters(source)` | deny level: `filter(isdir, paths)` and its `do` form, `isfile ∘ f` and `path -> ispath(path)` predicates, masks `paths[isfile.(paths)]`, and comprehensions filtered by `if isdir(path)`; a configured path with a typo is then skipped in silence. A filter inside the arguments of `rm` passes | throw on the missing paths (`paths[.!isdir.(paths)]`), or opt out a path that is optional by design |
+| `quadratic-scan` | `quadratic_scans(source)` | a `for` loop, comprehension, generator, anonymous function passed to `map`, `count` and the like, or broadcast over a collection `xs` (a variable or field, also through `enumerate`, `zip` and `eachindex`) that calls `filter`, `findall`, `findfirst`, `findlast`, `count`, `any`, `all` or `in` on the same `xs` per element; `in.(xs, (xs,))` too | group `xs` once: a `Dict` from key to entries, or `sort` and `searchsorted` |
 
 ## Rules with fixers
 

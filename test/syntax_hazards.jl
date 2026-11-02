@@ -24,3 +24,12 @@ end
     @test first(site_keys(found_in(Corset.silent_existence_filters, "silent-existence-filter"))) == "source.jl present"
     @test Corset.level(Corset.load_config(mktempdir()), Corset.SilentExistenceFilterRule()) === :deny
 end
+
+@testset "quadratic-scan: a loop over a collection that scans it per element" begin
+    sites = found_in(Corset.quadratic_scans, "quadratic-scan")
+    @test kept_lines(Corset.quadratic_scans, "quadratic-scan") == [3:3, 8:8, 9:9, 10:10, 12:12, 16:16, 17:17, 18:18]
+    @test length(sites) == 9
+    @test last(sites).detail == "scans `items` once per element of `items`; group it once (a Dict, or sort and searchsorted)"
+    @test sites[end - 1].detail == "scans `holder.items` once per element of `holder.items`; group it once (a Dict, or sort and searchsorted)"
+    @test Corset.level(Corset.load_config(mktempdir()), Corset.QuadraticScanRule()) === :warn
+end

@@ -201,6 +201,9 @@ broad_catches(source)
 @rule FileRule "silent-existence-filter" :deny "path filters that drop the paths that do not exist" (context, source) ->
 silent_existence_filters(source)
 
+@rule FileRule "quadratic-scan" :default "loops over a collection that scan the same collection per element" (context, source) ->
+quadratic_scans(source)
+
 @rule TreeRule "misplaced-import" :default "imports their file does not use, or that only other files use" context ->
 misplaced_imports(context.repository, context.sources)
 

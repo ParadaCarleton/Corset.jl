@@ -672,6 +672,17 @@ end
         twice = ["main.jl" => "include(\"c.jl\")\nmodule M\ninclude(\"c.jl\")\nend\n", "c.jl" => "using A: a\n"]
         @test isempty(misplaced_imports(Repository(write_tree(mktempdir(), twice)), (".",)))
     end
+    @testset "a name a relative import takes from another module of the package keeps that module's import" begin
+        parent = "module Parent\nusing A: f\ninclude(\"sub.jl\")\nend\n"
+        sub = "module Sub\nusing ..Parent: f\ng() = f()\nend\n"
+        @test placed(["parent.jl" => parent, "sub.jl" => sub]) == Dict("parent.jl" => parent, "sub.jl" => sub)
+        nested = "module Parent\nusing A: f, b\nmodule Sub\nimport ..Parent: f as h\ng() = h()\nend\nend\n"
+        @test placed(["nested.jl" => nested])["nested.jl"] == "module Parent\nusing A: f\nmodule Sub\nimport ..Parent: f as h\ng() = h()\nend\nend\n"
+        child = "module Sub\nusing A: k\nend\n"
+        main = "module P\ninclude(\"child.jl\")\nimport .Sub.k\nq() = k\nend\n"
+        @test placed(["main.jl" => main, "child.jl" => child]) == Dict("main.jl" => main, "child.jl" => child)
+        @test Corset.relayed_names(only(Corset.import_nodes(Corset.SYNTAX.parseall(Corset.SYNTAX.SyntaxNode, "using A: f")))) == String[]
+    end
     @testset "a moved import lands after the file's last top-level import, outside its module blocks" begin
         inner = "module Inner\nusing B: b\nh() = b\nend\n"
         result = placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "g() = a\n$inner"])

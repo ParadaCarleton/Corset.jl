@@ -4,6 +4,7 @@
 using Test: @testset, @test
 using Supposition: Supposition, Data, @check
 using Corset: Corset
+using TOML: TOML
 
 const SYNTAX = Corset.SYNTAX
 
@@ -244,12 +245,11 @@ subsequence(wanted::AbstractVector{String}, lines::AbstractVector{<:AbstractStri
 """The text of every file of `files` under the `src` of `root`, in order."""
 file_texts(root::String, files::AbstractVector{GeneratedFile})::Vector{String} = [read(joinpath(root, "src", file.path), String) for file in files]
 
-"""A `Config` that turns on exactly the fixable rules, at `:deny`, over `src`."""
-fixer_config()::Corset.Config = Corset.Config(
-    ("src",), nothing, (), (), false,
-    Dict{String, Symbol}(Corset.rule_name(rule) => ifelse(Corset.fixable(rule), :deny, :allow) for rule in Corset.RULES),
-    Corset.DEFAULT_CANDIDATE_LIMIT, nothing, Corset.DEFAULT_FILE_LINE_LIMIT,
-)
+"""The Project.toml of a generated package: it turns on exactly the fixable rules, at `deny`."""
+function fixer_project()::String
+    levels = Dict(Corset.rule_name(rule) => ifelse(Corset.fixable(rule), "deny", "allow") for rule in Corset.RULES)
+    return sprint(TOML.print, Dict("preferences" => Dict("Corset" => Dict("levels" => levels))))
+end
 
 """
 Whether `corset check --fix` on `package` keeps every fixer property: each file parses and keeps its
@@ -264,12 +264,14 @@ function fix_keeps_properties(package::PackageShape)::Bool
     write.(paths, [file.text for file in files])
     chmod.(paths, ifelse.([file.read_only for file in files], 0o444, 0o644))
     modes = filemode.(paths)
-    findings, _ = Corset.run_rules(fixer_config(), root; fix = true)
+    write(joinpath(root, "Project.toml"), fixer_project())
+    config = Corset.load_config(root)
+    findings, _ = Corset.run_rules(config, root; fix = true)
     fixed = file_texts(root, files)
     SYNTAX.parseall.(SYNTAX.SyntaxNode, fixed)
     Base.include(Module(), joinpath(root, "src", "Generated.jl"))
     rules = [finding.rule for finding in findings]
-    second, _ = Corset.run_rules(fixer_config(), root; fix = true)
+    second, _ = Corset.run_rules(config, root; fix = true)
     return filemode.(paths) == modes &&
         significant_tokens.([file.text for file in files]) == significant_tokens.(fixed) &&
         all(subsequence.([file.pinned for file in files], split.(fixed, '\n'))) &&

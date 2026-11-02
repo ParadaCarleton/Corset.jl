@@ -64,7 +64,7 @@ callee_name(::Any)::Nothing = nothing
 
 """The closure types of `package` that lowered statements `code` name, by type name."""
 function named_closures(code::Core.CodeInfo, package::Package)::Vector{Core.TypeName}
-    reads = filter(Base.Fix2(names_closure, package), reduce(vcat, global_reads.(code.code); init = GlobalRef[]))
+    reads = filter(Base.Fix2(names_closure, package), collect(GlobalRef, Iterators.flatten(global_reads.(code.code))))
     return Core.TypeName[Base.unwrap_unionall(called_type(getfield(read.mod, read.name))).name for read in reads]
 end
 
@@ -137,14 +137,14 @@ function fixed_reach(live::Set{T}, created::AbstractDict{T, Set{T}})::Set{T} whe
 end
 
 """
-    module_methods(mod)
+    module_methods(mod; own_methods = defined_methods(mod))
 
-The `defined_methods` of `mod`'s package that its current code reaches: every method except a
-closure's that is not `live_closures`.
+The methods of `mod`'s package (`own_methods`, its `defined_methods`) that its current code reaches:
+every method except a closure's that is not `live_closures`.
 """
-function module_methods(mod::Module)::Vector{Method}
+function module_methods(mod::Module; own_methods::AbstractVector{Method} = defined_methods(mod))::Vector{Method}
     package = Package(mod)
-    methods = defined_methods(package)
+    methods = own_methods
     live = live_closures(package, methods)
     return methods[reached.(methods, (closure_type_names(package),), (live,))]
 end
@@ -179,8 +179,8 @@ end
 Each read of a global that some method of `mod` takes besides its arguments and immutable
 constants, keyed by the global and placed at the statement that reads it.
 """
-hidden_inputs(repository::Repository, mod::Module)::Vector{Site} =
-    reduce(vcat, method_hidden_inputs.(filter(Base.Fix1(in_repository, repository), module_methods(mod))); init = Site[])
+hidden_inputs(repository::Repository, mod::Module; own_methods::AbstractVector{Method} = defined_methods(mod))::Vector{Site} =
+    collect(Site, Iterators.flatten(method_hidden_inputs.(filter(Base.Fix1(in_repository, repository), module_methods(mod; own_methods)))))
 
 """Whether `method` is defined in a file under the repository's root."""
 in_repository(repository::Repository, method::Method)::Bool = startswith(string(method.file), joinpath(repository.root, ""))
@@ -190,7 +190,7 @@ function method_hidden_inputs(method::Method)::Vector{Site}
     if isnothing(code)
         return Site[]
     end
-    return reduce(vcat, statement_hidden_inputs.((code,), (method,), collect(pairs(code.code))); init = Site[])
+    return collect(Site, Iterators.flatten(statement_hidden_inputs.((code,), (method,), collect(pairs(code.code)))))
 end
 
 """The `hidden_inputs` sites of the lowered statement `entry` (index => statement) of `method`'s `code`."""
@@ -352,7 +352,7 @@ function abstract_locals(
         inferred::AbstractVector{Inferred};
         comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
     )::Vector{Site}
-    return one_per_line(reduce(vcat, abstract_local_sites.((repository,), audited_frames(repository, inferred, "abstract-local", comments)); init = Site[]))
+    return one_per_line(collect(Site, Iterators.flatten(abstract_local_sites.((repository,), audited_frames(repository, inferred, "abstract-local", comments)))))
 end
 
 """The `abstract_locals` sites of `item`, one per abstract named local."""
@@ -445,7 +445,7 @@ method_site(repository::Repository, method::Method)::Site = Site(method_key(repo
 
 """Each closure type that the lowered code of `methods` names, with a method that names it."""
 closure_namers(package::Package, methods::AbstractVector{Method})::Dict{Core.TypeName, Method} = Dict{Core.TypeName, Method}(
-    reduce(vcat, method_namings.(methods, (package,)); init = Pair{Core.TypeName, Method}[]),
+    collect(Pair{Core.TypeName, Method}, Iterators.flatten(method_namings.(methods, (package,)))),
 )
 
 """Each closure type `method`'s lowered code names (`created_closures`), paired with `method`."""
@@ -503,7 +503,7 @@ end
 
 """The closure types `Base.specializations` records for the call methods of closure `type`: one per instance the package compiled."""
 closure_instances(type::DataType, world::Integer)::Vector{Type} = unique(
-    reduce(vcat, instance_callees.(Base._methods_by_ftype(Tuple{type, Vararg}, -1, world)); init = Type[]),
+    collect(Type, Iterators.flatten(instance_callees.(Base._methods_by_ftype(Tuple{type, Vararg}, -1, world)))),
 )
 
 """The function type each specialization of `match`'s method was compiled for."""
@@ -537,25 +537,34 @@ function capture_detail(kind::Symbol, @nospecialize(capture::Any))::String
     if kind === :unstable
         return "captures $capture, a type inference left abstract"
     end
+    if kind === :plain
+        return "captures $capture, which `strict_captures` forbids: pass it as an argument"
+    end
     return "captures $capture, not plain immutable data"
 end
 
 """The faults of closure instance `instance`, as `kind => detail` pairs (`capture_kind`, `capture_detail`)."""
-function instance_faults(@nospecialize(instance::Any))::Vector{Pair{Symbol, String}}
+function instance_faults(@nospecialize(instance::Any), strict::Bool)::Vector{Pair{Symbol, String}}
     if !(instance isa DataType && isconcretetype(instance))
         return [:unstable => "built where the types of its captures are unknown"]
     end
     captures = field_types(instance)
     kinds = capture_kind.(captures)
-    return [kind => capture_detail(kind, capture) for (kind, capture) in zip(kinds, captures) if kind !== :plain]
+    return [fault_kind(kind) => capture_detail(kind, capture) for (kind, capture) in zip(kinds, captures) if kind !== :plain || strict]
 end
 
+"""The faults of closure instance `instance` when plain captures are allowed (`strict_captures` off)."""
+instance_faults(@nospecialize(instance::Any))::Vector{Pair{Symbol, String}} = instance_faults(instance, false)
+
+"""The kind a capture of kind `kind` is reported under: plain data, forbidden in strict mode, is `:impure`."""
+fault_kind(kind::Symbol)::Symbol = ifelse(kind === :plain, :impure, kind)
+
 """
-The faults of closure `type`, as `kind => detail` pairs: a `Core.Box` or no compiled instance (its captures
+The faults of closure `type`, as `kind => detail` pairs (plain captures count when `strict`): a `Core.Box` or no compiled instance (its captures
 unverified) is `:impure`; otherwise the `instance_faults` of every instance. None for a closure that
 captures nothing, or only `plain_capture` data in every instance.
 """
-function closure_faults(type::DataType, world::Integer)::Vector{Pair{Symbol, String}}
+function closure_faults(type::DataType, world::Integer, strict::Bool)::Vector{Pair{Symbol, String}}
     declared = field_types(type)
     if isempty(declared)
         return Pair{Symbol, String}[]
@@ -567,7 +576,7 @@ function closure_faults(type::DataType, world::Integer)::Vector{Pair{Symbol, Str
     if isempty(instances)
         return [:impure => "no compiled instance, so its captures are unverified; cover it in the precompile workload"]
     end
-    return unique(reduce(vcat, instance_faults.(instances); init = Pair{Symbol, String}[]))
+    return unique(collect(Pair{Symbol, String}, Iterators.flatten(instance_faults.(instances, strict))))
 end
 
 """The details of the `faults` (`closure_faults`) of kind `kind`, joined; empty when there are none."""
@@ -583,27 +592,31 @@ end
 """
 Each `live_closure_types` closure of `mod`'s package with a fault of kind `kind` (`closure_faults`), as a
 `closure_site` whose detail is the fault. A closure that captures nothing, like `x -> x.field`, passes.
+`own_methods` holds the `defined_methods` of `mod`.
 """
-function anonymous_function_sites(repository::Repository, mod::Module, kind::Symbol)::Vector{Site}
+function anonymous_function_sites(repository::Repository, mod::Module, kind::Symbol; own_methods::AbstractVector{Method} = defined_methods(mod))::Vector{Site}
     world = Base.get_world_counter()
     package = Package(mod)
-    methods = defined_methods(package)
+    methods = own_methods
     namers = closure_namers(package, methods)
     types = live_closure_types(package, methods)
-    details = kind_detail.(closure_faults.(types, world), kind)
+    details = kind_detail.(closure_faults.(types, world, repository.strict_captures), kind)
     faulty = .!isempty.(details)
     definers = closure_definer.([type.name for type in types[faulty]], (namers,))
     return closure_site.((repository,), types[faulty], definers, world, details[faulty])
 end
 
 """Anonymous functions of `mod` that capture mutable state, hold a `Core.Box`, or were never compiled."""
-impure_anonymous_functions(repository::Repository, mod::Module)::Vector{Site} = anonymous_function_sites(repository, mod, :impure)
+impure_anonymous_functions(repository::Repository, mod::Module; own_methods::AbstractVector{Method} = defined_methods(mod))::Vector{Site} =
+    anonymous_function_sites(repository, mod, :impure; own_methods)
 
 """Anonymous functions of `mod` built where inference could not pin down the types of their captures."""
-unstable_anonymous_functions(repository::Repository, mod::Module)::Vector{Site} = anonymous_function_sites(repository, mod, :unstable)
+unstable_anonymous_functions(repository::Repository, mod::Module; own_methods::AbstractVector{Method} = defined_methods(mod))::Vector{Site} =
+    anonymous_function_sites(repository, mod, :unstable; own_methods)
 
 """Anonymous functions of `mod` that capture a type or function, so each value compiles a new instance."""
-overspecialized_anonymous_functions(repository::Repository, mod::Module)::Vector{Site} = anonymous_function_sites(repository, mod, :overspecialized)
+overspecialized_anonymous_functions(repository::Repository, mod::Module; own_methods::AbstractVector{Method} = defined_methods(mod))::Vector{Site} =
+    anonymous_function_sites(repository, mod, :overspecialized; own_methods)
 
 """Struct types `mod`'s package defines, closures excluded; a type bound to two names counts once."""
 function module_structs(mod::Module)::Vector{DataType}
@@ -954,7 +967,7 @@ Where each struct of the parsed `sources` is declared, sorted by name: at its `s
 one name in different files are both kept.
 """
 struct_locations(sources::AbstractVector{Source})::Vector{StructDeclaration} =
-    sort!(reduce(vcat, map(source_declarations, sources); init = StructDeclaration[]); by = declaration_name)
+    sort!(collect(StructDeclaration, Iterators.flatten(map(source_declarations, sources))); by = declaration_name)
 
 """The `struct` declarations of `source`."""
 function source_declarations(source::Source)::Vector{StructDeclaration}
@@ -1298,7 +1311,7 @@ function name_sites(
     if kind === FIELD_KIND && !fields
         children = children[1:1]
     end
-    return reduce(vcat, name_sites.((source,), children, (names,), fields); init = Site[])
+    return collect(Site, Iterators.flatten(name_sites.((source,), children, (names,), fields)))
 end
 
 """The C-interop type names (`C_TYPE_NAMES`) of the Julia file `source` outside a C call, by `name_sites`."""
@@ -1362,7 +1375,7 @@ function bound_names(target::Expr)::Vector{Symbol}
     elseif target.head in (:kw, :...)
         return bound_names(first(target.args))
     elseif target.head in (:tuple, :parameters)
-        return reduce(vcat, bound_names.(target.args); init = Symbol[])
+        return collect(Symbol, Iterators.flatten(bound_names.(target.args)))
     end
     return Symbol[]
 end
@@ -1373,11 +1386,10 @@ function one_letter_names(node::Expr, exempt::Tuple{Vararg{Symbol}})::Vector{Sym
     call = signature_call(node)
     names = Symbol[]
     if !isnothing(call)
-        names = reduce(
-            vcat,
-            bound_names.(call.args[2:end]);
-            init = bound_names(first(call.args) isa Symbol ? nothing : first(call.args)),
-        )
+        names = Symbol[
+            bound_names(ifelse(first(call.args) isa Symbol, nothing, first(call.args)));
+            collect(Symbol, Iterators.flatten(bound_names.(call.args[2:end])))
+        ]
     elseif node.head === :(=) || node.head === :->
         names = bound_names(first(node.args))
     elseif node.head === :try && length(node.args) >= 3
@@ -1388,7 +1400,7 @@ end
 
 """One site per one-letter variable name in the Julia file `source`, keyed by file and enclosing function (or testset); `repository.one_letter_exempt` names the allowed ones."""
 one_letter_sites(repository::Repository, source::Source)::Vector{Site} =
-    reduce(vcat, one_letter_item_sites.((source,), source.located, (repository.one_letter_exempt,)); init = Site[])
+    collect(Site, Iterators.flatten(one_letter_item_sites.((source,), source.located, (repository.one_letter_exempt,))))
 
 """One site per `one_letter_names` name `item` of the file `source` binds, at the item's line or its definition's."""
 function one_letter_item_sites(source::Source, item::Located, exempt::Tuple{Vararg{Symbol}})::Vector{Site}

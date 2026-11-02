@@ -54,6 +54,7 @@
 [float64]
 
 [hidden-input]
+"stdout" = 2
 
 [impure-anonymous-function]
 "src/entries.jl compiled_signatures" = 1
@@ -67,7 +68,7 @@
 
 [non-public-access]
 "Base.Compiler" = 1
-"Base.Compiler.EscapeAnalysis.EscapeState" = 16
+"Base.Compiler.EscapeAnalysis.EscapeState" = 20
 "Base.Compiler.EscapeAnalysis.iridx" = 1
 "Base.Compiler.IRShow.buildLineInfoNode" = 1
 "Base.CoreLogging" = 3
@@ -78,7 +79,7 @@
 "Base.LibuvServer" = 1
 "Base.LibuvStream" = 1
 "Base.Meta.lower" = 1
-"Base.Meta.parseall" = 2
+"Base.Meta.parseall" = 3
 "Base.PkgId" = 2
 "Base.Process" = 1
 "Base.ProcessChain" = 1
@@ -96,14 +97,14 @@
 "Base.specializations" = 2
 "Base.uncompressed_ir" = 1
 "Base.uniontypes" = 4
-"Base.unwrap_unionall" = 18
+"Base.unwrap_unionall" = 19
 "Compiler.EscapeAnalysis" = 1
-"Compiler.IRCode" = 30
+"Compiler.IRCode" = 34
 "Compiler.MethodLookupResult" = 1
 "Compiler.NativeInterpreter" = 3
 "Compiler.OptimizationState" = 1
 "Compiler._findall_matches" = 1
-"Compiler.argextype" = 6
+"Compiler.argextype" = 7
 "Compiler.get_escape_cache" = 1
 "Compiler.ignorelimited" = 1
 "Compiler.optimizer_lattice" = 1
@@ -111,8 +112,8 @@
 "Compiler.singleton_type" = 1
 "Compiler.specialize_method" = 2
 "Compiler.typeinf_frame" = 1
-"Compiler.widenconst" = 11
-"Core.Argument" = 2
+"Compiler.widenconst" = 12
+"Core.Argument" = 4
 "Core.BindingPartition" = 1
 "Core.Box" = 2
 "Core.Builtin" = 2
@@ -124,14 +125,17 @@
 "Core.CoreSTDOUT" = 1
 "Core.DebugInfo" = 1
 "Core.IntrinsicFunction" = 2
+"Core.Intrinsics" = 5
 "Core.MethodInstance" = 29
 "Core.MethodMatch" = 2
-"Core.PhiNode" = 1
-"Core.PiNode" = 1
+"Core.PhiNode" = 2
+"Core.PiNode" = 2
 "Core.ReturnNode" = 4
-"Core.SSAValue" = 4
+"Core.SSAValue" = 6
+"Core.SimpleVector" = 1
 "Core.SlotNumber" = 3
 "Core.TypeName" = 23
+"Core.TypeofVararg" = 1
 "Core._apply_iterate" = 1
 "Core.eval" = 3
 "Core.kwcall" = 1
@@ -181,7 +185,8 @@
 
 [runtime-dispatch]
 "src/candidates.jl call_signature" = 1
-"src/check.jl anonymous function" = 14
+"src/check.jl anonymous function" = 15
+"src/check.jl enabled_rules" = 1
 "src/check.jl file_diff" = 1
 "src/check.jl fix_diff" = 3
 "src/check.jl module_rule_names" = 1
@@ -259,6 +264,11 @@
 "src/rules.jl typed_frame" = 1
 "src/rules.jl untyped_argument" = 1
 "src/rules.jl without_lines" = 1
+
+[struct-constant]
+"Corset.NO_CANDIDATES" = 1
+"Corset.NO_WRITES" = 1
+"Corset.RULES" = 1
 
 [unmarked-mutation]
 "src/check.jl fix_diff" = 1

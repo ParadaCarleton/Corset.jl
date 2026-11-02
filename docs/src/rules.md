@@ -6,6 +6,22 @@ below are conventions; any lowercase words joined by `-` work.
 Rules that need the compiler's answer read a loaded module. Rules about how code is written read
 source files.
 
+## Groups
+
+The `corset` command runs the `default` group at `warn` level. `--pedantic`, or `pedantic = true` in
+the configuration, adds the `pedantic` group. Julia permits what Rust's compiler rejects; a `default`
+rule finds a pattern Rust rejects or requires an explicit marker for (`dyn`, `mut`, `unsafe`, typed
+signatures, privacy), a likely bug, or a performance trap. A `# lint:` opt-out is the explicit marker.
+A `pedantic` rule enforces house style that Rust allows, or is a noisy heuristic.
+
+| Group | Rules |
+| --- | --- |
+| `default` | `abstract-field`, `abstract-local`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anonymous-function`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anonymous-function`, `quadratic-vcat`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anonymous-function`, `where-return`, `widened-return` |
+| `pedantic` | `c-type`, `concrete-return`, `file-length`, `float64`, `jscpd`, `nothing-return`, `one-letter`, `quadratic-scan`, `range-guard`, `ref`, `repeated-prefix`, `struct-constant`, `wide-struct` |
+
+`corset rules` prints each rule's group and level. `[preferences.Corset.levels]` and the `--allow`,
+`--warn` and `--deny` flags set the level of one rule.
+
 ## Rules on a loaded module
 
 These see inferred types, bindings and closures. They need `using MyPackage`. The rules that read
@@ -24,7 +40,7 @@ Repair: pass the value as an argument, or return it from the function that compu
 
 ### `non-public-access`: `non_public_accesses(mod)`
 
-Pedantic. Qualified accesses (`Base.JuliaSyntax`) and explicit imports (`using Base: uniontypes`)
+Qualified accesses (`Base.JuliaSyntax`) and explicit imports (`using Base: uniontypes`)
 of a name its module neither exports nor declares `public`. Such a name can change in any release.
 ExplicitImports.jl finds them. A qualified access has a site per use, so an opt-out covers only its line.
 
@@ -56,8 +72,11 @@ At a runtime dispatch the rule lists the candidate methods (`candidate_limit`, d
 `unmarked_mutations(repo, inferred; search = CandidateSearch(inferred; candidate_limit))`). When every
 candidate is listed and none writes the argument, the dispatch writes nothing. A candidate that writes it
 makes the write definite, and the detail names the candidate. A `ccall` of a C function whose writes are
-known (`jl_genericmemory_copyto`, which `copyto!` and `vcat` of boxed elements call) reads its source;
-only its destination may be written. An argument passed to any other `ccall`, or to a
+known (`jl_genericmemory_copyto`, which `copyto!` and `vcat` of boxed elements call, and `memmove`, `memcpy`,
+`memset`, `strlen`, `memcmp`, `memchr`, `strcmp`, `strncmp`) reads its sources; only its destination may be written.
+A `Ptr` operand counts as the argument it points into (`pointer(x)`, the conversion `ccall` applies to `x`),
+and `unsafe_store!` through such a pointer writes the argument. A `Cstring` operand is read.
+An argument passed to any other `ccall`, or to a
 dispatch with more candidates than the budget, a candidate inference cannot type, or a candidate that
 itself dispatches on the argument, is reported as one that may be written. `runtime-dispatch` reports the same dispatch.
 A method the package adds to another module's non-`!` function (`Base.length`, `Base.iterate` on a stateful iterator) is checked too: "adds a writing method to `Base.length`, which callers expect not to write". A write to any Julia object counts, an `IOBuffer`, a lock or a `Channel` included. Arguments that cannot
@@ -71,7 +90,7 @@ Repair: add the `!`, or copy the argument before writing to the copy.
 
 ### `runtime-dispatch`: `runtime_dispatches(repo, entry_frames(seeds, mod))`
 
-Pedantic. Calls the optimizer leaves to run-time dispatch in each frame: a `:call` of a generic
+Calls the optimizer leaves to run-time dispatch in each frame: a `:call` of a generic
 function, or of `Core._apply_iterate` or `Core.invoke`. A logging macro's hand-off to the current
 logger is not reported. Pass the frames of `entry_frames`, so a `@noinline` callee reached only through
 an `:invoke` edge is read too. One site per method and source line.
@@ -81,7 +100,7 @@ Opt out a deliberate barrier on the method's first line.
 
 ### `widened-return`: `widened_returns(repo, entry_frames(seeds, mod))`
 
-Pedantic. Methods whose inferred result a caller cannot compile against: anything but a concrete
+Methods whose inferred result a caller cannot compile against: anything but a concrete
 type, `Union{}`, a `Type{X}` constant, a union of at most four concrete types, or a fixed-length tuple
 of such members.
 
@@ -89,7 +108,7 @@ Repair: make the result type depend only on the argument types.
 
 ### `float-widening`: `float_widenings(repo, entry_frames(seeds, mod))`
 
-Pedantic. Statements whose float result is wider than every float the method receives in its
+Statements whose float result is wider than every float the method receives in its
 arguments: `x::Float32 * 2.0`, `n / m` on `Int`s in a `Float32` method, `float(n)`, a `Float64`
 global, or a returned `0.0`. The detail names the operand that brings the wide float in (`Base.Float64`
 for a conversion, `0.0`, the global), or the callee. A value computed from an already widened one is
@@ -119,6 +138,7 @@ non-function `isbits` values, `String`s, `Symbol`s, and immutable structs, tuple
 | Rule | Function | Finds | Repair |
 | --- | --- | --- | --- |
 | `impure-anonymous-function` | `impure_anonymous_functions(repo, mod)` | a mutable capture (an array, `Dict`, `Ref`, a module); a `Core.Box`, a captured variable rebound; no compiled instance, so the captures are unverified | pass the data as an argument, or use `Base.Fix1`/`Base.Fix2` (`filter(in(allowed), items)`); cover an unverified function in the precompile workload |
+| | | with `Repository.strict_captures`: any capture, plain immutable data included | pass it as an argument |
 | `unstable-anonymous-function` | `unstable_anonymous_functions(repo, mod)` | a capture whose type inference left abstract, or an instance built where the capture types are unknown | make the captured variable's type concrete, or pass it as an argument |
 | `overspecialized-anonymous-function` | `overspecialized_anonymous_functions(repo, mod)` | a captured type or function: the anonymous function compiles anew for every value | pass it as an argument, or define a callable struct whose field is a `DataType` or `Function` |
 
@@ -136,8 +156,14 @@ place each site with `struct_site(T, struct_locations(Corset.Source.(files)))`.
 `mutable-struct` reports every struct of `mutable_structs(mod)`. Repair: return the changed data from
 the function that computes it and keep the struct immutable. A struct that needs a finalizer, a
 cyclic reference or a lock's identity opts out with `# lint: mutable-struct` and a reason.
-A limit on field count (`wide-struct`) takes one line: `fieldcount(T) > limit` over
-`module_structs(mod)`.
+`wide-struct` reports structs with more than `Repository.struct_field_limit` fields (default 12).
+Repair: group related fields into a struct of their own.
+
+`struct-constant` reports constants of the package that hold a struct it defines, or alias a type naming
+one (`const Alias = Union{Nothing, Setting}`): Revise rebuilds a revised struct but not an unchanged
+constant built from it. `derived-constant` reports a constant whose value calls a function the package
+defines, which Revise does not re-evaluate until the constant's own text changes. Repair: build the value
+in a function, and spell an alias at its use sites.
 
 ```julia
 files = repository_sources(REPO, ("src",))
@@ -164,6 +190,11 @@ Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 | `c-type` | `c_type_sites(source)` | `Cint`, `Cdouble` and the other C-interop types outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | `Int`, `Float64` or `String`; convert at the `ccall` |
 | `one-letter` | `one_letter_sites(repo, source)` | one-letter variable names (exempt: `_` and `Repository.one_letter_exempt`) | name the variable |
 | `file-length` | `long_file_sites(repo, source)` | source files longer than `Repository.file_line_limit` lines (default 1500) | split the file by topic |
+| `broad-catch` | `broad_catches(source)` | `catch` blocks that neither call `rethrow()` nor `throw` what they caught, so a missing file and an internal `error()` end alike; placed from the `try` line to the block's first line | test the exception with `isa`, handle the expected types and `rethrow()` the rest |
+| `quadratic-scan` | `quadratic_scans(source)` | a `for` loop, comprehension, generator, anonymous function passed to `map`, `count` and the like, or broadcast over a collection `xs` (a variable or field, also through `enumerate`, `zip` and `eachindex`) that calls `filter`, `findall`, `findfirst`, `findlast`, `count`, `any`, `all` or `in` on the same `xs` per element; `in.(xs, (xs,))` too | group `xs` once: a `Dict` from key to entries, or `sort` and `searchsorted` |
+| `quadratic-vcat` | `quadratic_concatenations(source)` | a fold whose operator is `vcat`, `hcat`, `cat` or `hvcat` that runs one piece at a time: `reduce` with `init` (Base's one-allocation `reduce(vcat, ::AbstractVector{<:AbstractVector})` then does not apply) or over a generator, and every `foldl`, `foldr`, `mapreduce`, `mapfoldl` and `mapfoldr`, `do` form included. Each step copies the accumulator, so the fold is quadratic in the total length | `collect(T, Iterators.flatten(pieces))`, a flattening comprehension `T[x for piece in pieces for x in piece]`, or `reduce(vcat, pieces)` on a nonempty vector |
+| `non-atomic-write` | `non_atomic_writes(source)` | `write.(paths, texts)`, `foreach(write, paths, texts)`, and loops, comprehensions and mapped anonymous functions whose body calls `write(path, …)` or `open(path, "w")` (also `"a"`, `"w+"`, `"a+"`, `"r+"`, `write = true`, `append = true`, `truncate = true`) on a path built from the iteration variable; a crash halfway leaves some files rewritten. A function that calls `mv` or `rename` stages its writes and passes | compute every text, write each to a temporary file beside its target, then rename them all (`Corset.write_all!`) |
+| `forbidden-pattern` | `forbidden_pattern_sites(repo, source)` | lines that match a `Repository.forbidden_patterns` entry (`name`, `pattern`, `message`, optional `unless`, `skip_files`) | what the entry's `message` says |
 
 ## Rules with fixers
 

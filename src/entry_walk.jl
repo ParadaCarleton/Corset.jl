@@ -41,7 +41,7 @@ callee needs no frame: its own calls are already in `ir`.
 function frame_callees(ir::COMPILER.IRCode, package::Package)::Vector{Core.MethodInstance}
     expressions = [statement for statement in ir.stmts.stmt if statement isa Expr]
     invoked = [invoked_instance(first(statement.args)) for statement in expressions if statement.head in (:invoke, :invoke_modify)]
-    inlined = reduce(vcat, inlined_instances.(ir.debuginfo.edges); init = Core.MethodInstance[])
+    inlined = collect(Core.MethodInstance, Iterators.flatten(inlined_instances.(ir.debuginfo.edges)))
     return Core.MethodInstance[filter(Base.Fix2(followed, package), invoked); filter(Base.Fix2(defined_in, package), inlined)]
 end
 
@@ -50,7 +50,7 @@ defined_in(callee::Core.MethodInstance, package::Package)::Bool = callee.def isa
 
 """The method instances inlined at debug info `debuginfo`: its own `def`, and those inlined below it."""
 inlined_instances(debuginfo::Core.DebugInfo)::Vector{Core.MethodInstance} = Core.MethodInstance[
-    own_instance(debuginfo.def); reduce(vcat, [inlined_instances(edge) for edge in debuginfo.edges]; init = Core.MethodInstance[])
+    own_instance(debuginfo.def); collect(Core.MethodInstance, Iterators.flatten([inlined_instances(edge) for edge in debuginfo.edges]))
 ]
 
 """The method instance a debug info `def` names, as a vector of one; none for a method or a symbol."""
@@ -70,7 +70,7 @@ included. Each instance is inferred once; frames of other modules are walked thr
 """
 entry_frames(seeds::AbstractVector{<:Type}, target::Module)::Vector{Inferred} = walk_frames(
     Package(target),
-    unique(reduce(vcat, selected_instances.(seeds); init = Core.MethodInstance[])),
+    unique(collect(Core.MethodInstance, Iterators.flatten(selected_instances.(seeds)))),
     Set{Core.MethodInstance}(),
     Inferred[],
 )
@@ -90,7 +90,7 @@ function walk_frames(
     end
     frames = Inferred[frame for frame in typed_frame.(frontier) if !isnothing(frame)]
     reached = union(seen, frontier)
-    callees = unique(reduce(vcat, frame_callees.(getfield.(frames, :ir), (package,)); init = Core.MethodInstance[]))
+    callees = unique(collect(Core.MethodInstance, Iterators.flatten(frame_callees.(getfield.(frames, :ir), (package,)))))
     owned = frames[belongs.(getfield.(getfield.(frames, :method), :module), (package,))]
     return walk_frames(package, filter(!in(reached), callees), reached, vcat(kept, owned))
 end

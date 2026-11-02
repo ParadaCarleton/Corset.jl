@@ -17,7 +17,7 @@ explicit import has one per name, at its first import.
 """
 function non_public_accesses(mod::Module, file::AbstractString = entry_file(mod))::Vector{Site}
     findings = improper_qualified_accesses(mod, file)
-    accesses = unique(reduce(vcat, qualified_uses.(first.(findings), last.(findings), (USES(file),)); init = NamedTuple[]))
+    accesses = unique(collect(NamedTuple, Iterators.flatten(qualified_uses.(first.(findings), last.(findings), (USES(file),)))))
     imports = [row for (_, rows) in improper_explicit_imports(mod, file; strict = false) for row in rows if row.public_import === false]
     return [non_public_site.(accesses, getproperty.(accesses, :accessing_from)); non_public_site.(imports, getproperty.(imports, :importing_from))]
 end

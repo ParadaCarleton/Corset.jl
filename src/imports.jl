@@ -255,7 +255,7 @@ function import_file(source::Source, editable::Bool)::ImportFile
     statements = ImportStatement[import_statement.(nodes, text, (lines,), module_block.(nodes, (modules,)))...]
     includes = include_nodes(tree)
     return ImportFile(
-        normpath(path), text, Set(name_tokens(tree, 0)), Set{String}(reduce(vcat, relayed_names.(nodes); init = String[])),
+        normpath(path), text, Set(name_tokens(tree, 0)), Set{String}(collect(String, Iterators.flatten(relayed_names.(nodes)))),
         statements, include_path.(includes, dirname(path)),
         module_block.(includes, (modules,)), editable,
     )
@@ -289,7 +289,7 @@ function unit_files(path::AbstractString, known::AbstractDict{String, ImportFile
     end
     unit = UnitFile(file, scope)
     below::Vector{String} = vcat(seen, [path])
-    return reduce(vcat, unit_files.(file.includes, (known,), (below,), block_scope.((unit,), file.include_blocks)); init = [unit])
+    return UnitFile[unit; collect(UnitFile, Iterators.flatten(unit_files.(file.includes, (known,), (below,), block_scope.((unit,), file.include_blocks))))]
 end
 
 """Whether `file` has a bare `using M`, which may bring in any name `M` exports."""
@@ -312,12 +312,12 @@ function unit_moves(unit::AbstractVector{UnitFile})::Vector{ImportMove}
     supplied = any(has_bare_using, getfield.(unit, :file))
     relayed = Set{String}(name for entry in unit for name in entry.file.relayed)
     editable = filter(entry -> entry.file.editable, unit)
-    return reduce(vcat, file_moves.((unit,), supplied, (relayed,), editable); init = ImportMove[])
+    return collect(ImportMove, Iterators.flatten(file_moves.((unit,), supplied, (relayed,), editable)))
 end
 
 """The moves of the unpinned statements of `entry`, one of `unit`; `supplied` when a bare `using` is in the unit, `relayed` the unit's `relayed_names`."""
-file_moves(unit::AbstractVector{UnitFile}, supplied::Bool, relayed::AbstractSet{String}, entry::UnitFile)::Vector{ImportMove} = reduce(
-    vcat, statement_moves.((unit,), supplied, (relayed,), (entry,), filter(statement -> !statement.pinned, entry.file.statements)); init = ImportMove[],
+file_moves(unit::AbstractVector{UnitFile}, supplied::Bool, relayed::AbstractSet{String}, entry::UnitFile)::Vector{ImportMove} = collect(
+    ImportMove, Iterators.flatten(statement_moves.((unit,), supplied, (relayed,), (entry,), filter(statement -> !statement.pinned, entry.file.statements))),
 )
 
 """The moves of the items of `statement` in `entry` that its file does not use and no relative import in the unit takes (`relayed`)."""
@@ -361,7 +361,7 @@ function import_moves(files::AbstractVector{ImportFile})::Vector{ImportMove} # l
     units = unit_files.(roots, (known,), (String[],), "")
     paths = collect(keys(known))
     membership::Dict{String, Int} = Dict(paths .=> unit_count.((units,), paths))
-    return filter(Base.Fix1(single_unit, membership), reduce(vcat, unit_moves.(units); init = ImportMove[]))
+    return filter(Base.Fix1(single_unit, membership), collect(ImportMove, Iterators.flatten(unit_moves.(units))))
 end
 
 """How many of `units` (each a module's files, ragged) hold the file at `path`."""
@@ -492,7 +492,7 @@ struct PlacedTexts
 end
 
 function (placed::PlacedTexts)(moves::AbstractVector{ImportMove})::Vector{Pair{String, String}}
-    touched = Set(reduce(vcat, [vcat([move.file], move.targets) for move in moves]; init = String[]))
+    touched = Set(collect(String, Iterators.flatten([vcat([move.file], move.targets) for move in moves])))
     rewritten = placed.files[in.([file.path for file in placed.files], (touched,))]
     return Pair.([file.path for file in rewritten], placed_text.(rewritten, (moves,)))
 end

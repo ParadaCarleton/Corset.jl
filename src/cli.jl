@@ -135,6 +135,9 @@ function with_overrides(
         checked_limit(something(candidate_limit, config.candidate_limit), "--candidate-limit"),
         config.entry_points,
         config.file_line_limit,
+        config.struct_field_limit,
+        config.strict_captures,
+        config.forbidden_patterns,
     )
 end
 
@@ -298,15 +301,16 @@ end
 
 """
 The entry signatures of the loaded package `mod` at `root`, by source name: the `entry_points` of
-`config` alone when it sets them, else the `entries` sources. Test output goes to `output`; the
-tests run without this command's own environment variables.
+`config` alone when it sets them, else the `entries` sources, read from `mod`'s methods `own_methods`.
+Test output goes to `output`; the tests run without this command's own environment variables.
 """
 function seed_sources(
         config::Config,
         root::AbstractString,
         entries::Union{Nothing, AbstractString},
         mod::Module,
-        output::IO,
+        output::IO;
+        own_methods::AbstractVector{Method} = defined_methods(mod),
     )::Vector{Pair{String, Vector{Type}}}
     sources = checked_entries(config, entries)
     if !isnothing(config.entry_points)
@@ -314,7 +318,7 @@ function seed_sources(
         return ["entry_points" => Entries.configured_signatures(abspath(root, file), name)]
     end
     warn_tests!(output, sources)
-    return Pair{String, Vector{Type}}.(string.(sources), Entries.source_signatures.((mod,), sources; root, output, unset = (INNER_VARIABLE, "JULIA_LOAD_PATH")))
+    return Pair{String, Vector{Type}}.(string.(sources), Entries.source_signatures.((mod,), sources; root, output, unset = (INNER_VARIABLE, "JULIA_LOAD_PATH"), own_methods))
 end
 
 """Print to `output` that the `:tests` source, when `sources` holds it, runs the whole test suite and its child processes."""
@@ -331,13 +335,13 @@ many of the package's frames the walk kept (`frames`), and the process's peak re
 """
 function seed_summary(sources::AbstractVector{Pair{String, Vector{Type}}}, frames::AbstractVector{Inferred}, peak::Integer)::String
     counts = join(["$name $(length(signatures))" for (name, signatures) in sources], ", ")
-    seeds = length(unique(reduce(vcat, last.(sources); init = Type[])))
+    seeds = length(unique(collect(Type, Iterators.flatten(last.(sources)))))
     return "entry signatures: $counts; $seeds seeds, $(length(frames)) frames kept; peak RSS $(peak ÷ 2^20) MiB"
 end
 
 """The `entry_frames` of `mod` the typed rules read, walked once from the union of `sources`."""
 seeded_frames(sources::AbstractVector{Pair{String, Vector{Type}}}, mod::Module)::Vector{Inferred} =
-    entry_frames(unique(reduce(vcat, last.(sources); init = Type[])), mod)
+    entry_frames(unique(collect(Type, Iterators.flatten(last.(sources)))), mod)
 
 """The path of `site` relative to `root`; empty for a site with no file."""
 function display_path(root::AbstractString, site::Site)::String
@@ -402,7 +406,10 @@ function exit_code(findings::AbstractVector{Finding}, deny_warnings::Bool)::Int
 end
 
 """The `corset rules` line for `rule`: its name, group, the level `config` gives it, and its summary."""
-rule_line(config::Config, rule::Rule)::String = rpad(rule_name(rule), 20) * rpad(rule_group(rule), 10) * rpad(level(config, rule), 7) * rule_summary(rule)
+rule_line(config::Config, rule::Rule)::String = rpad(rule_name(rule), NAME_COLUMN) * rpad(rule_group(rule), 10) * rpad(level(config, rule), 7) * rule_summary(rule)
+
+"""The width of the name column of `corset rules`: the longest rule name and a space."""
+const NAME_COLUMN = maximum(length ∘ rule_name, RULES) + 1
 
 """`corset rules`: one line per rule with its group and the level `config` gives it."""
 function print_rules(io::IO, config::Config)::Nothing
@@ -433,18 +440,20 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
         return relaunch(root, args) # COV_EXCL_LINE
     end
     mod = nothing
+    own_methods = Method[]
     frames = nothing
     sources = Pair{String, Vector{Type}}[]
     if loads
         mod = load_package(root)
+        own_methods = defined_methods(mod)
         if any(reads_signatures, enabled_rules(config))
-            sources = seed_sources(config, root, options.entries, mod, err)
+            sources = seed_sources(config, root, options.entries, mod, err; own_methods)
         end
         if !isempty(sources)
             frames = seeded_frames(sources, mod)
         end
     end
-    findings, skipped = run_rules(config, root; mod, frames, fix = options.fix, update_baseline = options.update_baseline)
+    findings, skipped = run_rules(config, root; mod, frames, fix = options.fix, update_baseline = options.update_baseline, own_methods)
     print_findings(out, root, findings, something(options.format, "human"))
     if !isnothing(frames)
         println(err, seed_summary(sources, frames, Sys.maxrss()))
@@ -453,6 +462,34 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
         println(err, "skipped (they read the loaded package or need entry signatures): ", join(skipped, ", "))
     end
     return exit_code(findings, options.deny_warnings)
+end
+
+"""
+    check_project(root, mod, signatures; out = stdout, format = "human", deny_warnings = false, update_baseline = false)
+
+`corset check` for a package `mod` already loaded in this process, the entry `signatures` given by the
+caller, and the configuration of the project at `root`. Prints the findings to `out` and returns the exit
+code: a test calls this once, `@test check_project(root, MyPackage, signatures) == 0`. `update_baseline`
+seeds and lowers the baseline file as `corset check --update-baseline` does.
+"""
+function check_project(
+        root::AbstractString,
+        mod::Module,
+        signatures::AbstractVector{<:Type};
+        out::IO = stdout,
+        format::AbstractString = "human",
+        deny_warnings::Bool = false,
+        update_baseline::Bool = false,
+    )::Int
+    project = project_root(root)
+    config = load_config(project)
+    frames = nothing
+    if any(reads_signatures, enabled_rules(config))
+        frames = seeded_frames(Pair{String, Vector{Type}}["signatures" => Type[signatures...]], mod)
+    end
+    findings, _ = run_rules(config, project; mod, frames, update_baseline)
+    print_findings(out, project, findings, format)
+    return exit_code(findings, deny_warnings)
 end
 
 """Run `corset rules`: print the rules and their levels to `out`."""

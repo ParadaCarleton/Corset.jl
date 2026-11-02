@@ -11,7 +11,21 @@ const SYNTAX = Base.JuliaSyntax # lint: non-public-access  the registered JuliaS
 # allows it at any number of sites; an integer allows that many sites. `TOML.print` drops comments.
 
 """
-    Repository(root; baseline = nothing, one_letter_exempt = (), skipped_directories = (), file_line_limit = 1500)
+A pattern a project forbids in its source text, found by the `forbidden-pattern` rule: each line of a
+file under the checked directories that matches `pattern`, unless it also matches `unless` or sits in a
+file named in `skip_files` (paths from the repository root). `message` tells the reader why it is forbidden.
+"""
+struct ForbiddenPattern
+    name::String
+    pattern::Regex
+    message::String
+    unless::Union{Regex, Nothing}
+    skip_files::Tuple{Vararg{String}}
+end
+
+"""
+    Repository(root; baseline = nothing, one_letter_exempt = (), skipped_directories = (), file_line_limit = 1500,
+        struct_field_limit = 12, strict_captures = false, forbidden_patterns = ())
 
 The tree the rules read, and the settings that relax them. The defaults are the strict reading: every
 finding of every rule fails. `root` is the tree whose source the rules read (made absolute).
@@ -23,6 +37,10 @@ finding of every rule fails. `root` is the tree whose source the rules read (mad
 - `skipped_directories`: directory names `repository_sources` leaves out wherever they sit, such as
   `("vendor",)`. Hidden directories (a leading `.`) are always left out.
 - `file_line_limit`: the most lines a source file may hold before the `file-length` rule reports it.
+- `struct_field_limit`: the most fields a struct may hold before the `wide-struct` rule reports it.
+- `strict_captures`: whether the anonymous-function rules also report a capture of plain immutable data
+  (an `Int`, a tuple of them), for a project whose functions read only their arguments.
+- `forbidden_patterns`: the `ForbiddenPattern`s the `forbidden-pattern` rule reads.
 """
 struct Repository
     root::String
@@ -30,6 +48,9 @@ struct Repository
     one_letter_exempt::Tuple{Vararg{Symbol}}
     skipped_directories::Tuple{Vararg{String}}
     file_line_limit::Int
+    struct_field_limit::Int
+    strict_captures::Bool
+    forbidden_patterns::Tuple{Vararg{ForbiddenPattern}}
 end
 Repository(
     root::AbstractString;
@@ -37,15 +58,30 @@ Repository(
     one_letter_exempt::Tuple{Vararg{Symbol}} = (),
     skipped_directories::Tuple{Vararg{String}} = (),
     file_line_limit::Integer = DEFAULT_FILE_LINE_LIMIT,
+    struct_field_limit::Integer = DEFAULT_STRUCT_FIELD_LIMIT,
+    strict_captures::Bool = false,
+    forbidden_patterns::Tuple{Vararg{ForbiddenPattern}} = (),
 )::Repository = Repository(
     abspath(root),
     baseline,
     one_letter_exempt,
     skipped_directories,
     checked_line_limit(file_line_limit, "file_line_limit"),
+    checked_field_limit(struct_field_limit, "struct_field_limit"),
+    strict_captures,
+    forbidden_patterns,
 )
 
 const DEFAULT_FILE_LINE_LIMIT = 1500
+const DEFAULT_STRUCT_FIELD_LIMIT = 12
+
+"""`limit`, a `struct_field_limit` set by `source`; one below 1 throws, since it would report every struct."""
+function checked_field_limit(limit::Integer, source::AbstractString)::Int
+    if limit < 1
+        throw(UsageError("$source is $limit; a struct may hold at least one field"))
+    end
+    return limit
+end
 
 """`limit`, a `file_line_limit` set by `source`; one below 1 throws, since it would report every file."""
 function checked_line_limit(limit::Integer, source::AbstractString)::Int
@@ -106,7 +142,7 @@ end
 
 function opt_out_comments(path::AbstractString, text::String)::Vector{OptOutComment}
     tokens = [token.range for token in SYNTAX.tokenize(text) if SYNTAX.kind(token) == COMMENT_KIND]
-    comments = reduce(vcat, token_comments.(text, (SYNTAX.SourceFile(text),), tokens); init = OptOutComment[])
+    comments = collect(OptOutComment, Iterators.flatten(token_comments.(text, (SYNTAX.SourceFile(text),), tokens)))
     unclosed = filter(Base.Fix1(open_begin, comments), comments)
     if !isempty(unclosed)
         throw(UsageError("$path:$(first(unclosed).line): `# lint: $(first(unclosed).rule)-begin` has no `# lint: $(first(unclosed).rule)-end` below it"))
@@ -151,7 +187,7 @@ every line from a `-begin` to the `-end` that closes it.
 function opt_outs(comments::AbstractVector{OptOutComment}, rule::AbstractString)::OptOuts
     named = [comment for comment in comments if comment.rule == rule]
     spans = span_lines.((named,), filter(is_begin, named))
-    lines = Set{Int}(reduce(vcat, spans; init = Int[comment.line for comment in named]))
+    lines = Set{Int}(Iterators.flatten((Int[comment.line for comment in named], Iterators.flatten(spans))))
     return OptOuts(any(comment.form === :file for comment in named), lines)
 end
 
@@ -166,7 +202,7 @@ span_lines(comments::AbstractVector{OptOutComment}, opening::OptOutComment)::Vec
 function julia_files(directory::AbstractString, skipped::Tuple{Vararg{String}})::Vector{String}
     entries = readdir(directory; join = true)
     entered = filter(Base.Fix2(entered_directory, skipped), entries)
-    return reduce(vcat, julia_files.(entered, (skipped,)); init = filter(julia_file, entries))
+    return String[filter(julia_file, entries); collect(String, Iterators.flatten(julia_files.(entered, (skipped,))))]
 end
 
 """Whether `julia_files` enters `entry`: a directory, not a link, not hidden and not named in `skipped`."""
@@ -178,7 +214,7 @@ julia_file(entry::AbstractString)::Bool = !isdir(entry) && endswith(entry, ".jl"
 
 """The Julia files under `directories` of `repository`; hidden directories and its `skipped_directories` are left out."""
 repository_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String} = sort!(
-    reduce(vcat, julia_files.(joinpath.(repository.root, directories), (repository.skipped_directories,)); init = String[]),
+    collect(String, Iterators.flatten(julia_files.(joinpath.(repository.root, directories), (repository.skipped_directories,)))),
 )
 
 """The baseline entry left after `found` sites against `entry`: a note stays, a count falls to `found`."""

@@ -15,7 +15,7 @@ function held_floats(type::Any, depth::Integer)::Vector{DataType} # lint: abstra
     elseif type <: AbstractFloat && isconcretetype(type)
         return DataType[type]
     end
-    return unique(reduce(vcat, held_floats.(collect(type.parameters), depth + 1); init = DataType[]))
+    return unique(collect(DataType, Iterators.flatten(held_floats.(collect(type.parameters), depth + 1))))
 end
 
 """The floats a value of IR type `type` holds; a `Type{Float64}` value holds no float."""
@@ -35,7 +35,7 @@ end
 
 """The `FloatBudget` of `item`, from its argument types."""
 function float_budget(item::Inferred)::FloatBudget
-    floats = unique(reduce(vcat, held_floats.(COMPILER.widenconst.(item.ir.argtypes[2:item.method.nargs]), 0); init = DataType[]))
+    floats = unique(collect(DataType, Iterators.flatten(held_floats.(COMPILER.widenconst.(item.ir.argtypes[2:item.method.nargs]), 0))))
     return FloatBudget(floats, maximum(precision, floats; init = 0))
 end
 
@@ -94,7 +94,7 @@ end
 
 """The floats IR statement `statement` makes: those of its inferred `type`, or a `return`'s value's (its `operands`)."""
 result_floats(::Any, type::Any, ::AbstractVector{Operand})::Vector{DataType} = value_floats(COMPILER.widenconst(type)) # lint: abstract-local  IR statements and types are any value
-result_floats(::Core.ReturnNode, ::Any, operands::AbstractVector{Operand})::Vector{DataType} = reduce(vcat, getfield.(operands, :floats); init = DataType[])
+result_floats(::Core.ReturnNode, ::Any, operands::AbstractVector{Operand})::Vector{DataType} = collect(DataType, Iterators.flatten(getfield.(operands, :floats)))
 
 """
 The detail of IR statement `statement`, of inferred type `type`, when it widens: its result holds a
@@ -172,7 +172,7 @@ function float_widenings(
         search::CandidateSearch = CandidateSearch(inferred),
         comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
     )::Vector{Site}
-    return one_per_line(reduce(vcat, frame_widenings.((repository,), audited_frames(repository, inferred, "float-widening", comments), (search,)); init = Site[]))
+    return one_per_line(collect(Site, Iterators.flatten(frame_widenings.((repository,), audited_frames(repository, inferred, "float-widening", comments), (search,)))))
 end
 
 """The `float_widenings` sites of `item`, one per widening statement."""

@@ -22,9 +22,21 @@ struct Config
     candidate_limit::Int
     entry_points::Union{Nothing, Pair{String, Symbol}}
     file_line_limit::Int
+    struct_field_limit::Int
+    strict_captures::Bool
+    forbidden_patterns::Tuple{Vararg{ForbiddenPattern}}
 end
 
 const LEVELS = (:allow, :warn, :deny)
+
+"""One `[[preferences.Corset.forbidden_patterns]]` entry, as written (`ForbiddenPattern` holds the compiled form)."""
+@option struct ForbiddenPatternPreference
+    name::String # COV_EXCL_LINE  a constructor `@option` generates, attributed to this line
+    pattern::String
+    message::String
+    unless::Union{Nothing, String} = nothing
+    skip_files::Vector{String} = String[]
+end
 
 """One `[Corset]` preferences table, as written: a key left out is `nothing`, so a layer overlays another key by key."""
 @option struct Preferences
@@ -37,6 +49,9 @@ const LEVELS = (:allow, :warn, :deny)
     candidate_limit::Union{Nothing, Int} = nothing
     entry_points::Union{Nothing, String} = nothing
     file_line_limit::Union{Nothing, Int} = nothing
+    struct_field_limit::Union{Nothing, Int} = nothing
+    strict_captures::Union{Nothing, Bool} = nothing
+    forbidden_patterns::Union{Nothing, Vector{ForbiddenPatternPreference}} = nothing
 end
 
 """Merge two preference dictionaries, with `over` overriding matching keys in `under`."""
@@ -102,7 +117,32 @@ function load_config(root::AbstractString)::Config
         checked_limit(something(prefs.candidate_limit, DEFAULT_CANDIDATE_LIMIT), "[preferences.Corset] candidate_limit"),
         entry_point(prefs.entry_points),
         checked_line_limit(something(prefs.file_line_limit, DEFAULT_FILE_LINE_LIMIT), "[preferences.Corset] file_line_limit"),
+        checked_field_limit(something(prefs.struct_field_limit, DEFAULT_STRUCT_FIELD_LIMIT), "[preferences.Corset] struct_field_limit"),
+        something(prefs.strict_captures, false),
+        Tuple(forbidden_pattern.(something(prefs.forbidden_patterns, ForbiddenPatternPreference[]))),
     )
+end
+
+"""The `ForbiddenPattern` of entry `entry`; a pattern that does not compile throws a `UsageError`."""
+function forbidden_pattern(entry::ForbiddenPatternPreference)::ForbiddenPattern # lint: unmarked-mutation  builds a tuple of the vector's length
+    pattern = compiled_pattern(entry.pattern, "pattern of $(repr(entry.name))")
+    unless = nothing
+    if !isnothing(entry.unless)
+        unless = compiled_pattern(entry.unless, "unless of $(repr(entry.name))")
+    end
+    return ForbiddenPattern(entry.name, pattern, entry.message, unless, Tuple(entry.skip_files)) # lint: runtime-dispatch  a tuple of the vector's length
+end
+
+"""The `Regex` of `text`; one that does not compile throws a `UsageError` naming `what`."""
+function compiled_pattern(text::AbstractString, what::AbstractString)::Regex
+    try
+        return Regex(text)
+    catch error_
+        if error_ isa ErrorException
+            throw(UsageError("[preferences.Corset.forbidden_patterns] $what does not compile: $(sprint(showerror, error_))"))
+        end
+        rethrow() # COV_EXCL_LINE
+    end
 end
 
 """
@@ -154,12 +194,15 @@ function repository(config::Config, root::AbstractString)::Repository
     if !isnothing(config.baseline)
         baseline = abspath(root, config.baseline)
     end
-    return Repository(
+    return Repository( # lint: runtime-dispatch  the keyword call checks the tuple settings once per run
         root;
         baseline,
         one_letter_exempt = config.one_letter_exempt,
         skipped_directories = config.skipped_directories,
         config.file_line_limit,
+        config.struct_field_limit,
+        config.strict_captures,
+        config.forbidden_patterns,
     )
 end
 

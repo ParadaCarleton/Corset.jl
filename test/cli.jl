@@ -35,6 +35,19 @@ end
 
 const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nend\n"]
 
+@testset "check_project: a package loaded in this process, signatures from the caller" begin
+    demo = Module(:Demo)
+    Core.eval(demo, :(f(x::Int)::Int = x))
+    project = "name = \"Demo\"\n[[preferences.Corset.forbidden_patterns]]\nname = \"todo\"\npattern = \"TODO\"\nmessage = \"finish it\"\n[preferences.Corset.levels]\nforbidden-pattern = \"deny\"\n"
+    signatures = Type[Tuple{typeof(demo.f), Int}]
+    clean = package_tree(project, SOURCE_TREE)
+    @test Corset.check_project(clean, demo, signatures; out = devnull) == 0
+    dirty = package_tree(project, [SOURCE_TREE; "src/Todo.jl" => "# TODO\n"])
+    report = IOBuffer()
+    @test Corset.check_project(dirty, demo, signatures; out = report) == 1
+    @test occursin("forbidden-pattern", String(take!(report)))
+end
+
 @testset "corset: configuration" begin
     root = package_tree("name = \"Demo\"\n", SOURCE_TREE)
     config = load_config(root)
@@ -68,6 +81,24 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
         @test_throws Corset.UsageError with_overrides(limited, false, Pair{String, Symbol}[], -1)
         @test_throws Corset.UsageError load_config(package_tree("name = \"D\"\n[preferences.Corset]\ncandidate_limit = -2\n", Pair[]))
         @test Corset.command_options(Corset.parse_args(["check", "--candidate-limit", "7"], Corset.argument_settings())).candidate_limit == 7
+    end
+
+    @testset "struct_field_limit, strict_captures, forbidden_patterns reach the Repository; a bad value fails loud" begin
+        @test config.struct_field_limit == Corset.DEFAULT_STRUCT_FIELD_LIMIT
+        @test !config.strict_captures
+        @test isempty(config.forbidden_patterns)
+        text = "name = \"D\"\n[preferences.Corset]\nstruct_field_limit = 5\nstrict_captures = true\n" *
+            "[[preferences.Corset.forbidden_patterns]]\nname = \"count\"\npattern = \"n = \\\\d\"\nmessage = \"name it\"\nunless = \"ok\"\nskip_files = [\"a.jl\"]\n"
+        tree = package_tree(text, Pair[])
+        repository = Corset.repository(load_config(tree), tree)
+        @test repository.struct_field_limit == 5
+        @test repository.strict_captures
+        forbidden = only(repository.forbidden_patterns)
+        @test forbidden.name == "count" && forbidden.message == "name it" && forbidden.skip_files == ("a.jl",)
+        @test occursin(forbidden.pattern, "n = 4") && occursin(forbidden.unless, "ok")
+        @test_throws Corset.UsageError load_config(package_tree("name = \"D\"\n[preferences.Corset]\nstruct_field_limit = 0\n", Pair[]))
+        broken = "name = \"D\"\n[[preferences.Corset.forbidden_patterns]]\nname = \"x\"\npattern = \"(\"\nmessage = \"m\"\n"
+        @test_throws r"pattern of \"x\" does not compile" load_config(package_tree(broken, Pair[]))
     end
 
     @testset "file_line_limit: the config's, else the default, reaching the Repository; one below 1 fails loud" begin
@@ -156,6 +187,10 @@ end
     names = rule_name.(RULES)
     @test allunique(names)
     @test all(group in (:default, :pedantic) for group in rule_group.(RULES))
+    @test sort!([rule_name(rule) for rule in RULES if rule_group(rule) === :pedantic]) == [
+        "c-type", "concrete-return", "file-length", "float64", "jscpd", "nothing-return", "one-letter",
+        "quadratic-scan", "range-guard", "ref", "repeated-prefix", "struct-constant", "wide-struct",
+    ]
 end
 
 @testset "corset: running the rules" begin
@@ -253,7 +288,7 @@ end
         unbraced = package_tree(
             "name = \"Demo\"\n",
             [
-                "src/Demo.jl" => "module Demo\nf(x::T)::T where T = x\ng(x)::T where {T} = convert(T, x)\nend\n",
+                "src/Demo.jl" => "module Demo\nf(x::T)::T where T = x\ng(x::Integer)::T where {T} = convert(T, x)\nend\n",
             ],
         )
         @test length(run_rules(load_config(unbraced), unbraced)[1]) == 2
@@ -261,7 +296,7 @@ end
         @test length(findings) == 1
         @test only(findings).rule == "where-return"
         @test occursin("(f(x::T)::T) where T = x", read(joinpath(unbraced, "src", "Demo.jl"), String))
-        @test occursin("g(x)::T where {T} = convert(T, x)", read(joinpath(unbraced, "src", "Demo.jl"), String))
+        @test occursin("g(x::Integer)::T where {T} = convert(T, x)", read(joinpath(unbraced, "src", "Demo.jl"), String))
     end
 
     @testset "module rules run on a loaded package" begin
@@ -305,6 +340,7 @@ end
     @test exit_code(Finding[], true) == 0
 
     @test occursin("where-return", sprint(print_rules, load_config(root)))
+    @test occursin(r"\nbroad-catch +default +warn ", sprint(print_rules, load_config(root)))
 end
 
 @testset "corset: the command" begin
@@ -350,9 +386,9 @@ end
 @testset "corset: every pedantic rule reports on a source that breaks it" begin
     root = mktempdir()
     fixture = load_fixture(joinpath(root, "src"))
-    smells = join((SNIPPETS[name]["source"] for name in ("nothing-return", "range-guard", "return-type", "concrete-arg", "concrete-return", "float64", "c-type", "ref", "annotation", "one-letter", "fatou", "jscpd")), "\n")
+    smells = join((SNIPPETS[name]["source"] for name in ("nothing-return", "range-guard", "return-type", "concrete-arg", "concrete-return", "float64", "c-type", "ref", "annotation", "one-letter", "fatou", "jscpd", "quadratic-scan")), "\n")
     write(joinpath(root, "src", "smells.jl"), smells)
-    write(joinpath(root, "Project.toml"), "name = \"Demo\"\n")
+    write(joinpath(root, "Project.toml"), "name = \"Demo\"\n[preferences.Corset]\nstruct_field_limit = 1\nfile_line_limit = 1\n")
     config = with_overrides(load_config(root), true, Pair{String, Symbol}[], nothing)
     findings, skipped = run_rules(config, root; mod = fixture, frames = entry_frames(concrete_signatures(fixture), fixture))
     @test isempty(skipped)

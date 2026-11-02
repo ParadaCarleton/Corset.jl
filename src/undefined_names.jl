@@ -29,7 +29,7 @@ function import_names!( # lint: abstract-local  walks Julia ASTs, whose nodes ar
             loaded = try
                 Core.eval(Main, :(import $root))
                 reduce(getfield, clause.args[(begin + 1):end]; init = getfield(Main, root))
-            catch
+            catch # lint: broad-catch  loading any package can fail any way; its names then stay unknown
                 nothing
             end
             if loaded isa Module && node.head === :using
@@ -211,7 +211,7 @@ function path_pieces( # lint: abstract-local  walks Julia ASTs, whose nodes are 
         if any(isnothing, parts)
             return nothing
         end
-        return reduce(vcat, parts; init = String[])
+        return collect(String, Iterators.flatten(parts))
     end
     return nothing
 end
@@ -350,7 +350,7 @@ function undefined_names( # lint: abstract-local  walks Julia ASTs, whose nodes 
         # every file. A `let` gives the body the same local scope a testset does.
         lowered = try
             Meta.lower(scope, Expr(:let, Expr(:block), without_imports(last(target.args))))
-        catch
+        catch # lint: broad-catch  a testset's macros can throw anything; `unlowered` reports the testset
             push!(unlowered, "line $line")
             continue
         end

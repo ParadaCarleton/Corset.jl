@@ -163,3 +163,146 @@ struct var"Odd Name"
     held::Int
 end
 '''
+
+[broad-catch]
+source = '''
+function swallowed(path::String)::String
+    try
+        return read(path, String)
+    catch
+        return ""
+    end
+end
+function mapped(path::String)::Int
+    try
+        read(path, String)
+    catch error_
+        println(error_)
+        return 1
+    end
+    return 0
+end
+function rethrown(path::String)::String
+    try
+        return read(path, String)
+    catch error_
+        if error_ isa SystemError
+            return ""
+        end
+        Base.rethrow()
+    end
+end
+function thrown(path::String)::String
+    try
+        return read(path, String)
+    catch error_
+        throw(error_)
+    end
+end
+function cleaned(path::String)::Nothing
+    try
+        write(path, "x")
+    finally
+        rm(path)
+    end
+end
+function opted(path::String)::String
+    try
+        return read(path, String)
+    catch # lint: broad-catch  any failure means no cache
+        return ""
+    end
+end
+'''
+
+[quadratic-scan]
+source = '''
+function looped(items::Vector{Int})::Int
+    total = 0
+    for item in items
+        total += count(==(item), items)
+    end
+    return total
+end
+comprehended(items::Vector{Int})::Vector{Int} = [findfirst(==(item), items) for (index, item) in enumerate(items)]
+filtered(items::Vector{Int})::Vector{Int} = [item for item in items if item in items]
+mapped(items::Vector{Int})::Vector{Int} = map(item -> count(==(item), items), items)
+function blocked(items::Vector{Int})::Vector{Bool}
+    return map(items) do item
+        any(>(item), items)
+    end
+end
+broadcast_lambda(items::Vector{Int})::Vector{Int} = (item -> length(filter(<(item), items))).(items)
+shielded(items::Vector{Int})::Vector{Bool} = in.(items, (items,))
+fielded(holder::Holder)::Vector{Int} = [count(==(item), holder.items) for item in holder.items]
+other(items::Vector{Int}, others::Vector{Int})::Vector{Bool} = [item in others for item in items]
+grouped(items::Vector{Int})::Int = sum(get(counts(items), item, 0) for item in items)
+ranged(count_::Int)::Vector{Int} = [index for index in 1:count_ if index in (1, 2)]
+plain(items::Vector{Int})::Vector{Int} = map(abs, items)
+kept(items::Vector{Int}; limit::Int)::Vector{Int} = filter(<(limit), items)
+opted(items::Vector{Int})::Vector{Bool} = [item in items for item in items] # lint: quadratic-scan  items holds at most three
+'''
+
+[quadratic-vcat]
+source = '''
+seeded(pieces::Vector{Vector{Int}})::Vector{Int} = reduce(vcat, pieces; init = Int[])
+inline(pieces::Vector{Vector{Int}})::Vector{Int} = reduce(vcat, pieces, init = Int[])
+named(pieces::Vector{Vector{Int}}, init::Vector{Int})::Vector{Int} = reduce(Base.vcat, pieces; init)
+generated(count_::Int)::Vector{Int} = reduce(vcat, [index] for index in 1:count_)
+folded(pieces::Vector{Vector{Int}})::Vector{Int} = foldl(vcat, pieces)
+mapped(items::Vector{Int})::Matrix{Int} = mapreduce(item -> [item, item], hcat, items)
+function blocked(items::Vector{Int})::Vector{Int}
+    return mapreduce(vcat, items) do item
+        [item, item]
+    end
+end
+flat(pieces::Vector{Vector{Int}})::Vector{Int} = reduce(vcat, pieces)
+summed(items::Vector{Int})::Int = reduce(+, items; init = 0)
+appended(pieces::Vector{Vector{Int}})::Vector{Int} = foldl(append!, pieces; init = Int[])
+flattened(pieces::Vector{Vector{Int}})::Vector{Int} = collect(Int, Iterators.flatten(pieces))
+opted(pieces::Vector{Vector{Int}})::Vector{Int} = foldl(vcat, pieces) # lint: quadratic-vcat  pieces holds at most three
+'''
+
+[non-atomic-write]
+source = '''
+function looped(paths::Vector{String}, texts::Vector{String})::Nothing
+    for (path, text) in zip(paths, texts)
+        write(path, text)
+    end
+    return nothing
+end
+broadcast(paths::Vector{String}, texts::Vector{String})::Nothing = (write.(paths, texts); nothing)
+each(paths::Vector{String}, texts::Vector{String})::Nothing = foreach(write, paths, texts)
+function opened(names::Vector{String})::Nothing
+    for name in names
+        open(joinpath("out", name), "w") do io
+            println(io, name)
+        end
+    end
+    return nothing
+end
+appended(names::Vector{String})::Vector{Int} = [open(io -> write(io, name), name; append = true) for name in names]
+mapped(names::Vector{String})::Vector{Int} = map(name -> write("$name.txt", name), names)
+function streamed(io::IO, names::Vector{String})::Nothing
+    for name in names
+        write(io, name)
+    end
+    return nothing
+end
+read_each(names::Vector{String})::Vector{String} = [read(open(name, "r"), String) for name in names]
+function staged(paths::Vector{String}, texts::Vector{String})::Nothing
+    temporary = string.(paths, ".tmp")
+    write.(temporary, texts)
+    mv.(temporary, paths; force = true)
+    return nothing
+end
+single(path::String, text::String)::Int = write(path, text)
+function each_block(names::Vector{String})::Nothing
+    foreach(names) do name
+        write(name, name)
+    end
+    return nothing
+end
+lambda_broadcast(names::Vector{String})::Vector{Int} = (name -> write(name, name)).(names)
+opted(paths::Vector{String}, texts::Vector{String})::Nothing = (write.(paths, texts); nothing) # lint: non-atomic-write  scratch files
+'''

@@ -20,7 +20,7 @@ function identifier_names(node::SYNTAX.SyntaxNode)::Vector{String}
         end
         return String[]
     end
-    return reduce(vcat, [identifier_names(child) for child in SYNTAX.children(node)]; init = String[])
+    return collect(String, Iterators.flatten([identifier_names(child) for child in SYNTAX.children(node)]))
 end
 
 """The variable names `where` clause `clause` introduces: `T`, `T<:B` or `{T, S<:B}`, each the first identifier of its entry."""
@@ -102,4 +102,4 @@ The `FixPlan` that writes every short-form `f(x)::R where {E} = …` of `directo
 arguments as `(f(x)::R) where {E} = …`, the reading the long form `function f(x)::R where {E}` already has.
 """
 where_plan(repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{WhereParentheses, typeof(parenthesized_texts)} =
-    FixPlan(reduce(vcat, where_repairs.(directory_sources(repository, directories)); init = Repair{WhereParentheses}[]), parenthesized_texts)
+    FixPlan(collect(Repair{WhereParentheses}, Iterators.flatten(where_repairs.(directory_sources(repository, directories)))), parenthesized_texts)

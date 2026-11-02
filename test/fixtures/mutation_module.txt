@@ -47,3 +47,7 @@ viaccall(x) = ccall(:jl_typeof_str, Cstring, (Any,), x)
 negated(box) = !box
 @noinline zero_last(vectors...) = (last(vectors)[1] = 0; nothing)
 last_zeroed(a, b) = zero_last(a, b)
+viapointer(x) = ccall(cglobal(:jl_typeof_str), Cstring, (Any,), x)
+copied(names) = copy(names)
+joined(first_names, last_names) = [first_names; last_names]
+copied_into(names, source) = (copyto!(names.ref.mem, source.ref.mem); nothing)

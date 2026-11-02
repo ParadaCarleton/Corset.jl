@@ -917,6 +917,8 @@ end
         Tuple{typeof(length), Mutation.Box}, Tuple{typeof(iterate), Mutation.Box}, Tuple{typeof(show), IOBuffer, Mutation.Box},
         Tuple{typeof(Mutation.guarded), ReentrantLock}, Tuple{typeof(Mutation.zero_first), vector},
         Tuple{typeof(Mutation.negated), Mutation.Box}, Tuple{typeof(Mutation.last_zeroed), vector, vector},
+        Tuple{typeof(Mutation.viapointer), vector}, Tuple{typeof(Mutation.copied), Vector{String}},
+        Tuple{typeof(Mutation.joined), Vector{String}, Vector{String}}, Tuple{typeof(Mutation.copied_into), Vector{String}, Vector{String}},
     ]
     inferred = entry_frames(seeds, Mutation)
     sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred)
@@ -976,6 +978,14 @@ end
     @testset "an argument passed to a runtime dispatch or a ccall may be written, never clean" begin
         @test details["opaquecall"] == "argument `x` reaches a runtime dispatch (`runtime-dispatch`) and may be written"
         @test details["viaccall"] == "argument `x` reaches a `ccall` and may be written"
+        @test details["viapointer"] == "argument `x` reaches a `ccall` and may be written"
+    end
+    @testset "jl_genericmemory_copyto writes its destination and reads its source" begin
+        @test !haskey(details, "copied") && !haskey(details, "joined")
+        @test details["copied_into"] == "writes argument `names` but its name has no `!`"
+        far = only(item for item in inferred if item.method.name === :far_outer)
+        estate = Corset.escape_state(far.ir, far.method.nargs)
+        @test Corset.foreign_writes(Expr(:call, :pointer), [Core.Argument(2)], far.ir, estate).foreign == [2]
     end
     @testset "Base.sort and Base.replace copy before they write" begin
         for signature in (Tuple{typeof(sort), vector}, Tuple{typeof(replace), vector, Pair{Int, Int}})

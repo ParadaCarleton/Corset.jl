@@ -31,7 +31,7 @@ function disallowed_keys(
             mkpath(dirname(repository.baseline))
             touch(repository.baseline)
         end
-        return offenders!(repository, rule, sites; comments)
+        return offenders!(repository, rule, sites; comments, seed = true)
     end
     return exceeding(allowances(repository, rule), tally(kept))
 end

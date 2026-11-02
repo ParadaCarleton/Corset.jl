@@ -317,15 +317,22 @@ end
 stale(entries::AbstractDict, measured::AbstractDict{String, Int}, scopes::Tuple{Vararg{String}}, key::String)::Bool =
     any(startswith.(key, scopes)) && entries[key] isa AbstractString && !haskey(measured, key)
 
+"""The environment variable that, set to a non-empty value, lets `offenders!` seed a rule's missing baseline table."""
+const SEED_VARIABLE = "CORSET_SEED_BASELINE"
+
+"""Whether the environment asks for missing baseline tables to be seeded (`SEED_VARIABLE`)."""
+seeding_requested()::Bool = !isempty(get(ENV, SEED_VARIABLE, ""))
+
 """
-    offenders!(repository, rule, sites; scopes = ("",), fix = "", comments = Dict())
+    offenders!(repository, rule, sites; scopes = ("",), fix = "", comments = Dict(), seed = seeding_requested())
 
 The keys of `rule`'s offenders `sites` that `repository` does not allow, logged. Sites that a `# lint:`
 comment naming the rule opts out are dropped and counted in the log; the rest are tallied by key.
 Without a baseline (`Repository`'s default) every key is returned. With one, the offenders are held to
 `rule`'s table in the baseline file: the keys past their entry are returned, and a count the tally
 undercuts is lowered or deleted and the file rewritten. A note stays; one with no site is logged stale.
-A rule with no table is seeded with its tally.
+A rule with no table fails every key it measures, naming `SEED_VARIABLE`; only `seed = true` writes the
+table from the tally (`corset check --update-baseline`, or `SEED_VARIABLE` set in the environment).
 Several testsets may share one rule's table, and a run may not measure all of it (a partial copy of
 the tree): each passes the prefixes `scopes` that begin the keys it measures, and only entries under
 one of them can fall. `fix` tells the reader of the log how to repair an offender, such as the forms
@@ -334,6 +341,7 @@ the rule accepts. `comments` holds the `# lint:` comments of files already parse
 function offenders!(
         repository::Repository, rule::String, sites::AbstractVector{Site}; scopes::Tuple{Vararg{String}} = ("",), fix::String = "",
         comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
+        seed::Bool = seeding_requested(),
     )::Vector{String}
     kept, opted = unopted(sites, rule, comments)
     measured = tally(kept)
@@ -348,6 +356,10 @@ function offenders!(
     # one lowering can be lost (the baseline stays higher, never wrong) and the next run redoes it.
     path = realpath(baseline_file)
     baseline = read_baseline(path)
+    if !haskey(baseline, rule) && !seed
+        missing_table = "no table in $path (seed it by running with $SEED_VARIABLE=1, or `corset check --update-baseline`)"
+        return logged_over(rule, measured, detail_lines(kept), sort!(collect(keys(measured))), missing_table, fix)
+    end
     if !haskey(baseline, rule)
         baseline[rule] = Dict{String, Union{Int, String}}(measured)
         write_baseline!(baseline, path)
@@ -377,15 +389,16 @@ function offenders!(
 end
 
 """
-    ratchet!(repository, rule, sites; scopes = ("",), fix = "")
+    ratchet!(repository, rule, sites; scopes = ("",), fix = "", seed = seeding_requested())
 
 A test that `rule`'s offenders `sites` are all allowed: it fails on the keys `offenders!` returns, and
 returns them.
 """
 function ratchet!(
         repository::Repository, rule::String, sites::AbstractVector{Site}; scopes::Tuple{Vararg{String}} = ("",), fix::String = "",
+        seed::Bool = seeding_requested(),
     )::Vector{String}
-    over = offenders!(repository, rule, sites; scopes, fix)
+    over = offenders!(repository, rule, sites; scopes, fix, seed)
     @test isempty(over)
     return over
 end

@@ -143,7 +143,9 @@ end
         write(baseline, "")
         repository = Repository(root; baseline)
         sites = [Site("counted", "", 0, ""), Site("counted", "", 0, ""), Site("noted", "", 0, "")]
-        @test isempty(@test_logs (:warn, r"seeded") offenders!(repository, "rule", sites))
+        @test (@test_logs (:error, r"rule: offenders past no table in .*CORSET_SEED_BASELINE=1") offenders!(repository, "rule", sites)) == ["counted", "noted"]
+        @test TOML.parsefile(baseline) == Dict{String, Any}()
+        @test isempty(@test_logs (:warn, r"seeded") offenders!(repository, "rule", sites; seed = true))
         @test TOML.parsefile(baseline)["rule"] == Dict("counted" => 2, "noted" => 1)
         write(baseline, "[rule]\ncounted = 2\nnoted = \"kept: deliberate\"\n")
         @test isempty(offenders!(repository, "rule", [sites; Site("noted", "", 0, "")]))

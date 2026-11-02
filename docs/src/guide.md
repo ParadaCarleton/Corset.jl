@@ -38,8 +38,9 @@ fixed.
 const REPO = Repository(pkgdir(MyPackage); baseline = joinpath(@__DIR__, "code_baseline.toml"))
 ```
 
-Create an empty `code_baseline.toml` and run the tests. A rule without a table is seeded with its
-current offenders and passes:
+Create an empty `code_baseline.toml` and run the tests with `CORSET_SEED_BASELINE=1` set. A rule
+without a table fails and names that variable; with it set, the rule is seeded with its current
+offenders and passes:
 
 ```toml
 [hidden-input]

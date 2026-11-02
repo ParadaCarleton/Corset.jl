@@ -707,6 +707,13 @@ end
         result = placed(["main.jl" => "module M\nusing A: a\ninclude(\"child.jl\")\nend\n", "child.jl" => "g() = a\n$inner"])
         @test result["child.jl"] == "using A: a\ng() = a\n$inner"
     end
+    @testset "a name only a nested `module` block uses is unused outside it: that block sees its own imports alone" begin
+        inner = "module Inner\nusing A: a\nh() = a\nend\n"
+        @test placed(["m.jl" => "using A: a\n$inner"]) == Dict("m.jl" => inner)
+        child = "g() = 1\n$inner"
+        result = placed(["main.jl" => "module M\nusing A: a\ninclude(\"child.jl\")\nend\n", "child.jl" => child])
+        @test result == Dict("main.jl" => "module M\ninclude(\"child.jl\")\nend\n", "child.jl" => child)
+    end
     @testset "an unused import sharing its line with code is cut out of the line, with its `;`" begin
         @test placed(["main.jl" => "module M; using A: a; f() = 1; end\n"])["main.jl"] == "module M; f() = 1; end\n"
         @test placed(["main.jl" => "using A: a; const X = 1\nf() = X\n"])["main.jl"] == "const X = 1\nf() = X\n"

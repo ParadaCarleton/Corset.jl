@@ -176,9 +176,9 @@ returns the sites it repaired.
 
 Imports that their file does not use, or that only other files of the module use. An import item
 belongs in the files that use its name. Its fixer deletes the unused ones and moves the rest.
-A file that holds only `module` blocks belongs
-to another module, so no import moves into it. A file included inside a `module` block belongs to
-that block's module: it takes only the block's imports. A name that a relative import
+A name counts as used only in the innermost `module` block that uses it, since a module sees only its
+own imports; so no import moves into a file that holds only `module` blocks. A file included inside a
+`module` block belongs to that block's module: it takes only the block's imports. A name that a relative import
 (`using ..Parent: f`, `import .Sub.g`) takes from another module of the package keeps its imports.
 
 ### `where-return`: `where_return_sites(file)`

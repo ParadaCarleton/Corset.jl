@@ -78,6 +78,7 @@
 "Base.PkgId" = 2
 "Base.Process" = 1
 "Base.ProcessChain" = 1
+"Base.Sys.maxrss" = 1
 "Base.UV_EPIPE" = 1
 "Base._methods_by_ftype" = 5
 "Base.current_project" = 1

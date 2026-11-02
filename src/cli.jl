@@ -275,12 +275,12 @@ function seed_sources(
         return ["entry_points" => Entries.configured_signatures(abspath(root, file), name)]
     end
     sources = entry_sources(entries)
-    warn_tests(output, sources)
+    warn_tests!(output, sources)
     return Pair{String, Vector{Type}}.(string.(sources), Entries.source_signatures.((mod,), sources; root, output, unset = (INNER_VARIABLE, "JULIA_LOAD_PATH")))
 end
 
 """Print to `output` that the `:tests` source, when `sources` holds it, runs the whole test suite and its child processes."""
-function warn_tests(output::IO, sources::AbstractVector{Symbol})::Nothing
+function warn_tests!(output::IO, sources::AbstractVector{Symbol})::Nothing
     if :tests in sources
         println(output, "warning: --entries tests runs the package's whole test suite, and every process it starts, beside this one")
     end

@@ -118,9 +118,9 @@ end
     compiled = length(last(first(sources)))
     @test Corset.seed_summary(sources, frames, 3 * 2^20 + 1) ==
         "entry signatures: compiled $compiled, declared 0; $compiled seeds, $(length(frames)) signatures inferred; peak RSS 3 MiB"
-    @test sprint(Corset.warn_tests, [:compiled, :tests]) ==
+    @test sprint(Corset.warn_tests!, [:compiled, :tests]) ==
         "warning: --entries tests runs the package's whole test suite, and every process it starts, beside this one\n"
-    @test isempty(sprint(Corset.warn_tests, [:compiled, :declared]))
+    @test isempty(sprint(Corset.warn_tests!, [:compiled, :declared]))
 
     configured = package_tree(
         "name = \"WorkloadPackage\"\n[preferences.Corset]\nentry_points = \"entries.jl:signatures\"\n",

@@ -28,7 +28,7 @@ end
         WorkloadPackage.bump(1)
         sources = seed_sources(config, root, nothing, WorkloadPackage, devnull)
         frames = seeded_frames(sources, WorkloadPackage)
-        seed_summary(sources, frames, Sys.maxrss())
+        seed_summary(sources, frames, 0)
         findings, _ = run_rules(config, root; mod = WorkloadPackage, signatures = frames)
         for format in ("human", "concise")
             print_findings(devnull, root, findings, format)

@@ -3,6 +3,7 @@
 [abstract-local]
 "src/candidates.jl call_candidates" = 1
 "src/cli.jl level_overrides" = 1
+"src/cli.jl option!" = 1
 "src/dispatch.jl dispatch_sites" = 1
 "src/dispatch.jl dispatches" = 1
 "src/float_widening.jl dispatch_widening" = 1
@@ -46,6 +47,8 @@
 
 [fatou]
 
+[file-length]
+
 [float-widening]
 
 [float64]
@@ -85,7 +88,7 @@
 "Base.include" = 1
 "Base.isvarargtype" = 1
 "Base.isvatuple" = 1
-"Base.loaded_modules" = 2
+"Base.loaded_modules" = 3
 "Base.require" = 3
 "Base.shell_parse" = 1
 "Base.specializations" = 2
@@ -118,7 +121,7 @@
 "Core.CoreSTDERR" = 1
 "Core.CoreSTDOUT" = 1
 "Core.IntrinsicFunction" = 2
-"Core.MethodInstance" = 13
+"Core.MethodInstance" = 11
 "Core.MethodMatch" = 3
 "Core.PhiNode" = 1
 "Core.PiNode" = 1
@@ -155,9 +158,9 @@ typed_frame = 1
 widening_detail = 1
 
 [one-letter]
+"src/external_tools.jl jscpd_command" = 1
 "src/float64_scan.jl float64_ops" = 1
 "src/precompile.jl bump" = 1
-"src/rules.jl jscpd_command" = 1
 
 [overspecialized-anonymous-function]
 
@@ -268,7 +271,6 @@ widening_detail = 1
 "src/float_widening.jl statement_operands" = 2
 "src/imports.jl addition_edit" = 1
 "src/imports.jl import_statement" = 1
-"src/imports.jl literal_pieces" = 1
 "src/imports.jl move_targets" = 1
 "src/imports.jl single_unit" = 1
 "src/mutation.jl declared_io" = 1

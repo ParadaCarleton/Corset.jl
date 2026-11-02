@@ -45,12 +45,15 @@ function compiled_concretely(return_type::Any)::Bool # lint: abstract-local  ref
     return return_type isa Union && length(members) <= UNION_SPLIT_LIMIT && all(isconcretetype, members)
 end
 
+"""Whether `frame`'s method is defined in a file under the repository's root."""
+in_repository(repository::Repository, frame::Inferred)::Bool = in_repository(repository, frame.method)
+
 """
 The `inferred` frames whose method is in `repository`'s own files and whose first line carries no
 `# lint: rule` opt-out, which so covers the whole method.
 """
 function audited_frames(repository::Repository, inferred::AbstractVector{Inferred}, rule::AbstractString)::Vector{Inferred}
-    own = inferred[startswith.([string(item.method.file) for item in inferred], repository.root)]
+    own = filter(Base.Fix1(in_repository, repository), inferred)
     files = unique([string(item.method.file) for item in own])
     return own[.!opted_out.(own, (Dict(files .=> opt_outs.(files, rule)),))]
 end

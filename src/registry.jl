@@ -112,7 +112,7 @@ declared(context::Context)::Vector{StructDeclaration} = struct_locations(context
 scope(context::Context)::Module = something(context.mod, Base)
 
 @rule ModuleRule "hidden-input" :default "reads of a mutable or non-constant global, or a ScopedValue" context ->
-hidden_inputs(context.mod)
+hidden_inputs(context.repository, context.mod)
 
 @rule ModuleRule "non-public-access" :pedantic "qualified accesses and explicit imports of another module's non-public names" context ->
 non_public_accesses(context.mod)
@@ -188,6 +188,9 @@ ref_sites(source)
 
 @rule FileRule "one-letter" :pedantic "one-letter variable names" (context, source) ->
 one_letter_sites(context.repository, source)
+
+@rule FileRule "file-length" :default "source files longer than the repository's file_line_limit" (context, source) ->
+long_file_sites(context.repository, source)
 
 @rule FileRule "where-return" :default "short-form definitions whose where binds the return annotation" (context, source) ->
 where_return_sites(source)

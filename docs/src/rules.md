@@ -15,7 +15,7 @@ entry_frames(seeds, MyPackage))` reads the frames an entry-point walk already in
 command line seeds that walk from `Corset.Entries` (see `--entries` in the CLI page). An opt-out on a method's first line covers
 every site these rules find in that method.
 
-### `hidden-input`: `hidden_inputs(mod)`
+### `hidden-input`: `hidden_inputs(repository, mod)`
 
 Reads of a non-constant or mutable global, or of a `ScopedValue`. The result of such a function
 depends on state its signature does not show.
@@ -146,7 +146,7 @@ ratchet!(REPO, "abstract-field", sites)
 
 ## Rules on source files
 
-Each takes `Corset.Source(file)`, the file read and parsed once.
+Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 
 | Rule | Function | Finds | Repair |
 | --- | --- | --- | --- |
@@ -161,16 +161,19 @@ Each takes `Corset.Source(file)`, the file read and parsed once.
 | `ref` | `ref_sites(source)` | `Ref` and `RefValue` outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | Return the changed data from the function that computes it. A broadcast shield (`f.(Ref(x), xs)`) opts out with `# lint: ref` |
 | `c-type` | `c_type_sites(source)` | `Cint`, `Cdouble` and the other C-interop types outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | `Int`, `Float64` or `String`; convert at the `ccall` |
 | `one-letter` | `one_letter_sites(repo, source)` | one-letter variable names (exempt: `_` and `Repository.one_letter_exempt`) | name the variable |
+| `file-length` | `long_file_sites(repo, source)` | source files longer than `Repository.file_line_limit` lines (default 1500) | split the file by topic |
 
 ## Rules with fixers
 
-Two rules come with a function that repairs what they find.
+Two rules come with a function that repairs what they find. A fixer leaves every site a `# lint:`
+comment opts out, in the line, block and file forms.
 
 ### `misplaced-import`: `misplaced_imports(repo, directories)`
 
 Imports that their file does not use, or that only other files of the module use. An import item
 belongs in the files that use its name. `place_imports!(repo, directories)` deletes the unused ones
-and moves the rest, and returns the sites it handled.
+and moves the rest, and returns the sites it handled. A file that holds only `module` blocks belongs
+to another module, so no import moves into it. The fixer computes every file before it writes any.
 
 ### `where-return`: `where_return_sites(file)`
 

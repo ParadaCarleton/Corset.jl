@@ -9,7 +9,7 @@ using Configurations: @option, from_dict, FieldTypeConversionError, InvalidKeyEr
 What a project sets for `corset`: the source `directories` to read, the `baseline` file, the
 `Repository` exemptions, whether the `pedantic` group is on, and per-rule `levels` (`:allow`,
 `:warn` or `:deny`) that override a rule's group, the `candidate_limit` of the typed rules'
-`CandidateSearch`, and the `entry_points` (`file => function`, the file relative to the project) whose
+`CandidateSearch`, the `file_line_limit` of the `file-length` rule, and the `entry_points` (`file => function`, the file relative to the project) whose
 signatures replace the `--entries` sources.
 """
 struct Config
@@ -21,6 +21,7 @@ struct Config
     levels::Dict{String, Symbol}
     candidate_limit::Int
     entry_points::Union{Nothing, Pair{String, Symbol}}
+    file_line_limit::Int
 end
 
 const LEVELS = (:allow, :warn, :deny)
@@ -35,6 +36,7 @@ const LEVELS = (:allow, :warn, :deny)
     levels::Union{Nothing, Dict{String, String}} = nothing
     candidate_limit::Union{Nothing, Int} = nothing
     entry_points::Union{Nothing, String} = nothing
+    file_line_limit::Union{Nothing, Int} = nothing
 end
 
 """Merge two preference dictionaries, with `over` overriding matching keys in `under`."""
@@ -70,7 +72,8 @@ end
 
 The `Config` of the project at `root`: the `[preferences.Corset]` table of its Project.toml overlaid by
 the `[Corset]` table of its LocalPreferences.toml, key by key. An unknown key, an unknown rule name or a
-level other than `allow`, `warn` or `deny` throws, so a typo cannot silently switch a rule off.
+level other than `allow`, `warn` or `deny`, or a set directory that does not exist, throws, so a typo cannot
+silently switch a rule off or skip a directory.
 """
 function load_config(root::AbstractString)::Config
     prefs = overlay(
@@ -94,7 +97,7 @@ function load_config(root::AbstractString)::Config
         end
     end
     return Config(
-        Tuple(something(prefs.directories, ["src"])),
+        Tuple(configured_directories(root, prefs.directories)),
         prefs.baseline,
         Tuple(Symbol.(something(prefs.one_letter_exempt, String[]))),
         Tuple(something(prefs.skipped_directories, String[])),
@@ -102,7 +105,32 @@ function load_config(root::AbstractString)::Config
         levels,
         checked_limit(something(prefs.candidate_limit, DEFAULT_CANDIDATE_LIMIT), "[preferences.Corset] candidate_limit"),
         entry_point(prefs.entry_points),
+        checked_line_limit(something(prefs.file_line_limit, DEFAULT_FILE_LINE_LIMIT), "[preferences.Corset] file_line_limit"),
     )
+end
+
+"""
+The `directories` setting: `src` when unset, which may be absent. A set directory missing under `root`
+throws; one inside another listed one is dropped, so no file is read twice.
+"""
+configured_directories(::AbstractString, ::Nothing)::Vector{String} = ["src"]
+
+function configured_directories(root::AbstractString, directories::AbstractVector{String})::Vector{String} # lint: unmarked-mutation  isdir's ccall reads each path
+    absent = directories[.!isdir.(joinpath.(root, directories))]
+    if !isempty(absent)
+        error("[preferences.Corset] directories names $(join(repr.(absent), ", ")), missing under $root")
+    end
+    paths = unique(directory_path.(directories))
+    return paths[.!vec(any(holds.(permutedims(paths), paths); dims = 2))]
+end
+
+"""Relative directory path `directory` normalized: no `.` part and no trailing separator."""
+directory_path(directory::AbstractString)::String = dirname(joinpath(normpath(directory), ""))
+
+"""Whether directory path `outer` strictly holds directory path `inner`; both are normalized and relative."""
+function holds(outer::AbstractString, inner::AbstractString)::Bool
+    outer_parts, inner_parts = splitpath(outer), splitpath(inner)
+    return length(inner_parts) > length(outer_parts) && inner_parts[eachindex(outer_parts)] == outer_parts
 end
 
 """The `file => function` of an `entry_points` setting `\"file.jl:function\"`; `nothing` when unset. Any other shape throws."""
@@ -135,6 +163,7 @@ function repository(config::Config, root::AbstractString)::Repository
         baseline,
         one_letter_exempt = config.one_letter_exempt,
         skipped_directories = config.skipped_directories,
+        config.file_line_limit,
     )
 end
 

@@ -92,40 +92,68 @@ writable(type::Type)::Bool = !(plain_capture(type) || type <: Union{Type, Module
 What a frame or statement does to arguments, as indices: those it writes through, those it passes to
 a runtime dispatch it cannot resolve, and those it passes to a `ccall`. The analysis cannot read the
 last two callees. `writers` pairs a written index with the runtime-dispatch candidate that writes it.
+`cut` is set when a recursive call was skipped, so the summary depends on the instances being summarized.
 """
 struct ArgumentWrites
     written::Vector{Int}
     dispatched::Vector{Int}
     foreign::Vector{Int}
     writers::Vector{Pair{Int, Method}}
+    cut::Bool
 end
 
 ArgumentWrites(written::AbstractVector{Int}, dispatched::AbstractVector{Int}, foreign::AbstractVector{Int})::ArgumentWrites =
-    ArgumentWrites(written, dispatched, foreign, Pair{Int, Method}[])
+    ArgumentWrites(written, dispatched, foreign, Pair{Int, Method}[], false)
 
 const NO_WRITES = ArgumentWrites(Int[], Int[], Int[])
 
 """
-    argument_writes(frame, frames, stack, search)
+The frames a write summary follows, keyed by method instance, and the summaries already made, keyed
+by method instance and candidate limit. A summary that skipped a recursive call (`cut`) is not kept.
+"""
+struct WriteWalk
+    frames::Dict{Core.MethodInstance, Inferred}
+    summaries::Dict{Tuple{Core.MethodInstance, Int}, ArgumentWrites}
+end
+
+WriteWalk(frames::AbstractDict{Core.MethodInstance, Inferred})::WriteWalk =
+    WriteWalk(frames, Dict{Tuple{Core.MethodInstance, Int}, ArgumentWrites}())
+
+"""
+    argument_writes(frame, walk, stack, search)
 
 The `ArgumentWrites` of `frame`, as argument numbers; a written argument is neither dispatched nor
-foreign. A statically resolved callee writes the arguments its own frame in `frames` (keyed by method
-instance) writes; a callee named with `!` writes its first argument; any other callee writes none.
-A runtime dispatch writes what its `call_candidates` in `search` write (`dispatch_writes`).
-`stack` holds the instances being summarized, which a recursive call skips.
+foreign. A statically resolved callee writes the arguments its own frame in `walk` writes; a callee
+named with `!` writes its first argument; any other callee writes none. A runtime dispatch writes
+what its `call_candidates` in `search` write (`dispatch_writes`). `stack` holds the instances being
+summarized, which a recursive call skips. A summary is made once per instance and `search` limit.
 """
-function argument_writes(
+function argument_writes( # lint: unmarked-mutation  memoizes summaries in the walk
         frame::Inferred,
-        frames::AbstractDict{Core.MethodInstance, Inferred},
+        walk::WriteWalk,
         stack::Tuple,
         search::CandidateSearch,
     )::ArgumentWrites
+    key = (frame.code.parent, search.limit)
+    if haskey(walk.summaries, key)
+        return walk.summaries[key]
+    end
+    writes = frame_writes(frame, walk, stack, search)
+    if !writes.cut
+        walk.summaries[key] = writes
+    end
+    return writes
+end
+
+"""The `ArgumentWrites` of `frame` read from its statements, as `argument_writes` describes, with no memo."""
+function frame_writes(frame::Inferred, walk::WriteWalk, stack::Tuple, search::CandidateSearch)::ArgumentWrites
     estate = escape_state(frame.ir, frame.method.nargs)
-    effects = statement_writes.(frame.ir.stmts.stmt, (frame.ir,), (estate,), (frames,), (stack,), (search,))
+    effects = statement_writes.(frame.ir.stmts.stmt, (frame.ir,), (estate,), (walk,), (stack,), (search,))
     written = effect_arguments(:written, effects, frame.ir, estate)
     dispatched = setdiff(effect_arguments(:dispatched, effects, frame.ir, estate), written)
     foreign = setdiff(effect_arguments(:foreign, effects, frame.ir, estate), written)
-    return ArgumentWrites(written, dispatched, foreign, reduce(vcat, reached_writers.(effects, (frame.ir,), (estate,)); init = Pair{Int, Method}[]))
+    writers = reduce(vcat, reached_writers.(effects, (frame.ir,), (estate,)); init = Pair{Int, Method}[])
+    return ArgumentWrites(written, dispatched, foreign, writers, any(getfield.(effects, :cut)))
 end
 
 """The arguments that the `field` operands of the statement `effects` reach (`reached_arguments`)."""
@@ -141,18 +169,18 @@ writer_arguments(writer::Pair{Int, Method}, ir::COMPILER.IRCode, estate::ESCAPE.
     reached_arguments([first(writer)], ir, estate) .=> (last(writer),)
 
 """The `ArgumentWrites` of one IR statement, as the indices of its operands."""
-statement_writes(::Any, ::COMPILER.IRCode, ::ESCAPE.EscapeState, ::AbstractDict, ::Tuple, ::CandidateSearch)::ArgumentWrites = NO_WRITES
+statement_writes(::Any, ::COMPILER.IRCode, ::ESCAPE.EscapeState, ::WriteWalk, ::Tuple, ::CandidateSearch)::ArgumentWrites = NO_WRITES
 
 function statement_writes(
         statement::Expr,
         ir::COMPILER.IRCode,
         estate::ESCAPE.EscapeState,
-        frames::AbstractDict{Core.MethodInstance, Inferred},
+        walk::WriteWalk,
         stack::Tuple,
         search::CandidateSearch,
     )::ArgumentWrites
     if statement.head === :invoke
-        return ArgumentWrites(invoked_writes(statement, estate, frames, stack, search), Int[], Int[])
+        return invoked_writes(statement, estate, walk, stack, search)
     elseif statement.head === :foreigncall
         return ArgumentWrites(Int[], Int[], writable_operands(statement.args[6:(5 + length(statement.args[3]))], ir, estate))
     elseif statement.head !== :call
@@ -162,7 +190,7 @@ function statement_writes(
     if builtin in WRITING_BUILTINS
         return ArgumentWrites(operand_indices(statement.args[2:2], estate), Int[], Int[])
     elseif isnothing(builtin) || builtin in CALLING_BUILTINS
-        return dispatch_writes(statement, ir, estate, frames, stack, search)
+        return dispatch_writes(statement, ir, estate, walk, stack, search)
     end
     return NO_WRITES
 end
@@ -176,25 +204,27 @@ function dispatch_writes(
         statement::Expr,
         ir::COMPILER.IRCode,
         estate::ESCAPE.EscapeState,
-        frames::AbstractDict{Core.MethodInstance, Inferred},
+        walk::WriteWalk,
         stack::Tuple,
         search::CandidateSearch,
     )::ArgumentWrites
     positions = writable_positions(statement.args, ir)
     candidates = call_candidates(statement, ir, search)
-    if !candidates.complete || any(in(stack), getfield.(getfield.(candidates.frames, :code), :parent))
+    if !candidates.complete
         return ArgumentWrites(Int[], operand_indices(statement.args[positions], estate), Int[])
+    elseif any(in(stack), getfield.(getfield.(candidates.frames, :code), :parent))
+        return ArgumentWrites(Int[], operand_indices(statement.args[positions], estate), Int[], Pair{Int, Method}[], true)
     end
     # A candidate's own dispatches stay unresolved: the budget covers one level.
-    effects = candidate_writes.(candidates.frames, (frames,), (stack,), (with_limit(search, 0),))
+    effects = candidate_writes.(candidates.frames, (walk,), (stack,), (with_limit(search, 0),))
     writers = reduce(vcat, position_writers.(candidates.frames, effects, (positions,), (statement.args,), (estate,)); init = Pair{Int, Method}[])
     unresolved = unique(reduce(vcat, unresolved_positions.(candidates.frames, effects, (positions,)); init = Int[]))
-    return ArgumentWrites(unique(first.(writers)), operand_indices(statement.args[unresolved], estate), Int[], writers)
+    return ArgumentWrites(unique(first.(writers)), operand_indices(statement.args[unresolved], estate), Int[], writers, any(getfield.(effects, :cut)))
 end
 
 """The `ArgumentWrites` of candidate `frame`, summarized with `frame` pushed on `stack`."""
-candidate_writes(frame::Inferred, frames::AbstractDict{Core.MethodInstance, Inferred}, stack::Tuple, search::CandidateSearch)::ArgumentWrites =
-    argument_writes(frame, frames, (stack..., frame.code.parent), search)
+candidate_writes(frame::Inferred, walk::WriteWalk, stack::Tuple, search::CandidateSearch)::ArgumentWrites =
+    argument_writes(frame, walk, (stack..., frame.code.parent), search)
 
 """The operand indices at `positions` of call `operands` that candidate `frame` writes (`effect`), each paired with its method."""
 function position_writers(
@@ -233,26 +263,33 @@ value (a `Ptr` too, which C reads by value) it is passed.
 writable_operands(operands::AbstractVector, ir::COMPILER.IRCode, estate::ESCAPE.EscapeState)::Vector{Int} =
     operand_indices(operands[writable.(COMPILER.widenconst.(COMPILER.argextype.(operands, (ir,))))], estate)
 
-"""The indices of the operands of `:invoke` statement `statement` that its callee writes (`argument_writes`)."""
+"""The `ArgumentWrites` of `:invoke` statement `statement`: the indices of the operands its callee writes (`argument_writes`)."""
 function invoked_writes(
         statement::Expr,
         estate::ESCAPE.EscapeState,
-        frames::AbstractDict{Core.MethodInstance, Inferred},
+        walk::WriteWalk,
         stack::Tuple,
         search::CandidateSearch,
-    )::Vector{Int}
+    )::ArgumentWrites
     instance = invoked_instance(first(statement.args))
     operands = statement.args[2:end]
-    if isnothing(instance) || !(instance.def isa Method) || (instance in stack)
-        return Int[]
-    elseif endswith(string(instance.def.name), "!")
-        return operand_indices(operands[2:min(2, end)], estate)
-    elseif !haskey(frames, instance)
-        return Int[]
+    if isnothing(instance) || !(instance.def isa Method)
+        return NO_WRITES
+    elseif instance in stack
+        return ArgumentWrites(Int[], Int[], Int[], Pair{Int, Method}[], true)
+    elseif bang_name(instance.def.name)
+        return ArgumentWrites(operand_indices(operands[2:min(2, end)], estate), Int[], Int[])
+    elseif !haskey(walk.frames, instance)
+        return NO_WRITES
     end
-    written = argument_writes(frames[instance], frames, (stack..., instance), search).written
-    return operand_indices(operands[filter(<=(length(operands)), written)], estate)
+    callee = argument_writes(walk.frames[instance], walk, (stack..., instance), search)
+    positions = collect(eachindex(operands))
+    written = operand_indices(operands[in.(candidate_argument.((instance.def,), positions), (callee.written,))], estate)
+    return ArgumentWrites(written, Int[], Int[], Pair{Int, Method}[], callee.cut)
 end
+
+"""Whether function name `name` ends in `!` and so marks a function that writes its first argument; `Base.:!` does not."""
+bang_name(name::Symbol)::Bool = name !== :! && endswith(string(name), "!")
 
 """
     unmarked_mutations(repository, inferred; search = CandidateSearch(inferred))
@@ -268,14 +305,14 @@ function unmarked_mutations(
         inferred::AbstractVector{Inferred};
         search::CandidateSearch = CandidateSearch(inferred),
     )::Vector{Site}
-    frames = Dict{Core.MethodInstance, Inferred}(item.code.parent => item for item in inferred)
+    walk = WriteWalk(Dict{Core.MethodInstance, Inferred}(item.code.parent => item for item in inferred))
     own = inferred[is_unmarked_method.((repository,), getfield.(inferred, :method))]
-    return one_per_line(reduce(vcat, mutation_sites.((repository,), own, (frames,), (search,)); init = Site[]))
+    return one_per_line(reduce(vcat, mutation_sites.((repository,), own, (walk,), (search,)); init = Site[]))
 end
 
 """The `unmarked_mutations` sites of `item`, one per written or unverified argument."""
-function mutation_sites(repository::Repository, item::Inferred, frames::AbstractDict{Core.MethodInstance, Inferred}, search::CandidateSearch)::Vector{Site}
-    writes = argument_writes(item, frames, (item.code.parent,), search)
+function mutation_sites(repository::Repository, item::Inferred, walk::WriteWalk, search::CandidateSearch)::Vector{Site}
+    writes = argument_writes(item, walk, (item.code.parent,), search)
     names = "`" .* string.(item.code.slotnames) .* "`"
     reported = Base.Fix1(filter, !Base.Fix1(declared_io, item.method))
     written = reported(writes.written)

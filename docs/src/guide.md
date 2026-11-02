@@ -14,17 +14,17 @@ and the rule in opt-out comments. [`offenders!`](@ref) does the same without the
 
 There are two kinds of rules.
 
-- **Module rules** read a loaded module: `hidden_inputs(MyPackage)`, `impure_anonymous_functions(repo, MyPackage)`,
+- **Module rules** read a loaded module: `hidden_inputs(repo, MyPackage)`, `impure_anonymous_functions(repo, MyPackage)`,
   `abstract_locals(repo, inferred_methods(MyPackage, SIGNATURES))`.
 - **Source rules** read a file's syntax. Parse each file once with `Corset.Source`, then hand it to
-  each rule: `nothing_returns(Corset.Source(file))`. `repository_sources(repo, ("src",))`
+  each rule: `nothing_returns(Corset.Source(REPO, file))`. `repository_sources(repo, ("src",))`
   lists a repository's files.
 
 ```julia
 @testset "code rules" begin
     files = repository_sources(REPO, ("src",))
     ratchet!(REPO, "nothing-return",
-        [site for file in files for site in nothing_returns(Corset.Source(file))])
+        [site for file in files for site in nothing_returns(Corset.Source(REPO, file))])
 end
 ```
 

@@ -70,6 +70,15 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
         @test Corset.command_options(Corset.parse_args(["check", "--candidate-limit", "7"], Corset.argument_settings())).candidate_limit == 7
     end
 
+    @testset "file_line_limit: the config's, else the default, reaching the Repository; one below 1 fails loud" begin
+        @test config.file_line_limit == Corset.DEFAULT_FILE_LINE_LIMIT
+        tree = package_tree("name = \"D\"\n[preferences.Corset]\nfile_line_limit = 40\n", Pair[])
+        limited = load_config(tree)
+        @test limited.file_line_limit == 40
+        @test Corset.repository(limited, tree).file_line_limit == 40
+        @test_throws ErrorException load_config(package_tree("name = \"D\"\n[preferences.Corset]\nfile_line_limit = 0\n", Pair[]))
+    end
+
     @testset "a typo fails loud" begin
         @test_throws ErrorException load_config(
             package_tree(
@@ -90,6 +99,17 @@ const SOURCE_TREE = ["src/Demo.jl" => "module Demo\nf(x::T)::T where {T} = x\nen
             )
         )
         @test_throws ErrorException with_overrides(config, false, ["no-such-rule" => :deny], nothing)
+    end
+
+    @testset "a configured directory that does not exist fails loud; a missing default src does not" begin
+        misspelled = package_tree("name = \"D\"\n[preferences.Corset]\ndirectories = [\"scr\"]\n", SOURCE_TREE)
+        @test_throws ErrorException load_config(misspelled)
+        redirect_stderr(devnull) do
+            @test captured_main(["check", misspelled, "--no-load"])[2] == 2
+        end
+        @test load_config(package_tree("name = \"D\"\n", Pair[])).directories == ("src",)
+        nested = package_tree("name = \"D\"\n[preferences.Corset]\ndirectories = [\"src\", \"ext/Foo\"]\n", [SOURCE_TREE; "ext/Foo/Foo.jl" => "module Foo\nend\n"])
+        @test load_config(nested).directories == ("src", "ext/Foo")
     end
 
     @test_throws ErrorException project_root(mktempdir())
@@ -212,6 +232,23 @@ end
         @test captured_main(["check", previewed, "--diff", "--fix"])[2] == 2
     end
 
+    @testset "--diff copies a nested directory, and a directory inside another once" begin
+        extension = package_tree(
+            "name = \"Demo\"\n[preferences.Corset]\ndirectories = [\"ext/Foo\"]\n",
+            ["ext/Foo/Foo.jl" => "module Foo\nf(x::T)::T where {T} = x\nend\n"],
+        )
+        output, code = captured_main(["check", extension, "--diff"])
+        @test code == 1 && occursin("--- a/ext/Foo/Foo.jl", output)
+        overlapping = package_tree(
+            "name = \"Demo\"\n[preferences.Corset]\ndirectories = [\"src\", \"src/sub/\", \"./src\"]\n",
+            ["src/sub/inner.jl" => "f(x::T)::T where {T} = x\n"],
+        )
+        @test load_config(overlapping).directories == ("src",)
+        output, code = captured_main(["check", overlapping, "--diff"])
+        @test code == 1 && count("--- a/src/sub/inner.jl", output) == 1
+        @test length(first(run_rules(load_config(overlapping), overlapping))) == 1
+    end
+
     @testset "where-return handles unbraced where T and unbound arguments" begin
         unbraced = package_tree(
             "name = \"Demo\"\n",
@@ -229,8 +266,8 @@ end
 
     @testset "module rules run on a loaded package" begin
         findings, skipped = run_rules(
-            with_overrides(load_config(root), false, ["hidden-input" => :deny], nothing),
-            root;
+            with_overrides(load_config(pkgdir(Corset)), false, ["hidden-input" => :deny], nothing),
+            pkgdir(Corset);
             mod = Corset.WorkloadPackage,
             signatures = concrete_signatures(Corset.WorkloadPackage),
         )
@@ -280,6 +317,15 @@ end
     @test captured_main(["check", root, "--no-load", "--allow", "where-return"]) == ("", 0)
     @test occursin("float64", first(captured_main(["rules", root, "--pedantic"])))
     @test captured_main(["check", root, "--no-load", "--allow", "no-such-rule"])[2] == 2
+    redirect_stderr(devnull) do
+        @test captured_main(["check", root, "--no-load", "--entries", "bogus"])[2] == 2
+        @test captured_main(["check", root, "--no-load", "--entries", "tests"])[2] == 2
+        for flags in (["--format", "json"], ["--format", "human"], ["--deny-warnings"], ["--update-baseline"], ["--entries", "workload"], ["--candidate-limit", "3"])
+            @test captured_main(["check", root, "--diff", flags...]) == ("", 2)
+        end
+    end
+    configured = package_tree("name = \"Demo\"\n[preferences.Corset]\nentry_points = \"entries.jl:signatures\"\n", SOURCE_TREE)
+    @test_throws ErrorException Corset.checked_options(Corset.command_options(Corset.parse_args(["check", "--entries", "workload"], Corset.argument_settings())), load_config(configured))
     @test_throws ErrorException Corset.load_package(
         package_tree(
             "version = \"1\"\n",
@@ -329,7 +375,10 @@ Base.write(stream::FailingStream, ::String)::Nothing = throw(stream.failure)
 @testset "corset: a write failure ends the run" begin
     root = package_tree("name = \"Demo\"\n", SOURCE_TREE)
     @test Corset.run_command(["rules", root], FailingStream(Base.IOError("write", Base.UV_EPIPE)), devnull) == 0
-    @test_throws DomainError Corset.run_command(["rules", root], FailingStream(DomainError(1)), devnull)
+    report = IOBuffer()
+    @test Corset.run_command(["rules", root], FailingStream(DomainError(1)), report) == 3
+    @test startswith(String(take!(report)), "corset: internal error: DomainError")
+    @test_throws InterruptException Corset.run_command(["rules", root], FailingStream(InterruptException()), devnull)
 end
 
 @testset "corset: a closed output pipe ends the run quietly" begin

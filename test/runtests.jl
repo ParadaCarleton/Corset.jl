@@ -64,6 +64,13 @@ function placed(files::AbstractVector{<:Pair})::Dict{String, String}
     return Dict(name => read(joinpath(repository.root, name), String) for (name, _) in files)
 end
 
+"""Every file under `root`, by path relative to it, with its text."""
+tree_texts(root::AbstractString)::Dict{String, String} =
+    Dict(relpath(joinpath(directory, name), root) => read(joinpath(directory, name), String) for (directory, _, names) in walkdir(root) for name in names)
+
+"""`fix_where_returns` of `text` written to a fresh file."""
+where_fixed(text::AbstractString)::String = fix_where_returns(joinpath(write_tree(mktempdir(), ["source.jl" => text]), "source.jl"))
+
 """A module of `count` structs, each one field wider than the last, and `count` functions returning a capturing closure."""
 function generated_module(count::Integer)::Module
     generated = Module(:Generated)
@@ -97,6 +104,7 @@ end
         @test isnothing(repository.baseline)
         @test repository.one_letter_exempt == ()
         @test repository.skipped_directories == ()
+        @test repository.file_line_limit == Corset.DEFAULT_FILE_LINE_LIMIT
     end
 
     @testset "without a baseline every offender's key is past it" begin
@@ -196,7 +204,9 @@ end
     inferred = inferred_methods(fixture, concrete_signatures(fixture))
 
     @testset "hidden-input: a read of a mutable or non-constant global" begin
-        @test unique(site_keys(hidden_inputs(fixture))) == ["counter"]
+        @test unique(site_keys(hidden_inputs(repository, fixture))) == ["counter"]
+        # A sibling directory whose name extends the root's is outside the repository.
+        @test isempty(hidden_inputs(Repository(mkpath(root[1:(end - 1)])), fixture))
     end
 
     @testset "non-public-access: a qualified access or explicit import of a non-public name" begin
@@ -279,7 +289,7 @@ end
                 findfirst.([startswith("struct Documented"), endswith("struct Counter"), startswith("struct Plain"), startswith("struct var\"Odd Name\"")], (lines,)),
             ),
         )
-        @test issorted(locations; by = Corset.declared_name)
+        @test issorted(locations; by = Corset.declaration_name)
         snippet = Module(:Snippet)
         Base.include(snippet, path)
         sites = [struct_site(Base.unwrap_unionall(getglobal(snippet, name)), locations) for name in (:Documented, :Counter)]
@@ -319,6 +329,15 @@ end
     @testset "float64_ops: Float64 operations in optimized IR" begin
         @test float64_ops(fixture.widened, (Float32,)) > 0
         @test float64_ops(fixture.narrow, (Float32,)) == 0
+    end
+
+    @testset "float64_line: a double operand of a listed operation, matched as whole words" begin
+        for line in ("%2 = sitofp i64 %0 to double", "%2 = uitofp i64 %0 to double", "%2 = fneg double %1", "%3 = call double @julia_f_1(double %0)")
+            @test Corset.float64_line(line)
+        end
+        for line in ("%3 = call i64 @julia_double_it_12(i64 %0)", "%2 = load double, ptr @julia_callback_3", "%2 = fneg float %1")
+            @test !Corset.float64_line(line)
+        end
     end
 
     @testset "nothing-return: a declared Union{Nothing, …} result" begin
@@ -372,6 +391,15 @@ end
         path = snippet_file("one-letter")
         @test length(one_letter_sites(Repository(dirname(path)), parsed(path))) == 2
         @test length(one_letter_sites(Repository(dirname(path); one_letter_exempt = (:p,)), parsed(path))) == 1
+    end
+
+    @testset "file-length: a file past the repository's line limit, reported as a whole" begin
+        path = joinpath(mktempdir(), "three.jl")
+        write(path, "a = 1\nb = 2\nc = 3\n")
+        @test Corset.long_file_sites(Repository(dirname(path); file_line_limit = 3), parsed(path)) == Site[]
+        @test Corset.long_file_sites(Repository(dirname(path); file_line_limit = 2), parsed(path)) ==
+            [Site("three.jl", path, 0, "3 lines, over 2")]
+        @test_throws ErrorException Repository(dirname(path); file_line_limit = 0)
     end
 
     @testset "fatou: findings of the real `fatou lint` (from mise.toml)" begin
@@ -453,13 +481,34 @@ end
 end
 
 @testset "short-form `where` binds the method, not the return annotation" begin
-    @test fix_where_returns("f(x::V{E})::Vector{E} where {E<:Real} = x\n") ==
+    @test where_fixed("f(x::V{E})::Vector{E} where {E<:Real} = x\n") ==
         "(f(x::V{E})::Vector{E}) where {E<:Real} = x\n"
-    @test fix_where_returns("f(x::V{E}, 1)::Vector{E} where {E} = x\n") ==
+    @test where_fixed("f(x::V{E}, 1)::Vector{E} where {E} = x\n") ==
         "(f(x::V{E}, 1)::Vector{E}) where {E} = x\n"
     @testset "no argument uses the variable, so the annotation may be deliberate" begin
         kept = "g()::Vector{T} where {T} = T[]\n"
-        @test fix_where_returns(kept) == kept
+        @test where_fixed(kept) == kept
+    end
+    @testset "an unbraced `where T<:B` introduces T alone; its bound is no variable" begin
+        kept = "g(x::Real)::Union{Nothing, T} where T<:Real = x\n"
+        @test where_fixed(kept) == kept
+        @test where_fixed("f(x::T)::Vector{T} where T<:Real = [x]\n") == "(f(x::T)::Vector{T}) where T<:Real = [x]\n"
+        @test where_fixed("f(x::T)::Vector{T} where T = [x]\n") == "(f(x::T)::Vector{T}) where T = [x]\n"
+    end
+    @testset "the fixer leaves a definition a `# lint: where-return` comment opts out" begin
+        broken = "f(x::T)::Vector{T} where {T} = [x]\n"
+        fixed = "(f(x::T)::Vector{T}) where {T} = [x]\n"
+        opted_line = "f(x::T)::Vector{T} where {T} = [x] # lint: where-return  deliberate\n"
+        opted_block = "# lint: where-return-begin  deliberate\n$(broken)# lint: where-return-end\n"
+        opted_file = "# lint: where-return-file  deliberate\n$broken"
+        files = ["line.jl" => opted_line * broken, "block.jl" => opted_block * broken, "file.jl" => opted_file, "plain.jl" => broken]
+        @test Corset.rule_name(Corset.WhereReturnRule()) == Corset.WHERE_RETURN_RULE
+        tree = write_tree(mktempdir(), files)
+        fixed_sites = Corset.fix_where_returns!(Repository(tree), (".",))
+        @test sort!([(basename(site.file), site.line) for site in fixed_sites]) == [("block.jl", 4), ("line.jl", 2), ("plain.jl", 1)]
+        @test tree_texts(tree) == Dict(
+            "line.jl" => opted_line * fixed, "block.jl" => opted_block * fixed, "file.jl" => opted_file, "plain.jl" => fixed,
+        )
     end
     @testset "the long form and a method-level `where` are left alone" begin
         for kept in (
@@ -467,7 +516,7 @@ end
                 "f(x::V{E}) where {E} = x\n",
                 "(f(x::V{E})::Vector{E}) where {E} = x\n",
             )
-            @test fix_where_returns(kept) == kept
+            @test where_fixed(kept) == kept
             path = tempname()
             write(path, kept)
             @test isempty(where_return_sites(parsed(path)))
@@ -560,11 +609,48 @@ end
         result = placed(["main.jl" => "module M\n    using A: a\n    include(\"child.jl\")\nend\n", "child.jl" => "    using C: c\n    g() = a + c\n"])
         @test result["child.jl"] == "    using C: c\n    using A: a\n    g() = a + c\n"
     end
-    @testset "an import has nowhere to go in a module without imports" begin
-        @test_throws ErrorException placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "module Inner\ng() = a\nend\n"])
+    @testset "a file that opens its own module is no target: its names are another module's" begin
+        inner = "module Inner\ng() = a\nend\n"
+        @test placed(["a.jl" => "using A: a\ninclude(\"z.jl\")\n", "z.jl" => inner]) == Dict("a.jl" => "include(\"z.jl\")\n", "z.jl" => inner)
+        documented = "\"\"\"Doc.\"\"\"\nbaremodule Sub\nusing B: b\ng() = a + b\nend\n"
+        result = placed(["main.jl" => "module M\nusing A: a\ninclude(\"sub.jl\")\nend\n", "sub.jl" => documented])
+        @test result == Dict("main.jl" => "module M\ninclude(\"sub.jl\")\nend\n", "sub.jl" => documented)
     end
-    @testset "an unused import sharing its line with code is cut out of the line" begin
-        @test placed(["main.jl" => "module M; using A: a; f() = 1; end\n"])["main.jl"] == "module M; ; f() = 1; end\n"
+    @testset "a moved import lands after the file's last top-level import, outside its module blocks" begin
+        inner = "module Inner\nusing B: b\nh() = b\nend\n"
+        result = placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "g() = a\n$inner"])
+        @test result["child.jl"] == "using A: a\ng() = a\n$inner"
+        result = placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "using C: c\ng() = a + c\n$inner"])
+        @test result["child.jl"] == "using C: c\nusing A: a\ng() = a + c\n$inner"
+    end
+    @testset "an unused import sharing its line with code is cut out of the line, with its `;`" begin
+        @test placed(["main.jl" => "module M; using A: a; f() = 1; end\n"])["main.jl"] == "module M; f() = 1; end\n"
+        @test placed(["main.jl" => "using A: a; const X = 1\nf() = X\n"])["main.jl"] == "const X = 1\nf() = X\n"
+        @test placed(["main.jl" => "    using A: a  # why\nf() = 1\n"])["main.jl"] == "f() = 1\n"
+        @test placed(["main.jl" => "using A: a;\nf() = 1"])["main.jl"] == "f() = 1"
+    end
+    @testset "a failed write leaves every file of the tree as it was" begin
+        files = ["a.jl" => "using A: a\ninclude(\"sub/z.jl\")\n", "sub/z.jl" => "g() = a\n"]
+        tree = write_tree(mktempdir(), files)
+        chmod(joinpath(tree, "sub"), 0o555)
+        try
+            @test_throws SystemError place_imports!(Repository(tree), (".",))
+        finally
+            chmod(joinpath(tree, "sub"), 0o755)
+        end
+        @test tree_texts(tree) == Dict(files)
+    end
+    @testset "the fixer leaves an import a `# lint: misplaced-import` comment opts out, in every form" begin
+        files = [
+            "file.jl" => "# lint: misplaced-import-file  kept\nusing A: a\n",
+            "block.jl" => "# lint: misplaced-import-begin  kept\nusing A: a\n# lint: misplaced-import-end\nusing B: b\n",
+            "multiline.jl" => "using C:\n    c # lint: misplaced-import  kept\n",
+        ]
+        @test Corset.rule_name(Corset.MisplacedImportRule()) == Corset.MISPLACED_IMPORT_RULE
+        tree = write_tree(mktempdir(), files)
+        @test site_keys(misplaced_imports(Repository(tree), (".",))) == ["block.jl b"]
+        place_imports!(Repository(tree), (".",))
+        @test tree_texts(tree) == Dict(files[1], "block.jl" => "# lint: misplaced-import-begin  kept\nusing A: a\n# lint: misplaced-import-end\n", files[3])
     end
     @testset "aliases, macros and string macros are names" begin
         @test placed(["main.jl" => "using A: a as b, @m\nf() = b\ng() = raw\"x\"\n"])["main.jl"] == "using A: a as b\nf() = b\ng() = raw\"x\"\n"
@@ -578,6 +664,11 @@ end
         end
         cyclic = placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "include(\"child.jl\")\ng() = a\n"])
         @test cyclic["main.jl"] == "include(\"child.jl\")\n"
+    end
+    @testset "include paths resolve as undefined_names resolves them: joinpath without @__DIR__ too" begin
+        files = ["main.jl" => "using A: a\ninclude(joinpath(\"sub\", \"child.jl\"))\n", "sub/child.jl" => "g() = a\n"]
+        @test placed(files)["sub/child.jl"] == "using A: a\ng() = a\n"
+        @test Corset.included_path(:(joinpath("sub", @__DIR__, "x.jl")), "/root") == "/root/x.jl"
     end
 end
 
@@ -674,6 +765,13 @@ end
         @test isempty(Corset.bound_names(Meta.parse("a.b")))
         @test Corset.one_letter_names(Meta.parse("try\n1\ncatch e\n2\nend"), ()) == [:e]
     end
+end
+
+@testset "defined_methods finds methods added to another module's function" begin
+    external = Module(:ExternalExtension)
+    Base.eval(external, :(Base.length(::Type{Val{:corset_probe}})::Int = 1))
+    defined = Corset.defined_methods(external)
+    @test any(method -> method.name === :length && method.module === external, defined)
 end
 
 @testset "closure reflection follows nested closures and macro-made code" begin
@@ -816,8 +914,10 @@ end
         Tuple{typeof(Mutation.buffer_context), IOContext{IOBuffer}, Mutation.Box},
         Tuple{typeof(length), Mutation.Box}, Tuple{typeof(iterate), Mutation.Box}, Tuple{typeof(show), IOBuffer, Mutation.Box},
         Tuple{typeof(Mutation.guarded), ReentrantLock}, Tuple{typeof(Mutation.zero_first), vector},
+        Tuple{typeof(Mutation.negated), Mutation.Box}, Tuple{typeof(Mutation.last_zeroed), vector, vector},
     ]
-    sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred_methods(Mutation, entry_frames(seeds, Mutation)))
+    inferred = inferred_methods(Mutation, entry_frames(seeds, Mutation))
+    sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred)
     details = Dict(last(split(site.key)) => site.detail for site in sites)
     @testset "a write through an argument, an alias, a field, an element or a callee is reported" begin
         for name in ("direct", "aliased", "setprop", "viafield", "outer", "far_helper", "far_outer", "viaindex", "stashed")
@@ -844,7 +944,7 @@ end
         @test details["iterate"] == "adds a writing method to `Base.iterate`, which callers expect not to write: it writes argument `box`"
         @test !haskey(details, "show")
         render = only(Corset.typed_frames(Tuple{typeof(Mutation.render), IOBuffer, Mutation.Box}))
-        @test Corset.argument_writes(render, Dict{Core.MethodInstance, Corset.Inferred}(), (), Corset.CandidateSearch(Corset.Inferred[])).written == [2]
+        @test Corset.argument_writes(render, Corset.WriteWalk(Dict{Core.MethodInstance, Corset.Inferred}()), (), Corset.CandidateSearch(Corset.Inferred[])).written == [2]
         @test Corset.declared_io(render.method, 2) && !Corset.declared_io(render.method, 3) && !Corset.declared_io(render.method, 9)
     end
     @testset "fresh memory, reads, a rebound local and a `!` function are not reported" begin
@@ -852,13 +952,32 @@ end
             @test !haskey(details, name)
         end
     end
+    @testset "a summary is made once per instance and limit; one cut short by recursion is not kept" begin
+        walk = Corset.WriteWalk(Dict{Core.MethodInstance, Corset.Inferred}(item.code.parent => item for item in inferred))
+        search = Corset.CandidateSearch(inferred)
+        far = only(item for item in inferred if item.method.name === :far_outer)
+        summary = Corset.argument_writes(far, walk, (far.code.parent,), search)
+        @test summary.written == [2] && !summary.cut
+        @test haskey(walk.summaries, (far.code.parent, search.limit)) && length(walk.summaries) == 2
+        @test Corset.argument_writes(far, walk, (), search) === summary
+        @test !haskey(walk.summaries, (far.code.parent, 0))
+        countdown = only(item for item in inferred if item.method.name === :countdown)
+        @test Corset.argument_writes(countdown, walk, (countdown.code.parent,), search).cut
+        @test !haskey(walk.summaries, (countdown.code.parent, search.limit))
+        estate = Corset.escape_state(far.ir, far.method.nargs)
+        @test Corset.invoked_writes(Expr(:invoke, "no instance", identity), estate, walk, (), search) === Corset.NO_WRITES
+    end
+    @testset "Base.:! is no `!` name; a varargs callee writes every operand it gathers" begin
+        @test !haskey(details, "negated")
+        @test occursin("argument `b`", details["last_zeroed"])
+    end
     @testset "an argument passed to a runtime dispatch or a ccall may be written, never clean" begin
         @test details["opaquecall"] == "argument `x` reaches a runtime dispatch (`runtime-dispatch`) and may be written"
         @test details["viaccall"] == "argument `x` reaches a `ccall` and may be written"
     end
     @testset "Base.sort and Base.replace copy before they write" begin
         for signature in (Tuple{typeof(sort), vector}, Tuple{typeof(replace), vector, Pair{Int, Int}})
-            writes = Corset.argument_writes(only(Corset.typed_frames(signature)), Dict{Core.MethodInstance, Corset.Inferred}(), (), Corset.CandidateSearch(Corset.Inferred[]))
+            writes = Corset.argument_writes(only(Corset.typed_frames(signature)), Corset.WriteWalk(Dict{Core.MethodInstance, Corset.Inferred}()), (), Corset.CandidateSearch(Corset.Inferred[]))
             @test isempty(writes.written) && isempty(writes.dispatched) && isempty(writes.foreign)
         end
     end

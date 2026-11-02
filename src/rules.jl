@@ -172,13 +172,16 @@ function statement_line(code::Union{Core.CodeInfo, COMPILER.IRCode}, method::Met
 end
 
 """
-    hidden_inputs(mod)
+    hidden_inputs(repository, mod)
 
 Each read of a global that some method of `mod` takes besides its arguments and immutable
 constants, keyed by the global and placed at the statement that reads it.
 """
-hidden_inputs(mod::Module)::Vector{Site} = reduce(vcat, method_hidden_inputs.(module_methods(mod)); init = Site[])
+hidden_inputs(repository::Repository, mod::Module)::Vector{Site} =
+    reduce(vcat, method_hidden_inputs.(filter(Base.Fix1(in_repository, repository), module_methods(mod))); init = Site[])
 
+"""Whether `method` is defined in a file under the repository's root."""
+in_repository(repository::Repository, method::Method)::Bool = startswith(string(method.file), joinpath(repository.root, ""))
 """The `hidden_inputs` sites of `method`'s lowered code; none for a method without one."""
 function method_hidden_inputs(method::Method)::Vector{Site}
     code = lowered(method)
@@ -412,7 +415,7 @@ function is_unmarked_method(repository::Repository, method::Method)::Bool # lint
         function_type isa DataType &&
         function_type <: Function &&
         function_type !== typeof(Core.kwcall) &&
-        startswith(string(method.file), repository.root)
+        in_repository(repository, method)
 end
 
 """The module that owns the function `method` is a method of."""
@@ -828,7 +831,7 @@ end
 
 The Julia file `path` of `repository`, read and parsed once for every rule that reads source: its
 `name` in keys (`file_key`), its syntax `tree`, its expressions as `Located`s (`located`), and its
-`# lint:` `comments` (`opt_out_comments`).
+`# lint:` `comments` (`opt_out_comments`), and its count of `lines`.
 """
 struct Source
     path::String
@@ -836,6 +839,7 @@ struct Source
     tree::SYNTAX.SyntaxNode
     located::Vector{Located}
     comments::Vector{OptOutComment}
+    lines::Int
 end
 
 function Source(repository::Repository, path::AbstractString)::Source
@@ -843,7 +847,7 @@ function Source(repository::Repository, path::AbstractString)::Source
     tree = SYNTAX.parseall(SYNTAX.SyntaxNode, text; filename = path)
     located = Located[]
     locate!(located, Expr(tree), 0, Symbol("<top level>"), 0)
-    return Source(path, file_key(repository, path), tree, located, opt_out_comments(path, text))
+    return Source(path, file_key(repository, path), tree, located, opt_out_comments(path, text), countlines(IOBuffer(text)))
 end
 """Functions declaring a `Union{Nothing, …}` return: a "can't compute here" answer, one site per definition."""
 function nothing_returns(source::Source)::Vector{Site}
@@ -949,7 +953,7 @@ struct StructDeclaration
 end
 
 """The name `declaration` declares, the order `struct_locations` sorts by."""
-declared_name(declaration::StructDeclaration)::Symbol = declaration.name
+declaration_name(declaration::StructDeclaration)::Symbol = declaration.name
 
 """
 Where each struct of the parsed `sources` is declared, sorted by name: at its `struct` keyword, so a
@@ -957,7 +961,7 @@ Where each struct of the parsed `sources` is declared, sorted by name: at its `s
 one name in different files are both kept.
 """
 struct_locations(sources::AbstractVector{Source})::Vector{StructDeclaration} =
-    sort!(reduce(vcat, map(source_declarations, sources); init = StructDeclaration[]); by = declared_name)
+    sort!(reduce(vcat, map(source_declarations, sources); init = StructDeclaration[]); by = declaration_name)
 
 """The `struct` declarations of `source`."""
 function source_declarations(source::Source)::Vector{StructDeclaration}
@@ -1402,109 +1406,6 @@ function one_letter_item_sites(source::Source, item::Located, exempt::Tuple{Vara
     return fill(Site("$(source.name) $(item.enclosing)", source.path, line, ""), length(one_letter_names(item.node, exempt)))
 end
 
-# One line of `fatou lint --output concise`: file, line, column, severity, rule and message.
-const FATOU_FINDING = r"^(.+?):(\d+):\d+: \w+\[([a-z0-9-]+)\] "
-# Fatou's closing line, `checked N file(s): clean` or with a finding count; it is no finding.
-const FATOU_SUMMARY = r"^checked \d+ file\(s\)"
-
-"""The `directories` that exist in `repository` (a job's copy holds only `src`, `ext`, `test` and links)."""
-present_directories(repository::Repository, directories::Tuple{Vararg{String}})::Tuple{Vararg{String}} =
-    filter(isdir ∘ Base.Fix1(joinpath, repository.root), directories)
-
-"""
-One site per finding of `fatou lint` over `directories` of `repository`, keyed by file and Fatou
-rule and placed at the finding's line (the `fatou` rule's opt-out comment takes it out). Fatou must be
-installed; a run that prints a line it did not mean as a finding (a parse error) throws.
-"""
-function fatou_sites(repository::Repository, directories::Tuple{Vararg{String}})::Vector{
-        Site,
-    }
-    fatou = Sys.which("fatou")
-    if isnothing(fatou)
-        error("fatou is not on PATH; the fatou rule runs `fatou lint`")
-    end
-    command = Cmd(
-        `$fatou lint --color never --output concise $(collect(directories))`;
-        dir = repository.root,
-    )
-    printed = IOBuffer()
-    run(pipeline(ignorestatus(command); stdout = printed, stderr = printed))
-    lines = split(String(take!(printed)), '\n'; keepempty = false)
-    findings = match.(FATOU_FINDING, lines)
-    unread = lines[isnothing.(findings) .& .!occursin.(FATOU_SUMMARY, lines)]
-    if !isempty(unread)
-        error("fatou lint printed lines that are no finding:\n" * join(unread, "\n"))
-    end
-    return fatou_site.(repository.root, filter(!isnothing, findings))
-end
-
-"""The site of `found`, a `FATOU_FINDING` match, in the repository at `root`."""
-fatou_site(root::AbstractString, found::RegexMatch)::Site = Site("$(found[1]) $(found[3])", joinpath(root, found[1]), parse(Int, found[2]), "")
-
-"""One `Site` from `duplicate`, an item of a `jscpd --absolute` JSON report on `repository`."""
-function jscpd_site(repository::Repository, duplicate::AbstractDict)::Site
-    first_file = string(duplicate["firstFile"]["name"])
-    second_file = string(duplicate["secondFile"]["name"])
-    rel_first = relpath(first_file, repository.root)
-    rel_second = relpath(second_file, repository.root)
-    start_line = Int(duplicate["secondFile"]["start"])
-    end_line = Int(duplicate["secondFile"]["end"])
-    return Site("$rel_second $rel_first", second_file, start_line, end_line, "")
-end
-
-"""The `Cmd` running `jscpd` against `dirs` with report written to `report_dir`."""
-function jscpd_command(
-        jscpd::AbstractString,
-        repository::Repository,
-        dirs::AbstractVector{String},
-        report_dir::AbstractString,
-    )::Cmd
-    ignore = String[]
-    if !isempty(repository.skipped_directories)
-        ignore = String["--ignore", join(["**/$d/**" for d in repository.skipped_directories], ",")]
-    end
-    return Cmd(
-        `$jscpd --mode mild --min-lines 5 --min-tokens 50 --silent --no-tips --absolute --reporters json --output $report_dir $ignore $dirs`;
-        dir = repository.root,
-    )
-end
-
-"""
-One site per duplicate code block found by `jscpd` over `directories` of `repository`, keyed by
-the duplicate file and the duplicated file, placed at the duplicate block's lines. `jscpd` must be
-installed and on PATH; an execution failure throws.
-"""
-function jscpd_sites( # lint: abstract-local  JSON report tables are untyped
-        repository::Repository,
-        directories::Tuple{Vararg{String}},
-    )::Vector{Site}
-    jscpd = Sys.which("jscpd")
-    if isnothing(jscpd)
-        error("jscpd is not on PATH; the jscpd rule runs `jscpd`")
-    end
-    dirs = present_directories(repository, directories)
-    if isempty(dirs)
-        return Site[]
-    end
-    report_dir = mktempdir()
-    try
-        command = jscpd_command(jscpd, repository, collect(dirs), report_dir)
-        printed = IOBuffer()
-        run(pipeline(ignorestatus(command); stdout = printed, stderr = printed))
-        report_file = joinpath(report_dir, "jscpd-report.json")
-        if !isfile(report_file)
-            unread = String(take!(printed))
-            error("jscpd produced no report:\n$unread")
-        end
-        json = Base.require(@__MODULE__, :JSON)
-        report = Base.invokelatest(json.parsefile, report_file; dicttype = Dict{String, Any})
-        duplicates = report["duplicates"]
-        return jscpd_site.((repository,), duplicates)
-    finally
-        rm(report_dir; recursive = true, force = true)
-    end
-end
-
 """The files that define the constructors of struct `type`: where Julia evaluated its declaration."""
 constructor_files(type::DataType)::Set{String} = Set{String}(string(method.file) for method in methods(type.name.wrapper))
 
@@ -1520,7 +1421,7 @@ declaration of its name the site has no file; with several and none in a constru
 """
 function struct_site(type::DataType, locations::AbstractVector{StructDeclaration})::Site
     name = nameof(type)
-    named = collect(view(locations, searchsorted(locations, StructDeclaration(name, "", 0); by = declared_name)))
+    named = collect(view(locations, searchsorted(locations, StructDeclaration(name, "", 0); by = declaration_name)))
     own = filter(Base.Fix2(declared_in, constructor_files(type)), named)
     if length(own) == 1
         named = own
@@ -1533,4 +1434,15 @@ function struct_site(type::DataType, locations::AbstractVector{StructDeclaration
     end
     declaration = only(named)
     return Site(string(name), declaration.file, declaration.line, "")
+end
+
+"""
+A site for the file `source` as a whole (line 0) when it holds more than `repository.file_line_limit` lines, its
+count in the detail; none otherwise. A long file hides its structure; split it by topic.
+"""
+function long_file_sites(repository::Repository, source::Source)::Vector{Site}
+    if source.lines <= repository.file_line_limit
+        return Site[]
+    end
+    return [Site(source.name, source.path, 0, "$(source.lines) lines, over $(repository.file_line_limit)")]
 end

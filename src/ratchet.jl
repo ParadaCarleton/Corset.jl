@@ -11,7 +11,7 @@ const SYNTAX = Base.JuliaSyntax # lint: non-public-access  the registered JuliaS
 # allows it at any number of sites; an integer allows that many sites. `TOML.print` drops comments.
 
 """
-    Repository(root; baseline = nothing, one_letter_exempt = (), skipped_directories = ())
+    Repository(root; baseline = nothing, one_letter_exempt = (), skipped_directories = (), file_line_limit = 1500)
 
 The tree the rules read, and the settings that relax them. The defaults are the strict reading: every
 finding of every rule fails. `root` is the tree whose source the rules read (made absolute).
@@ -22,19 +22,38 @@ finding of every rule fails. `root` is the tree whose source the rules read (mad
   convention, such as an argument everywhere named `p`).
 - `skipped_directories`: directory names `repository_sources` leaves out wherever they sit, such as
   `("vendor",)`. Hidden directories (a leading `.`) are always left out.
+- `file_line_limit`: the most lines a source file may hold before the `file-length` rule reports it.
 """
 struct Repository
     root::String
     baseline::Union{String, Nothing}
     one_letter_exempt::Tuple{Vararg{Symbol}}
     skipped_directories::Tuple{Vararg{String}}
+    file_line_limit::Int
 end
 Repository(
     root::AbstractString;
     baseline::Union{String, Nothing} = nothing,
     one_letter_exempt::Tuple{Vararg{Symbol}} = (),
     skipped_directories::Tuple{Vararg{String}} = (),
-)::Repository = Repository(abspath(root), baseline, one_letter_exempt, skipped_directories)
+    file_line_limit::Integer = DEFAULT_FILE_LINE_LIMIT,
+)::Repository = Repository(
+    abspath(root),
+    baseline,
+    one_letter_exempt,
+    skipped_directories,
+    checked_line_limit(file_line_limit, "file_line_limit"),
+)
+
+const DEFAULT_FILE_LINE_LIMIT = 1500
+
+"""`limit`, a `file_line_limit` set by `source`; one below 1 throws, since it would report every file."""
+function checked_line_limit(limit::Integer, source::AbstractString)::Int
+    if limit < 1
+        error("$source is $limit; a source file may hold at least one line")
+    end
+    return limit
+end
 
 """The name a key gives `file`: its path from the root of `repository`, joined with `/` on every system."""
 file_key(repository::Repository, file::AbstractString)::String = join(splitpath(relpath(file, repository.root)), "/")

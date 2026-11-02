@@ -51,8 +51,7 @@ function argument_settings()::ArgParseSettings
     option!(
         check,
         "--format";
-        help = "output format: human, concise or json",
-        default = "human",
+        help = "output format: human, concise or json (default: human)",
         range_tester = in(("human", "concise", "json")),
     )
     option!(
@@ -137,6 +136,7 @@ function with_overrides(
         levels,
         checked_limit(something(candidate_limit, config.candidate_limit), "--candidate-limit"),
         config.entry_points,
+        config.file_line_limit,
     )
 end
 
@@ -150,7 +150,7 @@ end
 struct CheckOptions
     path::String
     pedantic::Bool
-    format::String
+    format::Union{Nothing, String}
     fix::Bool
     diff::Bool
     deny_warnings::Bool
@@ -256,6 +256,51 @@ function entry_sources(entries::Union{Nothing, AbstractString})::Vector{Symbol}
 end
 
 """
+The `entry_sources` of `entries`; throws when the `entry_points` of `config` are set beside them,
+since those replace the sources.
+"""
+function checked_entries(config::Config, entries::Union{Nothing, AbstractString})::Vector{Symbol}
+    if !isnothing(config.entry_points) && !isnothing(entries)
+        error("entry_points in the configuration replaces --entries; drop one")
+    end
+    return entry_sources(entries)
+end
+
+"""
+The flags of `options` that `--diff`, when set, ignores, as written on the command line: it only
+prints the fixers' rewrites.
+"""
+function diff_ignored(options::CheckOptions)::Vector{String}
+    if !options.diff
+        return String[]
+    end
+    flags = [
+        "--format" => !isnothing(options.format),
+        "--deny-warnings" => options.deny_warnings,
+        "--update-baseline" => options.update_baseline,
+        "--entries" => !isnothing(options.entries),
+        "--candidate-limit" => !isnothing(options.candidate_limit),
+    ]
+    return first.(filter(last, flags))
+end
+
+"""
+`options`, checked under `config`: `--diff` with a flag it ignores, `--entries` with `--no-load` (the
+typed rules need the package), or an unknown `--entries` source throws.
+"""
+function checked_options(options::CheckOptions, config::Config)::CheckOptions
+    ignored = diff_ignored(options)
+    if !isempty(ignored)
+        error("--diff only prints the fixers' rewrites and ignores $(join(ignored, ", ")); drop them")
+    end
+    if options.no_load && !isnothing(options.entries)
+        error("--no-load skips the typed rules, which read --entries; drop one")
+    end
+    checked_entries(config, options.entries)
+    return options
+end
+
+"""
 The entry signatures of the loaded package `mod` at `root`, by source name: the `entry_points` of
 `config` alone when it sets them, else the `entries` sources. Test output goes to `output`; the
 tests run without this command's own environment variables.
@@ -267,14 +312,11 @@ function seed_sources(
         mod::Module,
         output::IO,
     )::Vector{Pair{String, Vector{Type}}}
+    sources = checked_entries(config, entries)
     if !isnothing(config.entry_points)
-        if !isnothing(entries)
-            error("entry_points in the configuration replaces --entries; drop one")
-        end
         file, name = config.entry_points
         return ["entry_points" => Entries.configured_signatures(abspath(root, file), name)]
     end
-    sources = entry_sources(entries)
     warn_tests!(output, sources)
     return Pair{String, Vector{Type}}.(string.(sources), Entries.source_signatures.((mod,), sources; root, output, unset = (INNER_VARIABLE, "JULIA_LOAD_PATH")))
 end
@@ -386,6 +428,7 @@ end
 function run_options(options::CheckOptions, args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Int
     root = project_root(options.path)
     config = with_overrides(load_config(root), options.pedantic, options.overrides, options.candidate_limit)
+    options = checked_options(options, config)
     if options.diff
         return print_fix_diff(out, config, root, options.fix)
     end
@@ -406,7 +449,7 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
         end
     end
     findings, skipped = run_rules(config, root; mod, signatures = frames, fix = options.fix, update_baseline = options.update_baseline)
-    print_findings(out, root, findings, options.format)
+    print_findings(out, root, findings, something(options.format, "human"))
     if !isnothing(frames)
         println(err, seed_summary(sources, frames, Sys.maxrss()))
     end
@@ -435,7 +478,8 @@ error_message(error_::TOML.ParserError)::String = sprint(showerror, error_)
     run_command(args, out, err)
 
 The `corset` command on the streams `out` and `err`. Returns the exit code: 0 when clean, 1 when a
-finding fails the run, 2 on a usage or configuration error.
+finding fails the run, 2 on a usage or configuration error, 3 when Corset itself fails (its error and
+backtrace go to `err`). An interrupt is rethrown.
 """
 function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Int
     try
@@ -443,12 +487,14 @@ function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::
     catch error_
         if broken_pipe(error_)
             return 0
-        end
-        if error_ isa Union{ErrorException, ArgParseError, TOML.ParserError}
+        elseif error_ isa Union{ErrorException, ArgParseError, TOML.ParserError}
             println(err, "corset: ", error_message(error_))
             return 2
+        elseif error_ isa InterruptException
+            rethrow()
         end
-        rethrow()
+        println(err, "corset: internal error: ", sprint(showerror, error_, catch_backtrace())) # lint: runtime-dispatch  any exception
+        return 3
     end
 end
 

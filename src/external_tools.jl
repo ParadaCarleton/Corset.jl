@@ -19,7 +19,7 @@ function fatou_sites(repository::Repository, directories::Tuple{Vararg{String}})
     }
     fatou = Sys.which("fatou")
     if isnothing(fatou)
-        error("fatou is not on PATH; the fatou rule runs `fatou lint`")
+        throw(UsageError("fatou is not on PATH; the fatou rule runs `fatou lint`"))
     end
     command = Cmd(
         `$fatou lint --color never --output concise $(collect(directories))`;
@@ -78,7 +78,7 @@ function jscpd_sites( # lint: abstract-local  JSON report tables are untyped
     )::Vector{Site}
     jscpd = Sys.which("jscpd")
     if isnothing(jscpd)
-        error("jscpd is not on PATH; the jscpd rule runs `jscpd`")
+        throw(UsageError("jscpd is not on PATH; the jscpd rule runs `jscpd`"))
     end
     dirs = present_directories(repository, directories)
     if isempty(dirs)

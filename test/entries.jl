@@ -48,11 +48,12 @@ end
     demo = Base.include(Module(), joinpath(package, "src", "TracedDemo.jl"))
     @test Tuple{typeof(demo.twice), Int8} in entry_signatures(demo; sources = (:tests,), root = package, unset = ("JULIA_LOAD_PATH",))
     failing = traced_package("FailingDemo", "error(\"a failing test\")\n")
-    @test_throws ErrorException Entries.test_trace(failing, devnull)
+    @test_throws Entries.SourceError Entries.test_trace(failing, devnull)
 end
 
 @testset "Entries: a configured function returns the signatures" begin
     root = write_tree(mktempdir(), ["entries.jl" => "signatures() = Type[Tuple{typeof(identity), Symbol}]\nwrong() = [1]\n"])
     @test Entries.configured_signatures(joinpath(root, "entries.jl"), :signatures) == Type[Tuple{typeof(identity), Symbol}]
-    @test_throws ErrorException Entries.configured_signatures(joinpath(root, "entries.jl"), :wrong)
+    @test_throws Entries.SourceError Entries.configured_signatures(joinpath(root, "entries.jl"), :wrong)
+    @test_throws r"^wrong in .*entries\.jl returned a Vector\{Int64\}" Entries.configured_signatures(joinpath(root, "entries.jl"), :wrong)
 end

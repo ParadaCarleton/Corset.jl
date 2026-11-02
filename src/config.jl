@@ -61,7 +61,7 @@ function read_preferences(file::AbstractString, path::Tuple{Vararg{String}})::Pr
         return from_dict(Preferences, table)
     catch error_
         if error_ isa Union{InvalidKeyError, FieldTypeConversionError}
-            error("[$(join(path, "."))] in $file: $(sprint(showerror, error_))")
+            throw(UsageError("[$(join(path, "."))] in $file: $(sprint(showerror, error_))"))
         end
         rethrow() # COV_EXCL_LINE
     end
@@ -86,14 +86,10 @@ function load_config(root::AbstractString)::Config
     )
     for (rule, level) in levels
         if rule ∉ rule_name.(RULES)
-            error(
-                "[preferences.Corset.levels] names no rule $(repr(rule)); the rules are $(join(rule_name.(RULES), ", "))",
-            )
+            throw(UsageError("[preferences.Corset.levels] names no rule $(repr(rule)); the rules are $(join(rule_name.(RULES), ", "))"))
         end
         if level ∉ LEVELS
-            error(
-                "[preferences.Corset.levels] sets $rule to $(repr(string(level))); a level is one of $(join(LEVELS, ", "))",
-            )
+            throw(UsageError("[preferences.Corset.levels] sets $rule to $(repr(string(level))); a level is one of $(join(LEVELS, ", "))"))
         end
     end
     return Config(
@@ -118,7 +114,7 @@ configured_directories(::AbstractString, ::Nothing)::Vector{String} = ["src"]
 function configured_directories(root::AbstractString, directories::AbstractVector{String})::Vector{String} # lint: unmarked-mutation  isdir's ccall reads each path
     absent = directories[.!isdir.(joinpath.(root, directories))]
     if !isempty(absent)
-        error("[preferences.Corset] directories names $(join(repr.(absent), ", ")), missing under $root")
+        throw(UsageError("[preferences.Corset] directories names $(join(repr.(absent), ", ")), missing under $root"))
     end
     paths = unique(directory_path.(directories))
     return paths[.!vec(any(holds.(permutedims(paths), paths); dims = 2))]
@@ -139,7 +135,7 @@ entry_point(::Nothing)::Nothing = nothing
 function entry_point(setting::AbstractString)::Pair{String, Symbol}
     pieces = rsplit(setting, ':'; limit = 2)
     if length(pieces) != 2 || any(isempty, pieces)
-        error("[preferences.Corset] entry_points is $(repr(setting)); write it as \"file.jl:function\"")
+        throw(UsageError("[preferences.Corset] entry_points is $(repr(setting)); write it as \"file.jl:function\""))
     end
     return String(first(pieces)) => Symbol(last(pieces))
 end
@@ -147,7 +143,7 @@ end
 """`limit`, a `candidate_limit` set by `source`; a negative one throws."""
 function checked_limit(limit::Integer, source::AbstractString)::Int
     if limit < 0
-        error("$source is $limit; 0 lists no runtime-dispatch candidates, a positive count caps them")
+        throw(UsageError("$source is $limit; 0 lists no runtime-dispatch candidates, a positive count caps them"))
     end
     return limit
 end

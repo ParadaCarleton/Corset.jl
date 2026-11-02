@@ -50,7 +50,7 @@ const DEFAULT_FILE_LINE_LIMIT = 1500
 """`limit`, a `file_line_limit` set by `source`; one below 1 throws, since it would report every file."""
 function checked_line_limit(limit::Integer, source::AbstractString)::Int
     if limit < 1
-        error("$source is $limit; a source file may hold at least one line")
+        throw(UsageError("$source is $limit; a source file may hold at least one line"))
     end
     return limit
 end
@@ -109,7 +109,7 @@ function opt_out_comments(path::AbstractString, text::String)::Vector{OptOutComm
     comments = reduce(vcat, token_comments.(text, (SYNTAX.SourceFile(text),), tokens); init = OptOutComment[])
     unclosed = filter(Base.Fix1(open_begin, comments), comments)
     if !isempty(unclosed)
-        error("$path:$(first(unclosed).line): `# lint: $(first(unclosed).rule)-begin` has no `# lint: $(first(unclosed).rule)-end` below it")
+        throw(UsageError("$path:$(first(unclosed).line): `# lint: $(first(unclosed).rule)-begin` has no `# lint: $(first(unclosed).rule)-end` below it"))
     end
     return comments
 end

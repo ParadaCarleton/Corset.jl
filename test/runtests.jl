@@ -133,6 +133,7 @@ end
 
     @testset "a `-begin` with no `-end` below it throws, naming its file and line" begin
         root = write_tree(mktempdir(), ["open.jl" => "x = 1\n# lint: rule-begin\ny = 2\n# lint: other-end\n"])
+        @test_throws Corset.UsageError offenders!(Repository(root), "rule", [Site("x", joinpath(root, "open.jl"), 3, "")])
         @test_throws r"open\.jl:2: `# lint: rule-begin` has no `# lint: rule-end`" offenders!(Repository(root), "rule", [Site("x", joinpath(root, "open.jl"), 3, "")])
     end
 
@@ -399,7 +400,7 @@ end
         @test Corset.long_file_sites(Repository(dirname(path); file_line_limit = 3), parsed(path)) == Site[]
         @test Corset.long_file_sites(Repository(dirname(path); file_line_limit = 2), parsed(path)) ==
             [Site("three.jl", path, 0, "3 lines, over 2")]
-        @test_throws ErrorException Repository(dirname(path); file_line_limit = 0)
+        @test_throws Corset.UsageError Repository(dirname(path); file_line_limit = 0)
     end
 
     @testset "fatou: findings of the real `fatou lint` (from mise.toml)" begin
@@ -411,7 +412,7 @@ end
         path = ENV["PATH"]
         try
             ENV["PATH"] = mktempdir()
-            @test_throws ErrorException fatou_sites(Repository(tree), ("src",))
+            @test_throws Corset.UsageError fatou_sites(Repository(tree), ("src",))
         finally
             ENV["PATH"] = path
         end
@@ -433,7 +434,7 @@ end
                 ENV["PATH"] = "$broken:$path"
                 @test_throws ErrorException jscpd_sites(Repository(tree), (".",))
                 ENV["PATH"] = mktempdir()
-                @test_throws ErrorException jscpd_sites(Repository(tree), (".",))
+                @test_throws Corset.UsageError jscpd_sites(Repository(tree), (".",))
             finally
                 ENV["PATH"] = path
             end

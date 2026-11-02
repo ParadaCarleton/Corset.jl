@@ -245,14 +245,18 @@ function invoked_writes(
     operands = statement.args[2:end]
     if isnothing(instance) || !(instance.def isa Method) || (instance in stack)
         return Int[]
-    elseif endswith(string(instance.def.name), "!")
+    elseif bang_name(instance.def.name)
         return operand_indices(operands[2:min(2, end)], estate)
     elseif !haskey(frames, instance)
         return Int[]
     end
     written = argument_writes(frames[instance], frames, (stack..., instance), search).written
-    return operand_indices(operands[filter(<=(length(operands)), written)], estate)
+    positions = collect(eachindex(operands))
+    return operand_indices(operands[in.(candidate_argument.((instance.def,), positions), (written,))], estate)
 end
+
+"""Whether function name `name` ends in `!` and so marks a function that writes its first argument; `Base.:!` does not."""
+bang_name(name::Symbol)::Bool = name !== :! && endswith(string(name), "!")
 
 """
     unmarked_mutations(repository, inferred; search = CandidateSearch(inferred))

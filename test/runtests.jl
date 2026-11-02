@@ -768,6 +768,7 @@ end
         Tuple{typeof(Mutation.buffer_context), IOContext{IOBuffer}, Mutation.Box},
         Tuple{typeof(length), Mutation.Box}, Tuple{typeof(iterate), Mutation.Box}, Tuple{typeof(show), IOBuffer, Mutation.Box},
         Tuple{typeof(Mutation.guarded), ReentrantLock}, Tuple{typeof(Mutation.zero_first), vector},
+        Tuple{typeof(Mutation.negated), Mutation.Box}, Tuple{typeof(Mutation.last_zeroed), vector, vector},
     ]
     sites = Corset.unmarked_mutations(Repository(@__DIR__), inferred_methods(Mutation, entry_frames(seeds, Mutation)))
     details = Dict(last(split(site.key)) => site.detail for site in sites)
@@ -803,6 +804,10 @@ end
         for name in ("rebound", "viahelper", "fresh", "readonly", "addup", "reads", "bangwrite!", "countdown", "memwrite!", "fieldread", "opaqueglobal")
             @test !haskey(details, name)
         end
+    end
+    @testset "Base.:! is no `!` name; a varargs callee writes every operand it gathers" begin
+        @test !haskey(details, "negated")
+        @test occursin("argument `b`", details["last_zeroed"])
     end
     @testset "an argument passed to a runtime dispatch or a ccall may be written, never clean" begin
         @test details["opaquecall"] == "argument `x` reaches a runtime dispatch (`runtime-dispatch`) and may be written"

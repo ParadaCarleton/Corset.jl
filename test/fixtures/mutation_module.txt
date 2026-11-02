@@ -42,3 +42,8 @@ opaquecall(f, x) = f(x)
 const SHARED = Int[]
 opaqueglobal(f) = f(SHARED)
 viaccall(x) = ccall(:jl_typeof_str, Cstring, (Any,), x)
+
+@noinline Base.:!(box::Box) = Box(Int(box.a == 0), box.inner)
+negated(box) = !box
+@noinline zero_last(vectors...) = (last(vectors)[1] = 0; nothing)
+last_zeroed(a, b) = zero_last(a, b)

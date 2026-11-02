@@ -275,8 +275,12 @@ end
 """Whether `statement` imports `name`."""
 statement_imports(statement::ImportStatement, name::AbstractString)::Bool = any(==(name), [item.name for item in statement.items])
 
-"""Whether `file` imports `name`."""
-imports_name(file::ImportFile, name::AbstractString)::Bool = any(Base.Fix2(statement_imports, name), file.statements)
+"""Whether `unit` imports `name` in `scope` (`block_scope`); an import in another `module` block of its file serves only that block."""
+function imports_name(unit::UnitFile, name::AbstractString, scope::AbstractString)::Bool
+    statements = unit.file.statements
+    in_scope = block_scope.((unit,), [statement.block for statement in statements]) .== scope
+    return any(statement_imports.(statements[in_scope], name))
+end
 
 """
 The files of the module rooted at `path`, reached in `scope`: it and every file it includes,
@@ -348,14 +352,15 @@ function move_targets(unit::AbstractVector{UnitFile}, supplied::Bool, entry::Uni
 end
 
 """
-Whether `item` of `statement` in `entry` can move to `other`: its file uses the name, does not import
-it, does not open a module of its own, and sits in the statement's scope (`block_scope`), so a file
-included inside a `module` block takes only that block's imports.
+Whether `item` of `statement` in `entry` can move to `other`: its file uses the name, does not open a
+module of its own, and sits in the statement's scope (`block_scope`), so a file included inside a
+`module` block takes only that block's imports. An import of the name at the file's top level serves
+it already; one inside a `module` block of the file serves only that block.
 """
 function move_target(other::UnitFile, supplied::Bool, entry::UnitFile, statement::ImportStatement, item::ImportItem)::Bool
     target = other.file
     return target.editable && !target.opens_module && !supplied && target.path != entry.file.path && item.name in target.used &&
-        !imports_name(target, item.name) && other.scope == block_scope(entry, statement.block)
+        other.scope == block_scope(entry, statement.block) && !imports_name(other, item.name, other.scope)
 end
 
 """Every import move in `files` (the rule's own), module by module; a file in two modules is left alone."""

@@ -702,6 +702,11 @@ end
         result = placed(["main.jl" => "using A: a\ninclude(\"child.jl\")\n", "child.jl" => "using C: c\ng() = a + c\n$inner"])
         @test result["child.jl"] == "using C: c\nusing A: a\ng() = a + c\n$inner"
     end
+    @testset "an import inside a file's `module` block serves only that block, so the file is still a target" begin
+        inner = "module Inner\nusing A: a\nh() = a\nend\n"
+        result = placed(["main.jl" => "module M\nusing A: a\ninclude(\"child.jl\")\nend\n", "child.jl" => "g() = a\n$inner"])
+        @test result["child.jl"] == "using A: a\ng() = a\n$inner"
+    end
     @testset "an unused import sharing its line with code is cut out of the line, with its `;`" begin
         @test placed(["main.jl" => "module M; using A: a; f() = 1; end\n"])["main.jl"] == "module M; f() = 1; end\n"
         @test placed(["main.jl" => "using A: a; const X = 1\nf() = X\n"])["main.jl"] == "const X = 1\nf() = X\n"

@@ -6,6 +6,22 @@ below are conventions; any lowercase words joined by `-` work.
 Rules that need the compiler's answer read a loaded module. Rules about how code is written read
 source files.
 
+## Groups
+
+The `corset` command runs the `default` group at `warn` level. `--pedantic`, or `pedantic = true` in
+the configuration, adds the `pedantic` group. Julia permits what Rust's compiler rejects; a `default`
+rule finds a pattern Rust rejects or requires an explicit marker for (`dyn`, `mut`, `unsafe`, typed
+signatures, privacy), a likely bug, or a performance trap. A `# lint:` opt-out is the explicit marker.
+A `pedantic` rule enforces house style that Rust allows, or is a noisy heuristic.
+
+| Group | Rules |
+| --- | --- |
+| `default` | `abstract-field`, `abstract-local`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anonymous-function`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anonymous-function`, `quadratic-vcat`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anonymous-function`, `where-return`, `widened-return` |
+| `pedantic` | `c-type`, `concrete-return`, `file-length`, `float64`, `jscpd`, `nothing-return`, `one-letter`, `quadratic-scan`, `range-guard`, `ref`, `repeated-prefix`, `struct-constant`, `wide-struct` |
+
+`corset rules` prints each rule's group and level. `[preferences.Corset.levels]` and the `--allow`,
+`--warn` and `--deny` flags set the level of one rule.
+
 ## Rules on a loaded module
 
 These see inferred types, bindings and closures. They need `using MyPackage`. The rules that read
@@ -24,7 +40,7 @@ Repair: pass the value as an argument, or return it from the function that compu
 
 ### `non-public-access`: `non_public_accesses(mod)`
 
-Pedantic. Qualified accesses (`Base.JuliaSyntax`) and explicit imports (`using Base: uniontypes`)
+Qualified accesses (`Base.JuliaSyntax`) and explicit imports (`using Base: uniontypes`)
 of a name its module neither exports nor declares `public`. Such a name can change in any release.
 ExplicitImports.jl finds them. A qualified access has a site per use, so an opt-out covers only its line.
 
@@ -74,7 +90,7 @@ Repair: add the `!`, or copy the argument before writing to the copy.
 
 ### `runtime-dispatch`: `runtime_dispatches(repo, entry_frames(seeds, mod))`
 
-Pedantic. Calls the optimizer leaves to run-time dispatch in each frame: a `:call` of a generic
+Calls the optimizer leaves to run-time dispatch in each frame: a `:call` of a generic
 function, or of `Core._apply_iterate` or `Core.invoke`. A logging macro's hand-off to the current
 logger is not reported. Pass the frames of `entry_frames`, so a `@noinline` callee reached only through
 an `:invoke` edge is read too. One site per method and source line.
@@ -84,7 +100,7 @@ Opt out a deliberate barrier on the method's first line.
 
 ### `widened-return`: `widened_returns(repo, entry_frames(seeds, mod))`
 
-Pedantic. Methods whose inferred result a caller cannot compile against: anything but a concrete
+Methods whose inferred result a caller cannot compile against: anything but a concrete
 type, `Union{}`, a `Type{X}` constant, a union of at most four concrete types, or a fixed-length tuple
 of such members.
 
@@ -92,7 +108,7 @@ Repair: make the result type depend only on the argument types.
 
 ### `float-widening`: `float_widenings(repo, entry_frames(seeds, mod))`
 
-Pedantic. Statements whose float result is wider than every float the method receives in its
+Statements whose float result is wider than every float the method receives in its
 arguments: `x::Float32 * 2.0`, `n / m` on `Int`s in a `Float32` method, `float(n)`, a `Float64`
 global, or a returned `0.0`. The detail names the operand that brings the wide float in (`Base.Float64`
 for a conversion, `0.0`, the global), or the callee. A value computed from an already widened one is
@@ -174,8 +190,7 @@ Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 | `c-type` | `c_type_sites(source)` | `Cint`, `Cdouble` and the other C-interop types outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | `Int`, `Float64` or `String`; convert at the `ccall` |
 | `one-letter` | `one_letter_sites(repo, source)` | one-letter variable names (exempt: `_` and `Repository.one_letter_exempt`) | name the variable |
 | `file-length` | `long_file_sites(repo, source)` | source files longer than `Repository.file_line_limit` lines (default 1500) | split the file by topic |
-| `broad-catch` | `broad_catches(source)` | deny level: `catch` blocks that neither call `rethrow()` nor `throw` what they caught, so a missing file and an internal `error()` end alike; placed from the `try` line to the block's first line | test the exception with `isa`, handle the expected types and `rethrow()` the rest |
-| `silent-existence-filter` | `silent_existence_filters(source)` | deny level: `filter(isdir, paths)` and its `do` form, `isfile ∘ f` and `path -> ispath(path)` predicates, masks `paths[isfile.(paths)]`, and comprehensions filtered by `if isdir(path)`; a configured path with a typo is then skipped in silence. A filter inside the arguments of `rm` passes | throw on the missing paths (`paths[.!isdir.(paths)]`), or opt out a path that is optional by design |
+| `broad-catch` | `broad_catches(source)` | `catch` blocks that neither call `rethrow()` nor `throw` what they caught, so a missing file and an internal `error()` end alike; placed from the `try` line to the block's first line | test the exception with `isa`, handle the expected types and `rethrow()` the rest |
 | `quadratic-scan` | `quadratic_scans(source)` | a `for` loop, comprehension, generator, anonymous function passed to `map`, `count` and the like, or broadcast over a collection `xs` (a variable or field, also through `enumerate`, `zip` and `eachindex`) that calls `filter`, `findall`, `findfirst`, `findlast`, `count`, `any`, `all` or `in` on the same `xs` per element; `in.(xs, (xs,))` too | group `xs` once: a `Dict` from key to entries, or `sort` and `searchsorted` |
 | `quadratic-vcat` | `quadratic_concatenations(source)` | a fold whose operator is `vcat`, `hcat`, `cat` or `hvcat` that runs one piece at a time: `reduce` with `init` (Base's one-allocation `reduce(vcat, ::AbstractVector{<:AbstractVector})` then does not apply) or over a generator, and every `foldl`, `foldr`, `mapreduce`, `mapfoldl` and `mapfoldr`, `do` form included. Each step copies the accumulator, so the fold is quadratic in the total length | `collect(T, Iterators.flatten(pieces))`, a flattening comprehension `T[x for piece in pieces for x in piece]`, or `reduce(vcat, pieces)` on a nonempty vector |
 | `non-atomic-write` | `non_atomic_writes(source)` | `write.(paths, texts)`, `foreach(write, paths, texts)`, and loops, comprehensions and mapped anonymous functions whose body calls `write(path, …)` or `open(path, "w")` (also `"a"`, `"w+"`, `"a+"`, `"r+"`, `write = true`, `append = true`, `truncate = true`) on a path built from the iteration variable; a crash halfway leaves some files rewritten. A function that calls `mv` or `rename` stages its writes and passes | compute every text, write each to a temporary file beside its target, then rename them all (`Corset.write_all!`) |

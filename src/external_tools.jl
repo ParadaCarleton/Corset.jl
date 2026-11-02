@@ -7,7 +7,7 @@ const FATOU_SUMMARY = r"^checked \d+ file\(s\)"
 
 """The `directories` that exist in `repository` (a job's copy holds only `src`, `ext`, `test` and links)."""
 function present_directories(repository::Repository, directories::Tuple{Vararg{String}})::Tuple{Vararg{String}}
-    return filter(isdir ∘ Base.Fix1(joinpath, repository.root), directories) # lint: silent-existence-filter  load_config rejects a missing set directory; the default `src` may be absent
+    return filter(isdir ∘ Base.Fix1(joinpath, repository.root), directories)
 end
 
 """

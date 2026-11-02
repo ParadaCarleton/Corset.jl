@@ -35,7 +35,7 @@ corset check [path] [options]
 - `--format <format>`: Output format (`human`, `concise`, or `json`). Default is `human`.
 - `--fix`: Rewrite files in place for rules that provide an automated fixer (such as `where-return` and `misplaced-import`).
 - `--diff`: Print a unified diff of the changes `--fix` would make without modifying any files on disk. Exits with code `1` if changes are detected, `0` if clean. It rejects `--fix` and the flags it would ignore: `--format`, `--deny-warnings`, `--update-baseline`, `--entries` and `--candidate-limit`.
-- `--pedantic`: Enable rules in the `:pedantic` group in addition to `:default` rules. Rules in the `:deny` group are always on, at the `deny` level.
+- `--pedantic`: Enable rules in the `:pedantic` group (house style and noisy heuristics) in addition to the `:default` rules (likely bugs, performance traps, and patterns Rust rejects without an explicit marker). The [rules page](rules.md#Groups) lists both groups.
 - `--deny-warnings`: Exit nonzero on warnings in addition to deny-level findings.
 - `--update-baseline`: Seed missing baseline entries and lower counts for improved sites.
 - `--no-load`: Skip loading the package module into Julia; runs only file and tree syntax rules. It rejects `--entries`, which only the typed rules read.
@@ -47,7 +47,7 @@ corset check [path] [options]
 
 ### `corset rules`
 
-List all available rules, their group (`default`, `deny` or `pedantic`), their configured level (`allow`, `warn`, or `deny`), and a one-line summary.
+List all available rules, their group (`default` or `pedantic`), their configured level (`allow`, `warn`, or `deny`), and a one-line summary.
 
 ```bash
 corset rules [path] [--pedantic]

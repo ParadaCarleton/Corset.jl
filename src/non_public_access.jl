@@ -60,7 +60,7 @@ function entry_file(mod::Module)::String
     end
     methods_ = defined_methods(Package(mod))
     own = methods_[parentmodule.(methods_) .=== (mod,)]
-    files = filter(isfile, unique(String[string(method.file) for method in own])) # lint: silent-existence-filter  a method `eval` defined names no file
+    files = filter(isfile, unique(String[string(method.file) for method in own]))
     if length(files) != 1
         throw(UsageError("the methods of $mod are in $(length(files)) files ($(join(files, ", "))); pass the file that defines it"))
     end

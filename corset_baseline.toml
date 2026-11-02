@@ -1,5 +1,20 @@
 [abstract-field]
 
+[abstract-local]
+"candidates.jl call_candidates" = 1
+"cli.jl level_overrides" = 1
+"dispatch.jl dispatch_sites" = 1
+"dispatch.jl dispatches" = 1
+"float_widening.jl dispatch_widening" = 1
+"mutation.jl called_builtin" = 1
+"mutation.jl view_sources" = 1
+"non_public_access.jl non_public_accesses" = 2
+"non_public_access.jl qualified_uses" = 2
+"rules.jl abstract_local_sites" = 2
+"rules.jl instance_callees" = 1
+"rules.jl named_closures" = 1
+"rules.jl typed_frame" = 1
+
 [annotation]
 "precompile.jl bump" = 1
 "ratchet.jl Site" = 1
@@ -18,6 +33,10 @@
 "undefined_names.jl undefined_names" = 1
 "undefined_names.jl without_imports" = 1
 
+[bang]
+"cli.jl print_findings" = 1
+"cli.jl print_rules" = 1
+
 [c-type]
 
 [concrete-arg]
@@ -27,6 +46,8 @@
 [concrete-return]
 
 [fatou]
+
+[float-widening]
 
 [float64]
 
@@ -58,15 +79,16 @@
 "Base.Process" = 1
 "Base.ProcessChain" = 1
 "Base.UV_EPIPE" = 1
-"Base._methods_by_ftype" = 4
+"Base._methods_by_ftype" = 5
 "Base.current_project" = 1
-"Base.get_world_counter" = 3
+"Base.get_world_counter" = 4
+"Base.include" = 1
 "Base.isvarargtype" = 1
 "Base.isvatuple" = 1
-"Base.loaded_modules" = 1
+"Base.loaded_modules" = 2
 "Base.require" = 3
 "Base.shell_parse" = 1
-"Base.specializations" = 1
+"Base.specializations" = 2
 "Base.uncompressed_ir" = 1
 "Base.uniontypes" = 4
 "Base.unwrap_unionall" = 18
@@ -105,7 +127,7 @@
 "Core.SlotNumber" = 3
 "Core.TypeName" = 23
 "Core._apply_iterate" = 1
-"Core.eval" = 1
+"Core.eval" = 3
 "Core.kwcall" = 1
 "Core.memoryrefget" = 1
 "Core.memoryrefmodify!" = 1
@@ -151,6 +173,157 @@ widening_detail = 1
 
 [return-type]
 
+[runtime-dispatch]
+"candidates.jl call_signature" = 1
+"check.jl anonymous function" = 15
+"check.jl file_diff" = 1
+"check.jl fix_diff" = 3
+"check.jl module_rule_names" = 1
+"cli.jl CheckOptions" = 1
+"cli.jl command_options" = 3
+"cli.jl error_message" = 2
+"cli.jl level_overrides" = 1
+"cli.jl load_package" = 1
+"cli.jl main" = 1
+"cli.jl print_findings" = 1
+"cli.jl reads_package" = 1
+"cli.jl run_command" = 1
+"cli.jl run_options" = 1
+"config.jl load_config" = 1
+"config.jl read_preferences" = 2
+"dispatch.jl dispatch_sites" = 2
+"entry_walk.jl entry_frames" = 2
+"entry_walk.jl followed" = 1
+"float_widening.jl callee_label" = 2
+"float_widening.jl carries_floats" = 1
+"float_widening.jl dispatch_widening" = 5
+"float_widening.jl float_budget" = 2
+"float_widening.jl frame_widenings" = 1
+"float_widening.jl held_floats" = 1
+"float_widening.jl returned_operands" = 1
+"float_widening.jl statement_operands" = 3
+"float_widening.jl wider" = 1
+"float_widening.jl widest" = 1
+"imports.jl import_file" = 1
+"imports.jl include_paths" = 1
+"mutation.jl declared_io" = 2
+"mutation.jl mutation_sites" = 1
+"mutation.jl reached_arguments" = 1
+"mutation.jl view_sources" = 1
+"non_public_access.jl non_public_accesses" = 1
+"non_public_access.jl qualified_uses" = 3
+"ratchet.jl repository_sources" = 1
+"registry.jl check" = 3
+"registry.jl declared" = 1
+"registry.jl fix!" = 2
+"rules.jl abstract_fields" = 1
+"rules.jl abstract_local_sites" = 3
+"rules.jl callee_name" = 2
+"rules.jl calls_argument" = 1
+"rules.jl caught_slots" = 2
+"rules.jl closure_site" = 3
+"rules.jl closure_type_names" = 1
+"rules.jl defined_name" = 1
+"rules.jl definition_line" = 2
+"rules.jl definition_lines" = 1
+"rules.jl field_types" = 1
+"rules.jl fixed_reach" = 1
+"rules.jl function_owner" = 1
+"rules.jl holds_abstract" = 1
+"rules.jl instance_callees" = 1
+"rules.jl is_unmarked_method" = 1
+"rules.jl is_unnamed_function_type" = 1
+"rules.jl live_closure_types" = 1
+"rules.jl module_structs" = 1
+"rules.jl named_closures" = 1
+"rules.jl names_concrete_type" = 1
+"rules.jl one_letter_sites" = 1
+"rules.jl range_guards" = 1
+"rules.jl repeated_prefix" = 1
+"rules.jl repeated_statements" = 1
+"rules.jl resizes" = 1
+"rules.jl returns_argument_call" = 1
+"rules.jl struct_lines" = 1
+"rules.jl struct_name" = 1
+"rules.jl typed_frame" = 1
+"rules.jl untyped_argument" = 1
+"rules.jl without_lines" = 1
+
+[unmarked-mutation]
+"check.jl fix_diff" = 1
+"cli.jl error_message" = 2
+"cli.jl main" = 1
+"cli.jl run_command" = 1
+"cli.jl seed_summary" = 1
+"cli.jl seeded_frames" = 1
+"dispatch.jl dispatch_sites" = 1
+"entry_walk.jl entry_frames" = 1
+"entry_walk.jl followed" = 1
+"entry_walk.jl new_callees" = 1
+"entry_walk.jl signature_callees" = 1
+"float_widening.jl callee_label" = 1
+"float_widening.jl carries_floats" = 1
+"float_widening.jl dispatch_widening" = 1
+"float_widening.jl float_budget" = 1
+"float_widening.jl frame_widenings" = 1
+"float_widening.jl returned_operands" = 1
+"float_widening.jl statement_operands" = 2
+"imports.jl addition_edit" = 1
+"imports.jl import_statement" = 1
+"imports.jl literal_pieces" = 1
+"imports.jl move_targets" = 1
+"imports.jl single_unit" = 1
+"mutation.jl declared_io" = 1
+"mutation.jl mutation_sites" = 1
+"mutation.jl reached_writers" = 1
+"mutation.jl view_sources" = 1
+"mutation.jl writer_note" = 1
+"ratchet.jl logged_over" = 1
+"registry.jl check" = 1
+"registry.jl declared" = 1
+"registry.jl struct_sites" = 1
+"rules.jl abstract_local_sites" = 1
+"rules.jl annotated_arguments" = 1
+"rules.jl callee_name" = 2
+"rules.jl calls_argument" = 1
+"rules.jl caught_slots" = 1
+"rules.jl closure_namers" = 1
+"rules.jl closure_site" = 1
+"rules.jl concrete_arguments" = 1
+"rules.jl created_closures" = 1
+"rules.jl defined_name" = 1
+"rules.jl definition_line" = 1
+"rules.jl definition_lines" = 1
+"rules.jl function_owner" = 1
+"rules.jl instance_callees" = 1
+"rules.jl is_concrete_container" = 1
+"rules.jl is_range_guard" = 1
+"rules.jl is_unmarked_method" = 1
+"rules.jl kind_detail" = 1
+"rules.jl lacks_annotation" = 1
+"rules.jl live_closures" = 1
+"rules.jl lowered" = 1
+"rules.jl mentions_nothing" = 1
+"rules.jl method_hidden_inputs" = 1
+"rules.jl method_namings" = 1
+"rules.jl module_frames" = 1
+"rules.jl name_sites" = 1
+"rules.jl named_closures" = 1
+"rules.jl names_concrete_type" = 1
+"rules.jl one_letter_names" = 1
+"rules.jl one_letter_sites" = 1
+"rules.jl range_guards" = 1
+"rules.jl returns_argument_call" = 1
+"rules.jl typed_frame" = 1
+"rules.jl unmarked_effects" = 1
+"rules.jl where_variables" = 1
+
 [unstable-anonymous-function]
 
 [where-return]
+
+[widened-return]
+"candidates.jl call_signature" = 1
+"check.jl enabled_rules" = 1
+"mutation.jl called_builtin" = 1
+"rules.jl return_annotation" = 1

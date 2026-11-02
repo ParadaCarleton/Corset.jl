@@ -40,6 +40,7 @@ corset check [path] [options]
 - `--update-baseline`: Seed missing baseline entries and lower counts for improved sites.
 - `--no-load`: Skip loading the package module into Julia; runs only file and tree syntax rules.
 - `--candidate-limit <count>`: The most candidate methods one runtime-dispatch site lists; `0` lists none. Overrides `candidate_limit`.
+- `--entries <sources>`: Where the typed rules (`abstract-local`, `bang`, `runtime-dispatch`, `unmarked-mutation`, `widened-return`, `float-widening`) get their entry signatures, as a comma-separated list. `workload` (the default) takes the specializations the package's precompile workload compiled and the methods whose declared signature is already concrete. `tests` runs the package's tests under `--trace-compile` and keeps the traced signatures of the package's methods. `none` skips the typed rules. The command prints how many signatures each source gave and how many the walk inferred.
 - `--allow <rule>`: Disable the specified rule (repeatable).
 - `--warn <rule>`: Set the specified rule to warn (repeatable).
 - `--deny <rule>`: Set the specified rule to deny (repeatable).
@@ -64,6 +65,7 @@ pedantic = false
 skipped_directories = ["vendor"]
 one_letter_exempt = ["p", "x"]
 candidate_limit = 4
+entry_points = "test/entry_points.jl:signatures"
 
 [preferences.Corset.levels]
 float64 = "deny"
@@ -78,6 +80,7 @@ Keys:
 - `skipped_directories`: Directory names omitted wherever they sit.
 - `one_letter_exempt`: Variable names exempt from the `one-letter` rule.
 - `candidate_limit`: The most methods `unmarked-mutation` and `float-widening` list at one runtime-dispatch site (default: `4`; `0` lists none). A site with more methods keeps its conservative report. The budget is a count, so the findings do not depend on timing.
+- `entry_points`: `"file.jl:function"`, a file relative to the project root and a function in it that takes no arguments and returns a vector of signature types (`Type[Tuple{typeof(MyPackage.f), Int}]`). Its signatures replace the `--entries` sources.
 - `levels`: Map of rule names to `:allow`, `:warn`, or `:deny`.
 
 ## Exit codes

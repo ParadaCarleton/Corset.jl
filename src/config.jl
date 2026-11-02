@@ -8,8 +8,9 @@ using Configurations: @option, from_dict, FieldTypeConversionError, InvalidKeyEr
 
 What a project sets for `corset`: the source `directories` to read, the `baseline` file, the
 `Repository` exemptions, whether the `pedantic` group is on, and per-rule `levels` (`:allow`,
-`:warn` or `:deny`) that override a rule's group, and the `candidate_limit` of the typed rules'
-`CandidateSearch`.
+`:warn` or `:deny`) that override a rule's group, the `candidate_limit` of the typed rules'
+`CandidateSearch`, and the `entry_points` (`file => function`, the file relative to the project) whose
+signatures replace the `--entries` sources.
 """
 struct Config
     directories::Tuple{Vararg{String}}
@@ -19,6 +20,7 @@ struct Config
     pedantic::Bool
     levels::Dict{String, Symbol}
     candidate_limit::Int
+    entry_points::Union{Nothing, Pair{String, Symbol}}
 end
 
 const LEVELS = (:allow, :warn, :deny)
@@ -32,6 +34,7 @@ const LEVELS = (:allow, :warn, :deny)
     pedantic::Union{Nothing, Bool} = nothing
     levels::Union{Nothing, Dict{String, String}} = nothing
     candidate_limit::Union{Nothing, Int} = nothing
+    entry_points::Union{Nothing, String} = nothing
 end
 
 """Merge two preference dictionaries, with `over` overriding matching keys in `under`."""
@@ -98,7 +101,19 @@ function load_config(root::AbstractString)::Config
         something(prefs.pedantic, false),
         levels,
         checked_limit(something(prefs.candidate_limit, DEFAULT_CANDIDATE_LIMIT), "[preferences.Corset] candidate_limit"),
+        entry_point(prefs.entry_points),
     )
+end
+
+"""The `file => function` of an `entry_points` setting `\"file.jl:function\"`; `nothing` when unset. Any other shape throws."""
+entry_point(::Nothing)::Nothing = nothing
+
+function entry_point(setting::AbstractString)::Pair{String, Symbol}
+    pieces = rsplit(setting, ':'; limit = 2)
+    if length(pieces) != 2 || any(isempty, pieces)
+        error("[preferences.Corset] entry_points is $(repr(setting)); write it as \"file.jl:function\"")
+    end
+    return String(first(pieces)) => Symbol(last(pieces))
 end
 
 """`limit`, a `candidate_limit` set by `source`; a negative one throws."""

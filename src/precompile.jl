@@ -25,8 +25,9 @@ end
             "module WorkloadPackage\nconst COUNTER = Ref(0)\nbump(x) = x + COUNTER[]\nstruct Holder\n    held::Any\nend\nend\n",
         )
         config = with_overrides(load_config(root), true, ["fatou" => :allow, "jscpd" => :allow], nothing)
-        frames = entry_frames(Type[Tuple{typeof(WorkloadPackage.bump), Int}], WorkloadPackage)
-        findings, _ = run_rules(config, root; mod = WorkloadPackage, signatures = collect(keys(frames)))
+        WorkloadPackage.bump(1)
+        frames = seeded_frames(seed_sources(config, root, nothing, WorkloadPackage, devnull), WorkloadPackage, devnull)
+        findings, _ = run_rules(config, root; mod = WorkloadPackage, signatures = frames)
         for format in ("human", "concise")
             print_findings(devnull, root, findings, format)
         end

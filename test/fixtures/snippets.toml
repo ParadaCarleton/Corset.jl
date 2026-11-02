@@ -265,6 +265,26 @@ kept(items::Vector{Int}; limit::Int)::Vector{Int} = filter(<(limit), items)
 opted(items::Vector{Int})::Vector{Bool} = [item in items for item in items] # lint: quadratic-scan  items holds at most three
 '''
 
+[quadratic-vcat]
+source = '''
+seeded(pieces::Vector{Vector{Int}})::Vector{Int} = reduce(vcat, pieces; init = Int[])
+inline(pieces::Vector{Vector{Int}})::Vector{Int} = reduce(vcat, pieces, init = Int[])
+named(pieces::Vector{Vector{Int}}, init::Vector{Int})::Vector{Int} = reduce(Base.vcat, pieces; init)
+generated(count_::Int)::Vector{Int} = reduce(vcat, [index] for index in 1:count_)
+folded(pieces::Vector{Vector{Int}})::Vector{Int} = foldl(vcat, pieces)
+mapped(items::Vector{Int})::Matrix{Int} = mapreduce(item -> [item, item], hcat, items)
+function blocked(items::Vector{Int})::Vector{Int}
+    return mapreduce(vcat, items) do item
+        [item, item]
+    end
+end
+flat(pieces::Vector{Vector{Int}})::Vector{Int} = reduce(vcat, pieces)
+summed(items::Vector{Int})::Int = reduce(+, items; init = 0)
+appended(pieces::Vector{Vector{Int}})::Vector{Int} = foldl(append!, pieces; init = Int[])
+flattened(pieces::Vector{Vector{Int}})::Vector{Int} = collect(Int, Iterators.flatten(pieces))
+opted(pieces::Vector{Vector{Int}})::Vector{Int} = foldl(vcat, pieces) # lint: quadratic-vcat  pieces holds at most three
+'''
+
 [non-atomic-write]
 source = '''
 function looped(paths::Vector{String}, texts::Vector{String})::Nothing

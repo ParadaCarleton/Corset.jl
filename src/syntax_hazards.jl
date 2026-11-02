@@ -1,4 +1,4 @@
-# Source rules on parsed expressions for error handling, path checks, scans and file writes.
+# Source rules on parsed expressions for error handling, path checks, scans, folds and file writes.
 
 """Every expression in parsed expression `node`, `node` first."""
 nested(node::Expr)::Vector{Expr} = Expr[node; collect(Expr, Iterators.flatten(nested.(node.args)))]
@@ -249,6 +249,57 @@ scan that same collection per element (`count`, `filter`, `findfirst`, `in`, …
 length. Keyed by file and the function they sit in.
 """
 quadratic_scans(source::Source)::Vector{Site} = collect(Site, Iterators.flatten(scan_sites.((source,), source.located)))
+
+"""The concatenations a fold copies its whole accumulator into at each step."""
+const CONCATENATIONS = (:vcat, :hcat, :cat, :hvcat)
+
+"""The folds over a collection, each with the position of its operator among the call's arguments."""
+const FOLD_OPERATORS = (; reduce = 1, foldl = 1, foldr = 1, mapreduce = 2, mapfoldl = 2, mapfoldr = 2)
+
+"""The name keyword argument `argument` passes: `init` for `init = x` and for `init` after `;`."""
+keyword_name(argument::Symbol)::Symbol = argument
+keyword_name(argument::Expr)::Symbol = Meta.isexpr(argument, :kw) ? called_name(first(argument.args)) : NO_NAME # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+
+"""The names of the keywords call `node` passes, after `;` or as `name = value`."""
+keyword_names(node::Expr)::Vector{Symbol} = Symbol[ # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+    keyword_name.(filter(Base.Fix2(Meta.isexpr, :kw), node.args));
+    keyword_name.(collect(Any, Iterators.flatten([argument.args for argument in node.args if Meta.isexpr(argument, :parameters)])))
+]
+
+"""
+Whether `call`, with `shift` arguments moved to a `do` block, folds a concatenation one piece at a time.
+`reduce` does only with `init` or over a generator; on a vector it concatenates once.
+"""
+function folds_concatenation(call::Expr, shift::Integer)::Bool # lint: abstract-local # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+    name = callee(call)
+    position = get(FOLD_OPERATORS, name, 0) - shift
+    arguments = call_arguments(call)
+    if call.head !== :call || !(1 <= position < length(arguments)) || !(called_name(arguments[position]) in CONCATENATIONS)
+        return false
+    end
+    return name !== :reduce || :init in keyword_names(call) || Meta.isexpr(arguments[position + 1], :generator)
+end
+
+"""Whether parsed expression `node` folds a concatenation piece by piece, in call or `do` form (`folds_concatenation`)."""
+function concatenation_fold(node::Expr)::Bool # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+    if node.head === :do
+        return Meta.isexpr(node.args[1], :call) && folds_concatenation(node.args[1], 1)
+    end
+    return folds_concatenation(node, 0)
+end
+
+"""
+Folds that concatenate one piece at a time, keyed by file and the function they sit in:
+`reduce(vcat, pieces; init = T[])`, `reduce(vcat, generator)`, `foldl(vcat, …)` and `mapreduce(f, hcat, …)`.
+Each step copies the accumulator, so the fold is quadratic in the total length.
+"""
+function quadratic_concatenations(source::Source)::Vector{Site}
+    (; path, name, located) = source
+    return [
+        Site("$name $(item.enclosing)", path, item.line, "concatenates one piece at a time, copying the result per piece; use `collect(T, Iterators.flatten(pieces))`")
+            for item in located if concatenation_fold(item.node)
+    ]
+end
 
 """The `open` modes that write to the file."""
 const WRITE_MODES = ("w", "a", "w+", "a+", "r+")

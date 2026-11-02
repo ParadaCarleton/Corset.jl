@@ -218,6 +218,9 @@ silent_existence_filters(source)
 @rule FileRule "quadratic-scan" :default "loops over a collection that scan the same collection per element" (context, source) ->
 quadratic_scans(source)
 
+@rule FileRule "quadratic-vcat" :default "folds that concatenate one piece at a time: reduce(vcat, …; init), foldl(vcat, …), mapreduce(f, vcat, …)" (context, source) ->
+quadratic_concatenations(source)
+
 @rule FileRule "non-atomic-write" :default "loops and broadcasts that write several files in turn, unstaged" (context, source) ->
 non_atomic_writes(source)
 

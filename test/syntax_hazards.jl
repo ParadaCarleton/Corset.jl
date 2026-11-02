@@ -38,6 +38,16 @@ end
     @test Corset.level(Corset.load_config(mktempdir()), Corset.QuadraticScanRule()) === :warn
 end
 
+@testset "quadratic-vcat: a fold that concatenates one piece at a time" begin
+    @test kept_lines(Corset.quadratic_concatenations, "quadratic-vcat") == [1:1, 2:2, 3:3, 4:4, 5:5, 6:6, 8:8]
+    sites = found_in(Corset.quadratic_concatenations, "quadratic-vcat")
+    @test length(sites) == 8
+    @test site_keys(sites)[[1, 7]] == ["source.jl seeded", "source.jl blocked"]
+    @test Corset.level(Corset.load_config(mktempdir()), Corset.QuadraticVcatRule()) === :warn
+    @test isempty(Corset.keyword_names(:(reduce(vcat, pieces))))
+    @test Corset.keyword_names(:(reduce(vcat, pieces; options...))) == [Corset.NO_NAME]
+end
+
 @testset "non-atomic-write: several files written in turn, unstaged" begin
     @test kept_lines(Corset.non_atomic_writes, "non-atomic-write") == [2:2, 7:7, 8:8, 10:10, 17:17, 18:18, 34:34, 39:39]
     @test length(found_in(Corset.non_atomic_writes, "non-atomic-write")) == 9

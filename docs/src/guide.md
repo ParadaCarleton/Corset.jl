@@ -3,7 +3,7 @@
 ## The pieces
 
 A **rule** is a function from code to a vector of [`Site`](@ref)s. A site has a `key` (the name of
-the offender, such as `"Demo.jl total"`), a file, a line and a `detail` (what the offender is, such as
+the offender, such as `"src/Demo.jl total"`), a file, a line and a `detail` (what the offender is, such as
 ``local `x`::Any``; `""` when the key says it all). The log of a failing rule prints each key's details.
 
 A **[`Repository`](@ref)** is the tree the rules read, plus the settings that relax them.
@@ -14,7 +14,7 @@ and the rule in opt-out comments. [`offenders!`](@ref) does the same without the
 
 There are two kinds of rules.
 
-- **Module rules** read a loaded module: `hidden_inputs(MyPackage)`, `impure_anonymous_functions(MyPackage)`,
+- **Module rules** read a loaded module: `hidden_inputs(MyPackage)`, `impure_anonymous_functions(repo, MyPackage)`,
   `abstract_locals(repo, inferred_methods(MyPackage, SIGNATURES))`.
 - **Source rules** read a file's syntax. Parse each file once with `Corset.Source`, then hand it to
   each rule: `nothing_returns(Corset.Source(file))`. `repository_sources(repo, ("src",))`
@@ -46,7 +46,7 @@ current offenders and passes:
 "COUNTER" = 1
 
 [abstract-local]
-"Demo.jl total" = 1
+"src/Demo.jl total" = 1
 ```
 
 Each entry is a key and an allowance. An integer allows that many sites under the key. A string,

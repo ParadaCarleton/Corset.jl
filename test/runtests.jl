@@ -27,10 +27,13 @@ end
 """The path of `source.jl` holding the snippet of `rule` (`fixtures/snippets.toml`), in a fresh tree."""
 snippet_file(rule::AbstractString)::String = joinpath(write_tree(mktempdir(), ["source.jl" => SNIPPETS[rule]["source"]]), "source.jl")
 
+"""The `Source` of the file `path`, read as the repository its directory roots."""
+parsed(path::AbstractString)::Source = Source(Repository(dirname(path)), path)
+
 """The `Site`s that `finder(source)` finds in the parsed snippet of `rule`."""
 function found_in(finder::Function, rule::AbstractString)::Vector{Site}
     path = snippet_file(rule)
-    return finder(Source(path))
+    return finder(parsed(path))
 end
 
 """The keys of `sites`."""
@@ -83,7 +86,7 @@ function reflect_all(mod::Module)::Nothing
     Corset.defined_methods(mod)
     abstract_fields.(structs)
     repeated_prefix.(structs)
-    impure_anonymous_functions(mod)
+    impure_anonymous_functions(Repository(pwd()), mod)
     return nothing
 end
 
@@ -148,6 +151,14 @@ end
         @test (@elapsed Corset.one_per_line(sites)) + (@elapsed Corset.detail_lines(sites)) < 5
         @test length(Corset.one_per_line(sites)) == 32_000
         @test Corset.detail_lines([sites; Site("file2.jl f1", "", 0, "local `w`::Any")])["file2.jl f1"] == "local `w`::Any; local `x2`::Any"
+    end
+
+    @testset "a key names its file by the path from the repository root: two util.jl files differ" begin
+        root = write_tree(mktempdir(), ["src/util.jl" => "x = 1.0\n", "ext/X/util.jl" => "y = 2.0\n"])
+        repository = Repository(root)
+        keys = [site.key for path in ("src/util.jl", "ext/X/util.jl") for site in float64_sites(Source(repository, joinpath(root, path)))]
+        @test keys == ["src/util.jl", "ext/X/util.jl"]
+        @test Corset.file_key(repository, joinpath(root, "ext", "X", "util.jl")) == "ext/X/util.jl"
     end
 
     @testset "a Context parses each file once: its rules and opt-outs read no file after" begin
@@ -218,15 +229,15 @@ end
         for (maker, argument) in ((:adder, 1), (:labeler, "a"), (:reader, [1]), (:kinded, Int))
             Base.invokelatest(Base.invokelatest(getfield(fixture, maker), argument), 2)
         end
-        sites = Dict(site.key => site for site in impure_anonymous_functions(fixture))
+        sites = Dict(site.key => site for site in impure_anonymous_functions(repository, fixture))
         @test Set(keys(sites)) == Set(["fixture.jl boxed", "fixture.jl lineless", "fixture.jl reader"])
         @test sites["fixture.jl boxed"].detail == "holds a Core.Box: a captured variable is rebound"
         @test occursin("unverified", sites["fixture.jl lineless"].detail)
         @test sites["fixture.jl reader"].detail == "captures Vector{Int64}, not plain immutable data"
-        overspecialized = only(Corset.overspecialized_anonymous_functions(fixture))
+        overspecialized = only(Corset.overspecialized_anonymous_functions(repository, fixture))
         @test overspecialized.key == "fixture.jl kinded"
         @test occursin("{Int64}, so it compiles once per value", overspecialized.detail)
-        @test isempty(Corset.unstable_anonymous_functions(fixture))
+        @test isempty(Corset.unstable_anonymous_functions(repository, fixture))
         @testset "plain immutable data is a non-function bits value, a String or Symbol, or an immutable composite of them" begin
             @test all(Corset.plain_capture, (Int, Float32, Char, String, Symbol, Nothing, Tuple{Int, String}, @NamedTuple{name::String}, Union{Nothing, String}))
             @test !any(Corset.plain_capture, (Vector{Int}, Dict{Int, Int}, SubArray{Int, 1, Vector{Int}, Tuple{UnitRange{Int}}, true}, DataType, typeof(sin), Module, Real, Union{Int, Vector{Int}}))
@@ -254,13 +265,13 @@ end
         @test repeated_prefix(structs[:SolverControls]) == "solver"
         @test isnothing(repeated_prefix(structs[:Plain]))
         path = joinpath(root, "fixture.jl")
-        @test struct_site(structs[:Holder], struct_locations([Source(path)])) == Site("Holder", path, findfirst(==("struct Holder"), readlines(path)), "")
+        @test struct_site(structs[:Holder], struct_locations([parsed(path)])) == Site("Holder", path, findfirst(==("struct Holder"), readlines(path)), "")
     end
 
     @testset "a struct is placed at its `struct` line, below its docstring" begin
         path = snippet_file("struct-line")
         lines = readlines(path)
-        locations = struct_locations([Source(path)])
+        locations = struct_locations([parsed(path)])
         @test Set(locations) == Set(
             Corset.StructDeclaration.(
                 [:Documented, :Counter, :Plain, Symbol("Odd Name")],
@@ -282,13 +293,13 @@ end
             owner = Module(:Owner)
             Base.include(owner, file)
             for order in (files, reverse(files))
-                @test struct_site(owner.Same, struct_locations(Source.(order))) == Site("Same", file, line, "")
+                @test struct_site(owner.Same, struct_locations(parsed.(order))) == Site("Same", file, line, "")
             end
         end
         unplaced = Module(:Unplaced)
         Core.eval(unplaced, :(struct Same end))
-        @test_throws r"struct Same is declared in .*a\.jl.*b\.jl" struct_site(unplaced.Same, struct_locations(Source.(files)))
-        @test struct_site(unplaced.Same, struct_locations(Source.(files[1:1]))) == Site("Same", first(files), 1, "")
+        @test_throws r"struct Same is declared in .*a\.jl.*b\.jl" struct_site(unplaced.Same, struct_locations(parsed.(files)))
+        @test struct_site(unplaced.Same, struct_locations(parsed.(files[1:1]))) == Site("Same", first(files), 1, "")
         @test struct_site(unplaced.Same, struct_locations(Source[])) == Site("Same", "", 0, "")
     end
 
@@ -342,15 +353,15 @@ end
     end
 
     @testset "float64: Float64 tokens and untyped float literals" begin
-        @test site_lines(float64_sites(Source(snippet_file("float64")))) == [1, 1]
+        @test site_lines(float64_sites(parsed(snippet_file("float64")))) == [1, 1]
     end
 
     @testset "c-type: C-interop types outside a ccall" begin
-        @test site_lines(c_type_sites(Source(snippet_file("c-type")))) == [1, 1]
+        @test site_lines(c_type_sites(parsed(snippet_file("c-type")))) == [1, 1]
     end
 
     @testset "ref: Ref and RefValue outside a ccall" begin
-        @test site_lines(Corset.ref_sites(Source(snippet_file("ref")))) == [1, 2, 5]
+        @test site_lines(Corset.ref_sites(parsed(snippet_file("ref")))) == [1, 2, 5]
     end
 
     @testset "annotation: every argument and result annotated" begin
@@ -359,8 +370,8 @@ end
 
     @testset "one-letter: one-letter variable names, with exemptions opt-in" begin
         path = snippet_file("one-letter")
-        @test length(one_letter_sites(Repository(dirname(path)), Source(path))) == 2
-        @test length(one_letter_sites(Repository(dirname(path); one_letter_exempt = (:p,)), Source(path))) == 1
+        @test length(one_letter_sites(Repository(dirname(path)), parsed(path))) == 2
+        @test length(one_letter_sites(Repository(dirname(path); one_letter_exempt = (:p,)), parsed(path))) == 1
     end
 
     @testset "fatou: findings of the real `fatou lint` (from mise.toml)" begin
@@ -459,7 +470,7 @@ end
             @test fix_where_returns(kept) == kept
             path = tempname()
             write(path, kept)
-            @test isempty(where_return_sites(Source(path)))
+            @test isempty(where_return_sites(parsed(path)))
         end
     end
 end
@@ -478,7 +489,7 @@ end
     check(text::String, rule::Function) = (
         path = tempname() * ".jl";
         write(path, text);
-        rule(Source(path))
+        rule(parsed(path))
     )
     @testset "a keyword splat needs no annotation, and Bool is an allowed result" begin
         text = "f(x::T; options...)::Bool where {T} = true\n"
@@ -514,7 +525,7 @@ end
     check(text::String) = (
         path = tempname() * ".jl";
         write(path, text);
-        length(concrete_returns(Source(path), scope))
+        length(concrete_returns(parsed(path), scope))
     )
     @test check("(wrap(element::E)::Wrapped{E}) where {E} = Wrapped(element)\n") == 0
     @test check("(wrap(element::E)::Set{E}) where {E} = Set(element)\n") == 0
@@ -529,7 +540,7 @@ end
     # A macro-named function keys by the macro name alone, with no line-number node.
     path = tempname() * ".jl"
     write(path, "(@main)(args::AbstractVector)::Int = 0\n")
-    @test only(concrete_returns(Source(path), scope)).key == "$(basename(path)) @main"
+    @test only(concrete_returns(parsed(path), scope)).key == "$(basename(path)) @main"
 end
 
 @testset "a name used only inside a macro call counts as used" begin
@@ -594,7 +605,9 @@ end
         @test isempty(Corset.method_hidden_inputs(first(methods(Core.tuple))))
     end
     @testset "an anonymous function's own method is keyed by its file alone" begin
-        @test Corset.method_key(only(methods(values -> values))) == "runtests.jl anonymous function"
+        anonymous = only(methods(values -> values))
+        @test Corset.method_key(Repository(@__DIR__), anonymous) == "runtests.jl anonymous function"
+        @test Corset.method_key(Repository(dirname(@__DIR__)), anonymous) == "test/runtests.jl anonymous function"
     end
     @testset "abstract local types: unions, containers, tuples and Type" begin
         concrete = (Union{}, Union{Int, String}, Type{Int}, Vector{Int}, Dict{String, Int}, Tuple{Int, Float64}, Tuple{Vararg{Int}})
@@ -629,7 +642,7 @@ end
         @test isnothing(Corset.testset_name(Meta.parse("@testset begin end")))
         path = tempname() * ".jl"
         write(path, "@testset \"inside\" begin\n    f(a) = 1\nend\n")
-        @test any(item.enclosing === :inside for item in Source(path).located)
+        @test any(item.enclosing === :inside for item in parsed(path).located)
     end
     @testset "concrete containers: bare, in a Union, and not a type at all" begin
         @test Corset.is_concrete_container(Meta.parse("Union{Vector, Nothing}"))

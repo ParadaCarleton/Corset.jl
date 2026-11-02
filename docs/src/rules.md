@@ -116,9 +116,9 @@ non-function `isbits` values, `String`s, `Symbol`s, and immutable structs, tuple
 
 | Rule | Function | Finds | Repair |
 | --- | --- | --- | --- |
-| `impure-anonymous-function` | `impure_anonymous_functions(mod)` | a mutable capture (an array, `Dict`, `Ref`, a module); a `Core.Box`, a captured variable rebound; no compiled instance, so the captures are unverified | pass the data as an argument, or use `Base.Fix1`/`Base.Fix2` (`filter(in(allowed), items)`); cover an unverified function in the precompile workload |
-| `unstable-anonymous-function` | `unstable_anonymous_functions(mod)` | a capture whose type inference left abstract, or an instance built where the capture types are unknown | make the captured variable's type concrete, or pass it as an argument |
-| `overspecialized-anonymous-function` | `overspecialized_anonymous_functions(mod)` | a captured type or function: the anonymous function compiles anew for every value | pass it as an argument, or define a callable struct whose field is a `DataType` or `Function` |
+| `impure-anonymous-function` | `impure_anonymous_functions(repo, mod)` | a mutable capture (an array, `Dict`, `Ref`, a module); a `Core.Box`, a captured variable rebound; no compiled instance, so the captures are unverified | pass the data as an argument, or use `Base.Fix1`/`Base.Fix2` (`filter(in(allowed), items)`); cover an unverified function in the precompile workload |
+| `unstable-anonymous-function` | `unstable_anonymous_functions(repo, mod)` | a capture whose type inference left abstract, or an instance built where the capture types are unknown | make the captured variable's type concrete, or pass it as an argument |
+| `overspecialized-anonymous-function` | `overspecialized_anonymous_functions(repo, mod)` | a captured type or function: the anonymous function compiles anew for every value | pass it as an argument, or define a callable struct whose field is a `DataType` or `Function` |
 
 ### `abstract-field`: `abstract_fields(type)`, `repeated-prefix`: `repeated_prefix(type)`
 

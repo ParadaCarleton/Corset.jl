@@ -37,17 +37,17 @@ function binds_an_argument(signature::SYNTAX.SyntaxNode)::Bool
 end
 
 """
-    where_return_sites!(sites, path, node)
+    where_return_sites!(sites, source, node)
 
 Push a `Site` for each short-form definition under `node` whose `where` binds the return annotation.
 """
-function where_return_sites!(sites::AbstractVector{Site}, path::AbstractString, node::SYNTAX.SyntaxNode)::Nothing
+function where_return_sites!(sites::AbstractVector{Site}, source::Source, node::SYNTAX.SyntaxNode)::Nothing
     if is_where_return(node)
-        push!(sites, Site(basename(path), path, first(SYNTAX.source_location(node)), ""))
+        push!(sites, Site(source.name, source.path, first(SYNTAX.source_location(node)), ""))
     end
     if !SYNTAX.is_leaf(node)
         for child in SYNTAX.children(node)
-            where_return_sites!(sites, path, child)
+            where_return_sites!(sites, source, child)
         end
     end
     return nothing
@@ -56,7 +56,7 @@ end
 """The short-form definitions of the Julia file `source` whose `where` binds the return annotation, keyed by file."""
 function where_return_sites(source::Source)::Vector{Site}
     sites = Site[]
-    where_return_sites!(sites, source.path, source.tree)
+    where_return_sites!(sites, source, source.tree)
     return sites
 end
 
@@ -101,7 +101,7 @@ Rewrite the Julia files of `directories` with `fix_where_returns`. Returns the s
 function fix_where_returns!(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site}
     sites = Site[]
     for path in repository_sources(repository, directories)
-        found = where_return_sites(Source(path))
+        found = where_return_sites(Source(repository, path))
         if !isempty(found)
             write(path, fix_where_returns(read(path, String)))
             append!(sites, found)

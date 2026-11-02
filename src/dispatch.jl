@@ -65,13 +65,13 @@ Each call the compiler leaves to run-time dispatch (`dispatches`) in a frame of 
 `audited_frames` keeps, one site per method and source line.
 """
 runtime_dispatches(repository::Repository, inferred::AbstractVector{Inferred})::Vector{Site} =
-    one_per_line(reduce(vcat, dispatch_sites.(audited_frames(repository, inferred, "runtime-dispatch")); init = Site[]))
+    one_per_line(reduce(vcat, dispatch_sites.((repository,), audited_frames(repository, inferred, "runtime-dispatch")); init = Site[]))
 
 """The `runtime_dispatches` sites of `item`, one per dispatching statement, placed at its line in the method."""
-function dispatch_sites(item::Inferred)::Vector{Site}
+function dispatch_sites(repository::Repository, item::Inferred)::Vector{Site}
     indices = findall(dispatches.(item.ir.stmts.stmt, (item.ir,)))
     details = "dispatches " .* string.(first.(getfield.(item.ir.stmts.stmt[indices], :args)))
-    return Site.(method_key(item.method), string(item.method.file), statement_line.((item.ir,), (item.method,), indices), details)
+    return Site.(method_key(repository, item.method), string(item.method.file), statement_line.((item.ir,), (item.method,), indices), details)
 end
 
 """
@@ -82,5 +82,5 @@ concretely (`compiled_concretely`), one site at its first line however many spec
 """
 function widened_returns(repository::Repository, inferred::AbstractVector{Inferred})::Vector{Site}
     widened = [item for item in audited_frames(repository, inferred, "widened-return") if !compiled_concretely(item.code.rettype)]
-    return one_per_line(Site[Site(method_key(item.method), string(item.method.file), item.method.line, "returns $(item.code.rettype)") for item in widened])
+    return one_per_line(Site[Site(method_key(repository, item.method), string(item.method.file), item.method.line, "returns $(item.code.rettype)") for item in widened])
 end

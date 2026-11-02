@@ -270,11 +270,11 @@ function unmarked_mutations(
     )::Vector{Site}
     frames = Dict{Core.MethodInstance, Inferred}(item.code.parent => item for item in inferred)
     own = inferred[is_unmarked_method.((repository,), getfield.(inferred, :method))]
-    return one_per_line(reduce(vcat, mutation_sites.(own, (frames,), (search,)); init = Site[]))
+    return one_per_line(reduce(vcat, mutation_sites.((repository,), own, (frames,), (search,)); init = Site[]))
 end
 
 """The `unmarked_mutations` sites of `item`, one per written or unverified argument."""
-function mutation_sites(item::Inferred, frames::AbstractDict{Core.MethodInstance, Inferred}, search::CandidateSearch)::Vector{Site}
+function mutation_sites(repository::Repository, item::Inferred, frames::AbstractDict{Core.MethodInstance, Inferred}, search::CandidateSearch)::Vector{Site}
     writes = argument_writes(item, frames, (item.code.parent,), search)
     names = "`" .* string.(item.code.slotnames) .* "`"
     reported = Base.Fix1(filter, !Base.Fix1(declared_io, item.method))
@@ -284,7 +284,7 @@ function mutation_sites(item::Inferred, frames::AbstractDict{Core.MethodInstance
         "argument " .* names[reported(writes.dispatched)] .* " reaches a runtime dispatch (`runtime-dispatch`) and may be written",
         "argument " .* names[reported(writes.foreign)] .* " reaches a `ccall` and may be written",
     )
-    return Site.(method_key(item.method), string(item.method.file), item.method.line, details)
+    return Site.(method_key(repository, item.method), string(item.method.file), item.method.line, details)
 end
 
 """The note naming the runtime-dispatch candidates that write `argument`, among `writers`; empty when none does."""

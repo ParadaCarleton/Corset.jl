@@ -23,7 +23,7 @@ function Context(
         repository::Repository, directories::Tuple{Vararg{AbstractString}}, mod::Union{Module, Nothing};
         inferred::AbstractVector{Inferred} = Inferred[], candidates::CandidateSearch = CandidateSearch(inferred),
     )::Context
-    return Context(repository, directories, mod, inferred, candidates, Source.(repository_sources(repository, directories)))
+    return Context(repository, directories, mod, inferred, candidates, Source.((repository,), repository_sources(repository, directories)))
 end
 
 """The `# lint:` comments of each file `context` parsed, by path."""
@@ -136,13 +136,13 @@ float_widenings(context.repository, context.inferred; search = context.candidate
 widened_returns(context.repository, context.inferred)
 
 @rule ModuleRule "impure-anonymous-function" :default "anonymous functions that capture mutable state, rebind a capture, or were never compiled" context ->
-impure_anonymous_functions(context.mod)
+impure_anonymous_functions(context.repository, context.mod)
 
 @rule ModuleRule "unstable-anonymous-function" :default "anonymous functions whose captures inference leaves abstract" context ->
-unstable_anonymous_functions(context.mod)
+unstable_anonymous_functions(context.repository, context.mod)
 
 @rule ModuleRule "overspecialized-anonymous-function" :default "anonymous functions that capture a type or function, compiling once per value" context ->
-overspecialized_anonymous_functions(context.mod)
+overspecialized_anonymous_functions(context.repository, context.mod)
 
 """The sites of the struct `types`, each placed at its declaration in `context`'s sources."""
 struct_sites(types::AbstractVector{DataType}, context::Context)::Vector{Site} = struct_site.(types, (declared(context),))

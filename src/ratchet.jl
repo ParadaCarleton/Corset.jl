@@ -36,6 +36,9 @@ Repository(
     skipped_directories::Tuple{Vararg{String}} = (),
 )::Repository = Repository(abspath(root), baseline, one_letter_exempt, skipped_directories)
 
+"""The name a key gives `file`: its path from the root of `repository`, joined with `/` on every system."""
+file_key(repository::Repository, file::AbstractString)::String = join(splitpath(relpath(file, repository.root)), "/")
+
 """
 One offender a rule found: `key` names it in the baseline; `file` (a path, empty when the offender
 has none) and the lines `line` through `last_line` place it for the opt-out comments, so a comment on

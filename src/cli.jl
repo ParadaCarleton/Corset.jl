@@ -212,14 +212,14 @@ end
 
 Replace this process with a Julia process whose active project is `root`, running `corset` on `args`.
 Corset's own environment stays on the load path after the project's, so the project's versions of shared
-dependencies win. Where `execv` does not exist the command runs as a child and its exit code is returned.
+dependencies win, and the default environment (`@v#.#`) comes last, so a JET installed there runs the `jet` rule. Where `execv` does not exist the command runs as a child and its exit code is returned.
 """
 function relaunch(root::AbstractString, args::AbstractVector{<:AbstractString})::Int # COV_EXCL_LINE
     # COV_EXCL_START
     # execv replaces the process before it can write its coverage
     ENV[INNER_VARIABLE] = "1"
     ENV["JULIA_LOAD_PATH"] = join(
-        ["@", dirname(Base.active_project()), "@stdlib"],
+        ["@", dirname(Base.active_project()), "@stdlib", "@v#.#"],
         ifelse(Sys.iswindows(), ";", ":"),
     )
     command = `$(Base.julia_cmd()) --startup-file=no --project=$root -e "using Corset; exit(Corset.main(ARGS))" -- $args`
@@ -459,7 +459,7 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
         println(err, seed_summary(sources, frames, Sys.maxrss()))
     end
     if !isempty(skipped)
-        println(err, "skipped (they read the loaded package or need entry signatures): ", join(skipped, ", "))
+        println(err, "skipped (they read the loaded package, need entry signatures, or need JET installed): ", join(skipped, ", "))
     end
     return exit_code(findings, options.deny_warnings)
 end

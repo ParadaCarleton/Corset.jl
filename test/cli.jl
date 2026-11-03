@@ -394,6 +394,7 @@ end
     @test isempty(skipped)
     pedantic = [rule_name(rule) for rule in RULES if rule_group(rule) === :pedantic]
     @test setdiff(pedantic, Set(finding.rule for finding in findings)) == String[]
+    @test "jet" in Set(finding.rule for finding in findings)
 end
 
 @testset "corset: JET sites need the caller's JET" begin

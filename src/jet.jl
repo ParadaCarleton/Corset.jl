@@ -41,3 +41,50 @@ end
 macro opt_sites(scope, sites, arguments...)
     return jet_assertion(Symbol("@report_opt"), scope, __source__, sites, arguments)
 end
+
+# The `jet` rule: `JET.report_call` on every frame the entry signatures compile, where the load path
+# finds JET. It is not a dependency, so a run without it skips the rule and names it as skipped.
+
+"""Whether the load path finds the package `id`; the `jet` rule runs only where it finds JET."""
+installed(id::Base.PkgId)::Bool = !isnothing(Base.locate_package(id)) # lint: non-public-access  Base has no public way to ask the load path for a package
+
+"""
+    call_report_sites(repository, inferred, mod)
+
+One site per `JET.report_call` report on the frames `inferred` whose innermost frame is a method of
+`mod`'s package (JET's `target_modules` scope, extensions and submodules included), keyed by method
+and report kind and placed at that frame's line. The same report reached from several frames is one
+site. JET loads from the load path on first use.
+"""
+function call_report_sites( # lint: runtime-dispatch # lint: abstract-local # lint: unmarked-mutation  JET loads at run time, reads only the frames' signature types, and its results are duck-typed
+        repository::Repository, inferred::AbstractVector{Inferred}, mod::Module,
+    )::Vector{Site}
+    jet = Base.require(JET_ID) # lint: non-public-access  JET is not a dependency, so it loads by its id
+    package = Package(mod)
+    sites = Site[]
+    for item in inferred
+        result = Base.invokelatest(jet.report_call, item.code.parent.specTypes)
+        for report in Base.invokelatest(jet.get_reports, result)
+            append!(sites, call_report_site(repository, jet, report, package))
+        end
+    end
+    return unique!(sites)
+end
+
+"""The site of JET report `report` when its innermost frame is a method of `package`; none otherwise."""
+function call_report_site(repository::Repository, jet::Module, report::Any, package::Package)::Vector{Site} # lint: runtime-dispatch # lint: abstract-local  JET reports are duck-typed
+    frame = last(report.vst)
+    method = frame.linfo.def
+    if !(method isa Method && belongs(method.module, package))
+        return Site[]
+    end
+    key = "$(method_key(repository, method)) $(nameof(typeof(report)))"
+    return [Site(key, string(frame.file), frame.line, report_message(jet, report))]
+end
+
+"""The first line of JET's message for `report`."""
+function report_message(jet::Module, report::Any)::String # lint: runtime-dispatch  JET reports are duck-typed
+    printed = IOBuffer()
+    Base.invokelatest(jet.print_report_message, printed, report)
+    return String(first(split(String(take!(printed)), '\n')))
+end

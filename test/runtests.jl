@@ -420,6 +420,23 @@ end
         @test isempty(clean)
     end
 
+    @testset "jet rule: report_call on the frames, one site per report in the package" begin
+        sites = Corset.call_report_sites(repository, inferred, fixture)
+        broken = filter(site -> endswith(site.key, "fixture.jl broken MethodErrorReport"), sites)
+        @test !isempty(broken)
+        @test all(site -> site.line == 60 && !isempty(site.detail), broken)
+        @test allunique(sites)
+        @test isempty(Corset.call_report_sites(repository, filter(item -> item.method.name === :reads_limit, inferred), fixture))
+        # `sum` of strings fails inside Base (`add_sum`, `reduce_empty`): JET reports it, the package's rule does not.
+        holder = Module(:Holder)
+        Core.eval(holder, :(total(words::Vector{String})::String = sum(words)))
+        signature = Tuple{typeof(holder.total), Vector{String}}
+        @test !isempty(JET.get_reports(JET.report_call(signature)))
+        @test isempty(Corset.call_report_sites(repository, entry_frames(Type[signature], holder), holder))
+        @test Corset.installed(Corset.JET_ID)
+        @test !Corset.installed(Base.PkgId(Base.UUID("00000000-0000-0000-0000-000000000001"), "NotInstalled"))
+    end
+
     @testset "float64_ops: Float64 operations in optimized IR" begin
         @test float64_ops(fixture.widened, (Float32,)) > 0
         @test float64_ops(fixture.narrow, (Float32,)) == 0

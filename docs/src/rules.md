@@ -16,7 +16,7 @@ A `pedantic` rule enforces house style that Rust allows, or is a noisy heuristic
 
 | Group | Rules |
 | --- | --- |
-| `default` | `abstract-field`, `abstract-local`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anonymous-function`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anonymous-function`, `quadratic-vcat`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anonymous-function`, `where-return`, `widened-return` |
+| `default` | `abstract-field`, `abstract-local`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anonymous-function`, `jet`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anonymous-function`, `quadratic-vcat`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anonymous-function`, `where-return`, `widened-return` |
 | `pedantic` | `c-type`, `concrete-return`, `file-length`, `float64`, `jscpd`, `nothing-return`, `one-letter`, `quadratic-scan`, `range-guard`, `ref`, `repeated-prefix`, `struct-constant`, `wide-struct` |
 
 `corset rules` prints each rule's group and level. `[preferences.Corset.levels]` and the `--allow`,
@@ -236,6 +236,16 @@ One site per duplicate code block found by [jscpd](https://github.com/kucherenko
 the duplicate file and the duplicated file, placed at the duplicate block's lines. `jscpd` must be
 on `PATH`; the rule errors if it is not.
 
-### `jet`: [`@call_sites`](@ref), [`@opt_sites`](@ref)
+### `jet`: `call_report_sites(repo, entry_frames(seeds, mod), mod)`, [`@call_sites`](@ref), [`@opt_sites`](@ref)
 
-Reports of `JET.@report_call` and `JET.@report_opt`. See the [guide](guide.md#JET).
+Reports of JET's error analysis, `JET.report_call`: a call no method matches, an undefined global or
+field, a call that always throws. The `corset` command runs it on every frame `entry_frames` keeps,
+when the load path finds JET: the project's environment, Corset's, or the default environment
+(`@v#.#`). Corset does not depend on JET; without it the rule is listed as skipped. A report counts
+when its innermost frame is a method of the package (JET's `target_modules`), and is keyed by that
+method and the report's kind and placed at its line, so an opt-out goes on the reported line. The
+same report reached from several frames is one site.
+
+The rule leaves out `JET.report_opt`: `runtime-dispatch` reports its runtime dispatches and
+`impure-anonymous-function` its captured `Core.Box`es. In tests, [`@call_sites`](@ref) and
+[`@opt_sites`](@ref) run either analysis on one call. See the [guide](guide.md#JET).

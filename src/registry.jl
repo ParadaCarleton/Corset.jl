@@ -146,6 +146,9 @@ float_widenings(context.repository, context.inferred; search = context.candidate
 @rule ModuleRule "widened-return" :default "methods whose inferred result a caller cannot compile against concretely" context ->
 widened_returns(context.repository, context.inferred; context.comments)
 
+@rule ModuleRule "jet" :default "JET.report_call's error reports on the frames the signatures compile (JET installed)" context ->
+call_report_sites(context.repository, context.inferred, context.mod)
+
 @rule ModuleRule "impure-anonymous-function" :default "anonymous functions that capture mutable state, rebind a capture, or were never compiled (and, with strict_captures, any capture)" context ->
 impure_anonymous_functions(context.repository, context.mod; context.own_methods)
 

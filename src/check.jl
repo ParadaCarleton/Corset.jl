@@ -56,11 +56,14 @@ function judge(
 end
 
 """Whether `rule` reads the frames inference gives the entry signatures (`entry_frames`)."""
-reads_signatures(rule::Rule)::Bool = rule isa Union{AbstractLocalRule, BangRule, UnmarkedMutationRule, RuntimeDispatchRule, WidenedReturnRule, FloatWideningRule}
+reads_signatures(rule::Rule)::Bool = rule isa Union{AbstractLocalRule, BangRule, UnmarkedMutationRule, RuntimeDispatchRule, WidenedReturnRule, FloatWideningRule, JetRule}
 
-"""Whether `rule` has what it reads: the loaded package `mod` for a module rule, `frames` for a rule that reads inferred types."""
+"""
+Whether `rule` has what it reads: the loaded package `mod` for a module rule, `frames` for a rule that
+reads inferred types, and JET on the load path for the `jet` rule.
+"""
 can_run(rule::Rule, mod::Union{Module, Nothing}, frames::Union{AbstractVector{Inferred}, Nothing})::Bool =
-    (!(rule isa ModuleRule) || !isnothing(mod)) && (!reads_signatures(rule) || !isnothing(frames))
+    (!(rule isa ModuleRule) || !isnothing(mod)) && (!reads_signatures(rule) || !isnothing(frames)) && (!(rule isa JetRule) || installed(JET_ID))
 
 """The names of the rules in `rules` that read the loaded package."""
 module_rule_names(rules::Tuple)::Vector{String} = [
@@ -128,7 +131,7 @@ end
     run_rules(config, root; mod = nothing, frames = nothing, fix = false, update_baseline = false, own_methods = defined_methods(mod))
 
 The findings of every rule `config` leaves on, over the project at `root`, and the names of the rules
-skipped because they read the loaded package `mod` and none was given. The rules that read inferred types also
+skipped because they read the loaded package `mod` and none was given, or are `jet` and JET is not installed. The rules that read inferred types also
 need `frames`, the `entry_frames` of `mod`; without them they are skipped. `fix` first rewrites the files
 for the rules that have a fixer. `update_baseline` seeds and lowers the baseline file; without it the
 baseline is only read. `own_methods` holds the `defined_methods` of `mod`.

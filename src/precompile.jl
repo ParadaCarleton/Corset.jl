@@ -24,7 +24,7 @@ end
             joinpath(root, "src", "WorkloadPackage.jl"),
             "module WorkloadPackage\nconst COUNTER = Ref(0)\nbump(x) = x + COUNTER[]\nstruct Holder\n    held::Any\nend\nend\n",
         )
-        config = with_overrides(load_config(root), true, ["fatou" => :allow, "jscpd" => :allow], nothing)
+        config = with_overrides(load_config(root), true, ["fatou" => :allow, "jscpd" => :allow, "jet" => :allow], nothing)
         WorkloadPackage.bump(1)
         own_methods = defined_methods(WorkloadPackage)
         sources = seed_sources(config, root, nothing, WorkloadPackage, devnull; own_methods)

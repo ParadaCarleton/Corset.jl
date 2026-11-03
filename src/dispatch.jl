@@ -99,6 +99,35 @@ function dispatch_sites(repository::Repository, item::Inferred)::Vector{Site}
 end
 
 """
+    recursion_limits(repository, inferred, mod; comments = Dict())
+
+One site per call in the `inferred` frames (as `audited_frames` keeps them under `comments`) that
+inference cut off at its recursion limit (`cut_off`), to a method of `mod`'s package.
+The callee's argument types nest deeper with every call (`grow((x,), n - 1)`), so it is inferred and
+compiled anew at each depth and never optimized with its caller. JET's optimization analysis reports
+the frames past the cut as `OptimizationFailureReport`.
+"""
+function recursion_limits(
+        repository::Repository, inferred::AbstractVector{Inferred}, mod::Module;
+        comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
+    )::Vector{Site}
+    package = Package(mod)
+    return one_per_line(collect(Site, Iterators.flatten(cut_off_sites.((repository,), audited_frames(repository, inferred, "recursion-limit", comments), (package,)))))
+end
+
+"""The `recursion_limits` sites of `item`, one per cut-off call to a method `package` defines."""
+function cut_off_sites(repository::Repository, item::Inferred, package::Package)::Vector{Site} # lint: runtime-dispatch # lint: abstract-local # lint: unmarked-mutation  optimized IR statements are untyped
+    sites = Site[]
+    for (index, statement) in enumerate(item.ir.stmts.stmt)
+        if cut_off(statement) && defined_in(first(statement.args), package)
+            detail = "calls $(first(statement.args).specTypes) past inference's recursion limit"
+            push!(sites, Site(method_key(repository, item.method), string(item.method.file), statement_line(item.ir, item.method, index), detail))
+        end
+    end
+    return sites
+end
+
+"""
     widened_returns(repository, inferred; comments = Dict())
 
 Each method of `inferred` (as `audited_frames` keeps them under `comments`) whose inferred result does not compile

@@ -140,6 +140,9 @@ unmarked_mutations(context.repository, context.inferred; search = context.candid
 @rule ModuleRule "runtime-dispatch" :default "calls left to run-time dispatch in the frames the signatures compile" context ->
 runtime_dispatches(context.repository, context.inferred; context.comments)
 
+@rule ModuleRule "recursion-limit" :default "calls inference cuts off at its recursion limit, their argument types nesting deeper with every call" context ->
+recursion_limits(context.repository, context.inferred, context.mod; context.comments)
+
 @rule ModuleRule "float-widening" :default "statements whose float result is wider than every float argument of their method" context ->
 float_widenings(context.repository, context.inferred; search = context.candidates, context.comments)
 

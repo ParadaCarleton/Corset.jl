@@ -533,4 +533,4 @@ function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::
 end
 
 """`run_command` on the process's standard streams, as they are when the command starts."""
-(@main)(args::AbstractVector{<:AbstractString})::Int = run_command(args, stdout, stderr) # lint: hidden-input
+(@main)(args::AbstractVector{<:AbstractString})::Int = run_command(args, stdout, stderr)

@@ -430,11 +430,13 @@ end
         @test allunique(sites)
         @test isempty(Corset.call_report_sites(fixture_repository, filter(item -> item.method.name === :reads_limit, inferred), fixture))
         # `sum` of strings fails inside Base (`add_sum`, `reduce_empty`): JET reports it, the package's rule does not.
+        # The method is in a repository file, so the rule analyzes it; both reports are raised inside Base.
+        summed_tree = write_tree(mktempdir(), ["total.jl" => "total(words::Vector{String})::String = sum(words)\n"])
         holder = Module(:Holder)
-        Core.eval(holder, :(total(words::Vector{String})::String = sum(words)))
+        Base.include(holder, joinpath(summed_tree, "total.jl"))
         signature = Tuple{typeof(holder.total), Vector{String}}
         @test !isempty(JET.get_reports(JET.report_call(signature)))
-        @test isempty(Corset.call_report_sites(repository, entry_frames(Type[signature], holder), holder))
+        @test isempty(Corset.call_report_sites(Repository(summed_tree), entry_frames(Type[signature], holder), holder))
         # A call that fails on one branch of a union split (`+(::Nothing, ::Int)` on an unchecked `findfirst`)
         # counts like any other; a frame whose file is outside the repository does not.
         split_source = """

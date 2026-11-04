@@ -18,6 +18,21 @@ You can also run it via `julia -m Corset`:
 julia --project -m Corset check
 ```
 
+### Corset as a test dependency
+
+A package that lists Corset only under `[extras]` and `[targets] test` can't load it from its own
+environment, so `julia --project -m Corset` fails with "Package Corset not found". Activate the test
+target's environment with [TestEnv.jl](https://github.com/JuliaTesting/TestEnv.jl) first:
+
+```bash
+julia -e 'using Pkg; Pkg.add("TestEnv")'
+julia --project=. -e 'using TestEnv; TestEnv.activate(); using Corset; exit(Corset.main(ARGS))' -- check .
+```
+
+`corset check` then relaunches in the package's own project and keeps the test environment on the load
+path for Corset and its dependencies. Corset's own CI runs this command in its `corset` job, so the job
+can be copied into a downstream package as is.
+
 ## Commands
 
 ### `corset check`

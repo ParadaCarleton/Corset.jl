@@ -217,7 +217,7 @@ Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 
 ## Rules with fixers
 
-Two rules come with a fixer. `Corset.fix!(rule, repo, directories)` applies one: the rule's
+Three rules come with a fixer. `Corset.fix!(rule, repo, directories)` applies one: the rule's
 `fix_plan` proposes one repair per site, and `fix!` drops every repair a `# lint:` comment opts out
 (line, block and file forms) before it writes. It computes every file before it writes any, and
 returns the sites it repaired.
@@ -241,6 +241,13 @@ f(x::T)::T where {T} = x      # parses as f(x::T)::(T where {T}); T is not the m
 ```
 
 Its fixer parenthesizes those whose `where` binds a variable of the arguments.
+
+### `quadratic-vcat`: `quadratic_concatenations(file)`
+
+Its fixer rewrites `reduce(vcat, pieces; init = T[])` as `collect(T, Iterators.flatten(pieces))`, and
+the folds inside `pieces` with it. It leaves `init = Any[]` and every other fold alone: `vcat` appends a
+piece that is not a vector whole, where `flatten` iterates it, and only a `T` other than `Any` turns that
+difference into a conversion error instead of a different result.
 
 ## Rules that call other tools
 

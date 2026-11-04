@@ -82,6 +82,13 @@ function where_fixed(text::AbstractString)::String
     return read(joinpath(tree, "source.jl"), String)
 end
 
+"""The text the quadratic-vcat fixer leaves of `text`, written to a fresh file."""
+function flatten_fixed(text::AbstractString)::String
+    tree = write_tree(mktempdir(), ["source.jl" => text])
+    Corset.fix!(Corset.QuadraticVcatRule(), Repository(tree), (".",))
+    return read(joinpath(tree, "source.jl"), String)
+end
+
 """A module of `count` structs, each one field wider than the last, and `count` functions returning a capturing closure."""
 function generated_module(count::Integer)::Module
     generated = Module(:Generated)
@@ -727,6 +734,42 @@ end
             write(path, kept)
             @test isempty(where_return_sites(parsed(path)))
         end
+    end
+end
+
+@testset "quadratic-vcat: the fixer flattens `reduce(vcat, pieces; init = T[])`" begin
+    @test flatten_fixed("x = reduce(vcat, (f(p) for p in ps); init = String[])\n") ==
+        "x = collect(String, Iterators.flatten(f(p) for p in ps))\n"
+    @test flatten_fixed("y = reduce(vcat, xs, init = Vector{Int}[])\n") == "y = collect(Vector{Int}, Iterators.flatten(xs))\n"
+    @test flatten_fixed("z = reduce(\n    vcat,\n    (g(a) for a in as);\n    init = A.B[],\n)\n") ==
+        "z = collect(A.B, Iterators.flatten(g(a) for a in as))\n"
+    @testset "a fold inside the pieces of another is flattened with it" begin
+        nested = "w = reduce(vcat, (reduce(vcat, (h(b) for b in bs); init = Int[]) for bs in groups); init = Int[])\n"
+        @test flatten_fixed(nested) == "w = collect(Int, Iterators.flatten(collect(Int, Iterators.flatten(h(b) for b in bs)) for bs in groups))\n"
+    end
+    @testset "a fold whose pieces may not be vectors, or that is not reduce(vcat, …; init = T[]), is left alone" begin
+        for kept in (
+                "a = reduce(vcat, pairs; init = Any[])\n",
+                "b = reduce(vcat, (f(p) for p in ps))\n",
+                "c = reduce(hcat, columns; init = Int[])\n",
+                "d = foldl(vcat, pieces; init = Int[])\n",
+                "e = reduce(vcat, pieces; init = start)\n",
+                "g = reduce(vcat, pieces; init = Int[], dims = 1)\n",
+                "h = reduce(vcat, pieces; base = Int[])\n",
+                "k = reduce(vcat, pieces; init = Int[1])\n",
+                "m = reduce(vcat; init = Int[])\n",
+            )
+            @test flatten_fixed(kept) == kept
+        end
+    end
+    @testset "the fixer leaves a fold a `# lint: quadratic-vcat` comment opts out, on any line it spans" begin
+        broken = "x = reduce(vcat, xs; init = Int[])\n"
+        fixed = "x = collect(Int, Iterators.flatten(xs))\n"
+        spanning = "y = reduce(\n    vcat, ys; # lint: quadratic-vcat  deliberate\n    init = Int[])\n"
+        tree = write_tree(mktempdir(), ["line.jl" => spanning * broken, "plain.jl" => broken])
+        fixed_sites = Corset.fix!(Corset.QuadraticVcatRule(), Repository(tree), (".",))
+        @test sort!([(basename(site.file), site.line) for site in fixed_sites]) == [("line.jl", 4), ("plain.jl", 1)]
+        @test tree_texts(tree) == Dict("line.jl" => spanning * fixed, "plain.jl" => fixed)
     end
 end
 

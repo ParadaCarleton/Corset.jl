@@ -1,5 +1,5 @@
 # Properties every registered fixer keeps on small generated packages: imports, nested modules,
-# includes, `where` clauses, opt-out comments and code sharing a line with an import.
+# includes, `where` clauses, concatenating folds, opt-out comments and code sharing a line with an import.
 
 using Test: @testset, @test
 using Supposition: Supposition, Data, @check
@@ -9,7 +9,7 @@ using TOML: TOML
 const SYNTAX = Corset.SYNTAX
 
 # The rules whose fixers the generator below exercises.
-const GENERATED_FIXERS = Set(["misplaced-import", "where-return"])
+const GENERATED_FIXERS = Set(["misplaced-import", "quadratic-vcat", "where-return"])
 
 # The names generated packages import: bindings of Base.Iterators that Base does not export.
 const ITERATOR_NAMES = ("take", "drop", "cycle", "flatten", "partition", "product")
@@ -25,6 +25,15 @@ const WHERE_TEMPLATES = (
     "NAME(x::AbstractVector{T})::AbstractVector{T} where {T<:Real} = x" => true,
     "NAME(x::Real)::AbstractVector{T} where T<:Real = T[]" => false,
     "NAME()::AbstractVector{T} where {T} = T[]" => false,
+)
+
+# Folds `quadratic-vcat` reports, each with the text the fixer writes for it, or `""` when it leaves it.
+const FOLD_TEMPLATES = (
+    "reduce(vcat, ([i, i + 1] for i in 1:3); init = Int[])" => "collect(Int, Iterators.flatten([i, i + 1] for i in 1:3))",
+    "reduce(vcat, [[1], [2, 3]], init = Int[])" => "collect(Int, Iterators.flatten([[1], [2, 3]]))",
+    "reduce(vcat, (reduce(vcat, ([j] for j in 1:i); init = Int[]) for i in 1:3); init = Int[])" =>
+        "collect(Int, Iterators.flatten(collect(Int, Iterators.flatten([j] for j in 1:i)) for i in 1:3))",
+    "reduce(vcat, [1 => 2, 3 => 4]; init = Any[])" => "",
 )
 
 # The paths the root file includes, in order.
@@ -43,6 +52,13 @@ struct WhereShape
     opt_out::Symbol
 end
 
+"""One generated fold: its `template` (`FOLD_TEMPLATES`), the text the fixer writes for it (`""` for none), and its `opt_out` form."""
+struct FoldShape
+    template::String
+    fixed::String
+    opt_out::Symbol
+end
+
 """A `module` block inside a generated file, with its own `imports` and the names it `uses`."""
 struct NestedShape
     imports::Vector{ImportShape}
@@ -50,13 +66,14 @@ struct NestedShape
 end
 
 """
-One generated file: its imports, the names it uses, its where-return definitions, its nested modules,
-the rule a file-level `# lint:` comment names (`""` for none), and whether the file is read-only.
+One generated file: its imports, the names it uses, its where-return definitions, its folds, its nested
+modules, the rule a file-level `# lint:` comment names (`""` for none), and whether the file is read-only.
 """
 struct FileShape
     imports::Vector{ImportShape}
     uses::Vector{String}
     definitions::Vector{WhereShape}
+    folds::Vector{FoldShape}
     nested::Vector{NestedShape}
     file_opt_out::String
     read_only::Bool
@@ -71,6 +88,9 @@ end
 """The `WhereShape` of `template` (`WHERE_TEMPLATES`) with `opt_out`."""
 where_shape(template::Pair{String, Bool}, opt_out::Symbol)::WhereShape = WhereShape(first(template), last(template), opt_out)
 
+"""The `FoldShape` of `template` (`FOLD_TEMPLATES`) with `opt_out`."""
+fold_shape(template::Pair{String, String}, opt_out::Symbol)::FoldShape = FoldShape(first(template), last(template), opt_out)
+
 """
 Vectors of `elements` at most `longest` long, every length equally likely. `Data.Vectors` keeps a
 short vector empty for its first thousands of examples.
@@ -81,10 +101,11 @@ short vector empty for its first thousands of examples.
 const NAMES = Data.SampledFrom(ITERATOR_NAMES)
 const IMPORT_SHAPES = map(ImportShape, map(vcat, NAMES, up_to(NAMES, 2)), Data.SampledFrom(IMPORT_FORMS))
 const WHERE_SHAPES = map(where_shape, Data.SampledFrom(WHERE_TEMPLATES), Data.SampledFrom((:none, :line, :block, :other)))
+const FOLD_SHAPES = map(fold_shape, Data.SampledFrom(FOLD_TEMPLATES), Data.SampledFrom((:none, :line, :block, :other)))
 const NESTED_SHAPES = map(NestedShape, up_to(IMPORT_SHAPES, 2), up_to(NAMES, 2))
 const FILE_SHAPES = map(
-    FileShape, up_to(IMPORT_SHAPES, 3), up_to(NAMES, 3), up_to(WHERE_SHAPES, 2), up_to(NESTED_SHAPES, 1),
-    Data.SampledFrom(("", "misplaced-import", "where-return")), Data.Booleans(),
+    FileShape, up_to(IMPORT_SHAPES, 3), up_to(NAMES, 3), up_to(WHERE_SHAPES, 2), up_to(FOLD_SHAPES, 2), up_to(NESTED_SHAPES, 1),
+    Data.SampledFrom(("", "misplaced-import", "quadratic-vcat", "where-return")), Data.Booleans(),
 )
 const PACKAGE_SHAPES = map(PackageShape, FILE_SHAPES, up_to(FILE_SHAPES, length(INCLUDED_PATHS)))
 
@@ -138,6 +159,24 @@ function where_lines(shape::WhereShape, label::String, file_rule::String)::Vecto
     return body
 end
 
+"""Whether fold `shape` is kept by a line or block opt-out, or by the file's own opt-out of `quadratic-vcat`."""
+fold_opted(shape::FoldShape, file_rule::String)::Bool = shape.opt_out in (:line, :block) || file_rule == "quadratic-vcat"
+
+"""
+The lines of fold `shape` labeled `label`, a constant `fold_LABEL`; as the fixer should leave them when
+`fixed`, which rewrites a fold no opt-out keeps and the fixer can repair.
+"""
+function fold_lines(shape::FoldShape, label::String, file_rule::String, fixed::Bool)::Vector{Pair{String, Bool}}
+    opted = fold_opted(shape, file_rule)
+    call = ifelse(fixed && !opted && !isempty(shape.fixed), shape.fixed, shape.template)
+    suffixes = Dict(:none => "", :line => " # lint: quadratic-vcat  kept", :block => "", :other => " # lint: where-return  other")
+    body = ["const fold_$label = $call$(suffixes[shape.opt_out])" => opted]
+    if shape.opt_out === :block
+        return vcat(["# lint: quadratic-vcat-begin  kept" => true], body, ["# lint: quadratic-vcat-end" => true])
+    end
+    return body
+end
+
 """The lines of nested module `shape` labeled `label`: its imports, and its uses of what they take."""
 nested_lines(shape::NestedShape, label::String, file_rule::String)::Vector{Pair{String, Bool}} = vcat(
     ["module Nested_$label" => false], imports_lines(shape.imports, label, file_rule),
@@ -146,17 +185,19 @@ nested_lines(shape::NestedShape, label::String, file_rule::String)::Vector{Pair{
 
 """
 The body lines of `file` labeled `label`, whose uses read the names of `available`: imports, uses,
-where-return definitions, the `included` lines, then nested modules.
+where-return definitions, folds (as the fixer should leave them when `fixed`), the `included` lines,
+then nested modules.
 """
-function body_lines(file::FileShape, label::String, available::AbstractSet{String}, included::AbstractVector{Pair{String, Bool}})::Vector{Pair{String, Bool}}
+function body_lines(file::FileShape, label::String, available::AbstractSet{String}, included::AbstractVector{Pair{String, Bool}}, fixed::Bool)::Vector{Pair{String, Bool}}
     rule = file.file_opt_out
     definitions = Pair{String, Bool}[line for (position, shape) in enumerate(file.definitions) for line in where_lines(shape, "$(label)_$position", rule)]
+    folds = Pair{String, Bool}[line for (position, shape) in enumerate(file.folds) for line in fold_lines(shape, "$(label)_$position", rule, fixed)]
     nested = Pair{String, Bool}[line for (position, shape) in enumerate(file.nested) for line in nested_lines(shape, "$(label)_$position", rule)]
     opt_out = Pair{String, Bool}[]
     if !isempty(rule)
         opt_out = ["# lint: $rule-file  generated" => true]
     end
-    return vcat(opt_out, imports_lines(file.imports, label, rule), use_lines(file.uses, available, label), definitions, included, nested)
+    return vcat(opt_out, imports_lines(file.imports, label, rule), use_lines(file.uses, available, label), definitions, folds, included, nested)
 end
 
 """A generated file: its `path` under `src`, its `text`, its `pinned` lines in order, and whether it is `read_only`."""
@@ -172,17 +213,18 @@ generated_file(path::String, lines::AbstractVector{Pair{String, Bool}}, read_onl
     GeneratedFile(path, join(first.(lines), "\n") * "\n", first.(filter(last, lines)), read_only)
 
 """
-The files of `package`. Uses in the root read its own imports; an included file reads those of the
-root and of every file included up to it, which load before it.
+The files of `package`, with their folds as the fixer should leave them when `fixed`. Uses in the root
+read its own imports; an included file reads those of the root and of every file included up to it,
+which load before it.
 """
-function package_files(package::PackageShape)::Vector{GeneratedFile}
+function package_files(package::PackageShape, fixed::Bool)::Vector{GeneratedFile}
     paths = collect(INCLUDED_PATHS[eachindex(package.included)])
     scopes = accumulate(union, vcat([imported_names(package.root.imports)], [imported_names(file.imports) for file in package.included]))
     includes = Pair{String, Bool}["include($(repr(path)))" => false for path in paths]
-    root_lines = vcat(["module Generated" => false], body_lines(package.root, "0", first(scopes), includes), ["end" => false])
+    root_lines = vcat(["module Generated" => false], body_lines(package.root, "0", first(scopes), includes, fixed), ["end" => false])
     root = generated_file("Generated.jl", root_lines, package.root.read_only)
     included = [
-        generated_file(path, body_lines(file, "$position", scope, Pair{String, Bool}[]), file.read_only)
+        generated_file(path, body_lines(file, "$position", scope, Pair{String, Bool}[], fixed), file.read_only)
             for (position, (path, file, scope)) in enumerate(zip(paths, package.included, Iterators.drop(scopes, 1)))
     ]
     return vcat([root], included)
@@ -194,6 +236,20 @@ unrepairable(shape::WhereShape)::Bool = !shape.binds && shape.opt_out in (:none,
 """The where-return definitions of `package` no opt-out keeps and no fixer repairs: those binding no argument."""
 unrepairable_definitions(package::PackageShape)::Int =
     sum(Int[count(unrepairable, file.definitions) for file in vcat([package.root], package.included) if file.file_opt_out != "where-return"])
+
+"""The files of `package` labeled as `package_files` labels them, in order."""
+package_labels(package::PackageShape)::Vector{Pair{String, FileShape}} =
+    vcat(["0" => package.root], ["$position" => file for (position, file) in enumerate(package.included)])
+
+"""The folds of `package` no opt-out keeps and the fixer leaves: those it cannot repair."""
+unrepairable_folds(package::PackageShape)::Int =
+    sum(Int[count(shape -> isempty(shape.fixed) && !fold_opted(shape, file.file_opt_out), file.folds) for file in vcat([package.root], package.included)])
+
+"""Whether every fold constant of `package` in `generated`, its loaded module, holds what its original fold computes."""
+fold_values_kept(generated::Module, package::PackageShape)::Bool = all(
+    Base.invokelatest(getglobal, generated, Symbol("fold_$(label)_$position")) == Core.eval(Module(), Meta.parse(shape.template))
+        for (label, file) in package_labels(package) for (position, shape) in enumerate(file.folds)
+)
 
 """Whether byte `start` falls in one of the byte ranges `ranges`."""
 in_ranges(start::Integer, ranges::AbstractVector{<:UnitRange})::Bool = any(Base.Fix1(in, start), ranges)
@@ -254,11 +310,14 @@ end
 """
 Whether `corset check --fix` on `package` keeps every fixer property: each file parses and keeps its
 mode and significant tokens; pinned lines stay in order; the package loads; the fixed rules report only
-the definitions no fixer can repair; and a second fix changes nothing.
+the definitions and folds no fixer can repair; every fold constant keeps its value; and a second fix
+changes nothing. Significant tokens are compared with the package as the fixer should leave it, folds
+rewritten.
 """
 function fix_keeps_properties(package::PackageShape)::Bool
     root = mktempdir()
-    files = package_files(package)
+    files = package_files(package, false)
+    expected = package_files(package, true)
     paths = [joinpath(root, "src", file.path) for file in files]
     mkpath.(dirname.(paths))
     write.(paths, [file.text for file in files])
@@ -269,14 +328,17 @@ function fix_keeps_properties(package::PackageShape)::Bool
     findings, _ = Corset.run_rules(config, root; fix = true)
     fixed = file_texts(root, files)
     SYNTAX.parseall.(SYNTAX.SyntaxNode, fixed)
-    Base.include(Module(), joinpath(root, "src", "Generated.jl"))
+    loaded = Module()
+    Base.include(loaded, joinpath(root, "src", "Generated.jl"))
     rules = [finding.rule for finding in findings]
     second, _ = Corset.run_rules(config, root; fix = true)
     return filemode.(paths) == modes &&
-        significant_tokens.([file.text for file in files]) == significant_tokens.(fixed) &&
+        significant_tokens.([file.text for file in expected]) == significant_tokens.(fixed) &&
         all(subsequence.([file.pinned for file in files], split.(fixed, '\n'))) &&
         count(==("misplaced-import"), rules) == 0 &&
         count(==("where-return"), rules) == unrepairable_definitions(package) &&
+        count(==("quadratic-vcat"), rules) == unrepairable_folds(package) &&
+        fold_values_kept(Base.invokelatest(getglobal, loaded, :Generated), package) &&
         [finding.rule for finding in second] == rules &&
         file_texts(root, files) == fixed
 end

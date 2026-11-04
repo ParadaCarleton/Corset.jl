@@ -260,5 +260,8 @@ fix_plan(::MisplacedImportRule, repository::Repository, directories::Tuple{Varar
 fix_plan(::WhereReturnRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{WhereParentheses, typeof(parenthesized_texts)} =
     where_plan(repository, directories)
 
+fix_plan(::QuadraticVcatRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
+    flatten_plan(repository, directories)
+
 """Every rule, ordered by name."""
 const RULES = Tuple(sort!([type() for kind in (ModuleRule, TreeRule, FileRule) for type in subtypes(kind)]; by = rule_name))

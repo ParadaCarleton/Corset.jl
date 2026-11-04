@@ -6,6 +6,9 @@ using TOML: TOML
 
 const SYNTAX = Base.JuliaSyntax # lint: non-public-access  the registered JuliaSyntax lags the parser Julia 1.13 ships
 
+"""The children of syntax node `node`: none for a leaf, where JuliaSyntax's `children` gives `nothing`."""
+node_children(node::SYNTAX.SyntaxNode)::Vector{SYNTAX.SyntaxNode} = something(SYNTAX.children(node), SYNTAX.SyntaxNode[])
+
 # The baseline file holds one table per rule, named as in the rule's opt-out comment. A string
 # is a named offender's note ("unassigned" waits on a decision, "kept: …" is deliberate) and
 # allows it at any number of sites; an integer allows that many sites. `TOML.print` drops comments.
@@ -158,7 +161,7 @@ end
 
 """The comment `found`, an `OPT_OUT` match in a comment token that starts at byte `start`, placed by `lines`."""
 opt_out_comment(lines::SYNTAX.SourceFile, start::Integer, found::RegexMatch)::OptOutComment =
-    OptOutComment(found[1], opt_out_form(found[2]), SYNTAX.source_line(lines, start + found.offset - 1))
+    OptOutComment(found[1]::AbstractString, opt_out_form(found[2]), SYNTAX.source_line(lines, start + found.offset - 1))
 
 """The form an `OPT_OUT` suffix (`file`, `begin`, `end` or none) gives its comment."""
 opt_out_form(suffix::AbstractString)::Symbol = Symbol(suffix)

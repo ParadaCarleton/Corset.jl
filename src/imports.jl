@@ -111,9 +111,9 @@ function name_tokens(node::SYNTAX.SyntaxNode, block::Integer)::Vector{Tuple{Int,
     elseif SYNTAX.is_leaf(node)
         return Tuple{Int, String}[]
     elseif kind === MACRO_NAME_KIND
-        return [(Int(block), "@" * SYNTAX.sourcetext(only(SYNTAX.children(node))))]
+        return [(Int(block), "@" * SYNTAX.sourcetext(only(node_children(node))))]
     end
-    children = SYNTAX.children(node)
+    children = node_children(node)
     if kind === FIELD_KIND
         return name_tokens(first(children), block)
     end
@@ -129,7 +129,7 @@ function import_nodes(node::SYNTAX.SyntaxNode)::Vector{SYNTAX.SyntaxNode}
     elseif SYNTAX.is_leaf(node) || kind === QUOTE_KIND
         return SYNTAX.SyntaxNode[]
     end
-    return SYNTAX.SyntaxNode[found for child in SYNTAX.children(node) for found in import_nodes(child)]
+    return SYNTAX.SyntaxNode[found for child in node_children(node) for found in import_nodes(child)]
 end
 
 """Every `module` block below `node`."""
@@ -137,7 +137,7 @@ function module_nodes(node::SYNTAX.SyntaxNode)::Vector{SYNTAX.SyntaxNode}
     if SYNTAX.is_leaf(node)
         return SYNTAX.SyntaxNode[]
     end
-    below = SYNTAX.SyntaxNode[found for child in SYNTAX.children(node) for found in module_nodes(child)]
+    below = SYNTAX.SyntaxNode[found for child in node_children(node) for found in module_nodes(child)]
     if SYNTAX.kind(node) === MODULE_KIND
         return vcat([node], below)
     end
@@ -147,16 +147,16 @@ end
 """The name parsed import item `node` binds."""
 function item_name(node::SYNTAX.SyntaxNode)::String
     if SYNTAX.kind(node) === AS_KIND
-        return String(SYNTAX.sourcetext(last(SYNTAX.children(node))))
+        return String(SYNTAX.sourcetext(last(node_children(node))))
     end
     return path_name(node)
 end
 
 """The last part of parsed import path `node` (`f` of `..Parent.f`, `@m` of `A.@m`)."""
 function path_name(node::SYNTAX.SyntaxNode)::String
-    tail = last(SYNTAX.children(node))
+    tail = last(node_children(node))
     if SYNTAX.kind(tail) === MACRO_NAME_KIND
-        return "@" * SYNTAX.sourcetext(only(SYNTAX.children(tail)))
+        return "@" * SYNTAX.sourcetext(only(node_children(tail)))
     end
     return String(SYNTAX.sourcetext(tail))
 end
@@ -164,22 +164,22 @@ end
 """The import path of parsed import item `node`: the path before `as`, or `node` itself."""
 function item_path(node::SYNTAX.SyntaxNode)::SYNTAX.SyntaxNode
     if SYNTAX.kind(node) === AS_KIND
-        return first(SYNTAX.children(node))
+        return first(node_children(node))
     end
     return node
 end
 
 """Whether parsed import path `node` starts with a `.`, naming a module relative to its own (`..Parent`, `.Sub`)."""
-relative_path(node::SYNTAX.SyntaxNode)::Bool = SYNTAX.kind(first(SYNTAX.children(node))) === FIELD_KIND
+relative_path(node::SYNTAX.SyntaxNode)::Bool = SYNTAX.kind(first(node_children(node))) === FIELD_KIND
 
 """
 The names `using` or `import` `node` takes from a module of its own package by a relative path:
 `f` of `using ..Parent: f as g` or of `import .Sub.f`. The module that supplies each needs its own import of it.
 """
 function relayed_names(node::SYNTAX.SyntaxNode)::Vector{String}
-    children = SYNTAX.children(node)
+    children = node_children(node)
     if length(children) == 1 && SYNTAX.kind(only(children)) === COLON_KIND
-        parts = SYNTAX.children(only(children))
+        parts = node_children(only(children))
         if relative_path(first(parts))
             return path_name.(item_path.(parts[2:end]))
         end
@@ -197,12 +197,12 @@ function import_statement(node::SYNTAX.SyntaxNode, text::AbstractString, lines::
     if SYNTAX.kind(node) === USING_KIND
         keyword = "using"
     end
-    children = SYNTAX.children(node)
+    children = node_children(node)
     colon = length(children) == 1 && SYNTAX.kind(only(children)) === COLON_KIND
     prefix = keyword * " "
     item_nodes = children
     if colon
-        parts = SYNTAX.children(only(children))
+        parts = node_children(only(children))
         prefix = keyword * " " * strip(text[SYNTAX.byte_range(first(parts))]) * ": "
         item_nodes = parts[2:end]
     end
@@ -220,7 +220,7 @@ function include_nodes(node::SYNTAX.SyntaxNode)::Vector{SYNTAX.SyntaxNode}
     if SYNTAX.is_leaf(node) || kind === QUOTE_KIND
         return SYNTAX.SyntaxNode[]
     end
-    children = SYNTAX.children(node)
+    children = node_children(node)
     if kind === CALL_KIND && SYNTAX.kind(first(children)) === IDENTIFIER_KIND && SYNTAX.sourcetext(first(children)) == "include"
         return [node]
     end
@@ -232,7 +232,7 @@ The path `include` call `node` names, relative to `directory` and resolved by `i
 for one whose path is not a literal.
 """
 function include_path(node::SYNTAX.SyntaxNode, directory::AbstractString)::String
-    children = SYNTAX.children(node)
+    children = node_children(node)
     if length(children) != 2
         return ""
     end
@@ -451,7 +451,8 @@ function addition_edit(file::ImportFile, items::AbstractVector{Pair{String, Stri
     bytes = codeunits(file.text)
     last_statement = argmax(last_byte, top)
     start = line_start(bytes, last_statement.first_byte)
-    indent = String(bytes[start:(start + findfirst(!is_blank, view(bytes, start:length(bytes))) - 2)])
+    # A statement's line holds a non-blank byte; with none, the statement takes no indent.
+    indent = String(bytes[start:(start + something(findfirst(!is_blank, view(bytes, start:length(bytes))), 1) - 2)])
     stop = line_end(bytes, last_statement.last_byte)
     return ((stop + 1):stop) => join(indent .* statements .* "\n")
 end

@@ -772,7 +772,7 @@ end
 """Whether parsed type expression `annotation` is a `Union` with `Nothing` among its members."""
 mentions_nothing(annotation::Expr)::Bool = annotation.head === :curly &&
     first(annotation.args) === :Union &&
-    :Nothing in annotation.args[2:end]
+    (:Nothing in annotation.args[2:end])::Bool
 mentions_nothing(::Any)::Bool = false
 
 # The edge of `exp`'s Float32 and Float64 ranges, written as a literal guard.
@@ -785,7 +785,7 @@ Whether parsed source `node` itself is an overflow or underflow guard: a call to
 is_range_guard(node::Real)::Bool = node in EXP_RANGE_LITERALS
 is_range_guard(node::Expr)::Bool = node.head === :call &&
     (
-    first(node.args) in (:floatmin, :floatmax) ||
+    (first(node.args) in (:floatmin, :floatmax))::Bool ||
         (first(node.args) === :isfinite && any(calls_exp, node.args[2:end]))
 )
 is_range_guard(::Any)::Bool = false
@@ -978,9 +978,9 @@ const SUBTYPE_KIND = SYNTAX.@K_str "<:"
 
 """The name a `struct` syntax node declares, whatever its parameters and supertype, as Julia names the type (`var"Odd Name"` gives `Symbol("Odd Name")`)."""
 function struct_name(node::SYNTAX.SyntaxNode)::Symbol
-    header = first(SYNTAX.children(node))
+    header = first(node_children(node))
     while SYNTAX.kind(header) in (CURLY_KIND, SUBTYPE_KIND)
-        header = first(SYNTAX.children(header))
+        header = first(node_children(header))
     end
     return Symbol(Expr(header))
 end
@@ -990,7 +990,7 @@ function struct_lines(node::SYNTAX.SyntaxNode)::Vector{Pair{Symbol, Int}}
     if SYNTAX.is_leaf(node)
         return Pair{Symbol, Int}[]
     end
-    nested = vcat(Pair{Symbol, Int}[], (struct_lines(child) for child in SYNTAX.children(node))...)
+    nested = vcat(Pair{Symbol, Int}[], (struct_lines(child) for child in node_children(node))...)
     if SYNTAX.kind(node) === STRUCT_KIND
         return vcat(struct_name(node) => first(SYNTAX.source_location(node)), nested)
     end
@@ -1048,7 +1048,7 @@ function is_concrete_container(annotation::Expr)::Bool
     if first(annotation.args) === :Union
         return any(is_concrete_container, annotation.args[2:end])
     end
-    return first(annotation.args) in CONCRETE_CONTAINERS
+    return (first(annotation.args) in CONCRETE_CONTAINERS)::Bool
 end
 is_concrete_container(::Any)::Bool = false
 
@@ -1056,7 +1056,7 @@ is_concrete_container(::Any)::Bool = false
 function resizes(node::Expr, name::Symbol)::Bool # lint: abstract-local  Expr nodes hold untyped arguments
     if node.head === :call &&
             length(node.args) >= 2 &&
-            first(node.args) in RESIZERS &&
+            (first(node.args) in RESIZERS)::Bool &&
             node.args[2] === name
         return true
     end
@@ -1182,7 +1182,7 @@ function package_type(head::Symbol, scope::Module)::Bool # lint: abstract-local 
         return false
     end
     named = getglobal(scope, head)
-    return named isa Type && !(parentmodule(named) in (Base, Core))
+    return named isa Type && !(parentmodule(named) in (Base, Core))::Bool
 end
 package_type(::Any, ::Module)::Bool = false
 
@@ -1297,7 +1297,7 @@ function float64_sites!(
         end
         return nothing
     end
-    children = SYNTAX.children(node)
+    children = node_children(node)
     if kind === QUOTE_KIND ||
             (
             kind === MACROCALL_KIND &&
@@ -1347,7 +1347,7 @@ function name_sites(
         end
         return Site[]
     end
-    children = SYNTAX.children(node)
+    children = node_children(node)
     if kind === QUOTE_KIND
         return Site[]
     end

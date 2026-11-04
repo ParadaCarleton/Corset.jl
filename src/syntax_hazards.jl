@@ -205,10 +205,10 @@ function folds_concatenation(call::Expr, shift::Integer)::Bool # lint: abstract-
     name = callee(call)
     position = get(FOLD_OPERATORS, name, 0) - shift
     arguments = call_arguments(call)
-    if call.head !== :call || !(1 <= position < length(arguments)) || !(called_name(arguments[position]) in CONCATENATIONS)
+    if call.head !== :call || !(1 <= position < length(arguments)) || !(called_name(arguments[position]) in CONCATENATIONS)::Bool
         return false
     end
-    return name !== :reduce || :init in keyword_names(call) || Meta.isexpr(arguments[position + 1], :generator)
+    return name !== :reduce || (:init in keyword_names(call))::Bool || Meta.isexpr(arguments[position + 1], :generator)
 end
 
 """Whether parsed expression `node` folds a concatenation piece by piece, in call or `do` form (`folds_concatenation`)."""
@@ -267,8 +267,9 @@ end
 """Whether `open` call `node` opens its file to write: a mode `"w"`, `"a"`, `"w+"`, `"a+"` or `"r+"`, or `write`, `append` or `truncate` set to `true`."""
 function opens_to_write(node::Expr)::Bool # lint: abstract-local # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
     keywords = collect(Any, Iterators.flatten([argument.args for argument in node.args if Meta.isexpr(argument, :parameters)]))
-    return any(in(WRITE_MODES), filter(Base.Fix2(isa, String), call_arguments(node))) ||
-        any(keyword -> Meta.isexpr(keyword, :kw) && first(keyword.args) in WRITE_KEYWORDS && last(keyword.args) === true, keywords)
+    modes = String[argument for argument in call_arguments(node) if argument isa String]
+    return any(in(WRITE_MODES), modes) ||
+        any(keyword -> Meta.isexpr(keyword, :kw) && (first(keyword.args) in WRITE_KEYWORDS)::Bool && last(keyword.args) === true, keywords)
 end
 
 """Whether parsed expression `node` writes a file whose path mentions one of `variables`: `write(path, text)`, or `open(path, "w")`."""

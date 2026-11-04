@@ -122,11 +122,20 @@ declared(context::Context)::Vector{StructDeclaration} = struct_locations(context
 """The scope a `FileRule` resolves type names in: the loaded package, or `Base` when none is loaded."""
 scope(context::Context)::Module = something(context.mod, Base)
 
+"""The loaded package of `context`, which a module rule reads; `can_run` runs one only when there is one."""
+function loaded_module(context::Context)::Module
+    mod = context.mod
+    if isnothing(mod)
+        throw(ArgumentError("a module rule ran on a context with no loaded package; `can_run` should have skipped it"))
+    end
+    return mod
+end
+
 @rule ModuleRule "hidden-input" :default "reads of a mutable or non-constant global, or a ScopedValue" context ->
-hidden_inputs(context.repository, context.mod; context.own_methods)
+hidden_inputs(context.repository, loaded_module(context); context.own_methods)
 
 @rule ModuleRule "non-public-access" :default "qualified accesses and explicit imports of another module's non-public names" context ->
-non_public_accesses(context.mod)
+non_public_accesses(loaded_module(context))
 
 @rule ModuleRule "abstract-local" :default "local variables whose inferred type is abstract or a union" context ->
 abstract_locals(context.repository, context.inferred; context.comments)
@@ -141,7 +150,7 @@ unmarked_mutations(context.repository, context.inferred; search = context.candid
 runtime_dispatches(context.repository, context.inferred; context.comments)
 
 @rule ModuleRule "recursion-limit" :default "calls inference cuts off at its recursion limit, their argument types nesting deeper with every call" context ->
-recursion_limits(context.repository, context.inferred, context.mod; context.comments)
+recursion_limits(context.repository, context.inferred, loaded_module(context); context.comments)
 
 @rule ModuleRule "float-widening" :default "statements whose float result is wider than every float argument of their method" context ->
 float_widenings(context.repository, context.inferred; search = context.candidates, context.comments)
@@ -150,34 +159,34 @@ float_widenings(context.repository, context.inferred; search = context.candidate
 widened_returns(context.repository, context.inferred; context.comments)
 
 @rule ModuleRule "jet" :default "JET.report_call's error reports on the frames the signatures compile (JET installed)" context ->
-call_report_sites(context.repository, context.inferred, context.mod)
+call_report_sites(context.repository, context.inferred, loaded_module(context); context.comments)
 
 @rule ModuleRule "impure-anonymous-function" :default "anonymous functions that capture mutable state, rebind a capture, or were never compiled (and, with strict_captures, any capture)" context ->
-impure_anonymous_functions(context.repository, context.mod; context.own_methods)
+impure_anonymous_functions(context.repository, loaded_module(context); context.own_methods)
 
 @rule ModuleRule "unstable-anonymous-function" :default "anonymous functions whose captures inference leaves abstract" context ->
-unstable_anonymous_functions(context.repository, context.mod; context.own_methods)
+unstable_anonymous_functions(context.repository, loaded_module(context); context.own_methods)
 
 @rule ModuleRule "overspecialized-anonymous-function" :default "anonymous functions that capture a type or function, compiling once per value" context ->
-overspecialized_anonymous_functions(context.repository, context.mod; context.own_methods)
+overspecialized_anonymous_functions(context.repository, loaded_module(context); context.own_methods)
 
 """The sites of the struct `types`, each placed at its declaration in `context`'s sources."""
 struct_sites(types::AbstractVector{DataType}, context::Context)::Vector{Site} = struct_site.(types, (declared(context),))
 
 @rule ModuleRule "abstract-field" :default "struct fields of an abstract type or of a container of one" context ->
-struct_sites(filter(!isempty ∘ abstract_fields, module_structs(context.mod)), context)
+struct_sites(filter(!isempty ∘ abstract_fields, module_structs(loaded_module(context))), context)
 
 @rule ModuleRule "mutable-struct" :default "structs declared with the mutable keyword" context ->
-struct_sites(mutable_structs(context.mod), context)
+struct_sites(mutable_structs(loaded_module(context)), context)
 
 @rule ModuleRule "wide-struct" :pedantic "structs with more fields than the repository's struct_field_limit" context ->
-struct_sites(filter(Base.Fix2(wider_struct, context.repository.struct_field_limit), module_structs(context.mod)), context)
+struct_sites(filter(Base.Fix2(wider_struct, context.repository.struct_field_limit), module_structs(loaded_module(context))), context)
 
 @rule ModuleRule "struct-constant" :pedantic "constants that hold a struct of the package, which Revise leaves stale after an edit" context ->
-struct_holding_constants(context.mod)
+struct_holding_constants(loaded_module(context))
 
 @rule ModuleRule "repeated-prefix" :pedantic "field names that repeat a word the type should say once" context ->
-struct_sites(filter(!isnothing ∘ repeated_prefix, module_structs(context.mod)), context)
+struct_sites(filter(!isnothing ∘ repeated_prefix, module_structs(loaded_module(context))), context)
 
 @rule FileRule "nothing-return" :pedantic "declared Union{Nothing, …} results" (context, source) ->
 nothing_returns(source)

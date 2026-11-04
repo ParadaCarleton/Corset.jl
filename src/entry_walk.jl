@@ -36,14 +36,52 @@ invoked_instance(::Any)::Nothing = nothing
 The method instances `ir`, an optimized method body, calls that a walk of `package` follows: the
 `:invoke` edges defined in `package` or with a signature naming one of its types (JET's
 `target_modules` scope), and the inlined callees defined in `package`. Another module's inlined
-callee needs no frame: its own calls are already in `ir`.
+callee needs no frame: its own calls are already in `ir`. No instance of a method that `ir` calls
+past inference's recursion limit (`cut_off_instances`) is followed, so the walk ends.
 """
 function frame_callees(ir::COMPILER.IRCode, package::Package)::Vector{Core.MethodInstance}
     expressions = [statement for statement in ir.stmts.stmt if statement isa Expr]
     invoked = [invoked_instance(first(statement.args)) for statement in expressions if statement.head in (:invoke, :invoke_modify)]
     inlined = collect(Core.MethodInstance, Iterators.flatten(inlined_instances.(ir.debuginfo.edges)))
-    return Core.MethodInstance[filter(Base.Fix2(followed, package), invoked); filter(Base.Fix2(defined_in, package), inlined)]
+    callees = Core.MethodInstance[filter(Base.Fix2(followed, package), invoked); filter(Base.Fix2(defined_in, package), inlined)]
+    limited = cut_off_methods(ir)
+    kept = Core.MethodInstance[] # lint: non-public-access  the walk's edges are method instances
+    for callee in callees
+        if !(callee.def in limited)
+            push!(kept, callee)
+        end
+    end
+    return kept
 end
+
+"""
+Whether optimized statement `statement` invokes a method instance inference cut off at its recursion
+limit: an `:invoke` whose callee has a concrete signature but no `CodeInstance`, since inference kept
+no code for it.
+"""
+function cut_off(statement::Expr)::Bool # lint: abstract-local  IR operands are untyped
+    callee = statement.head === :invoke ? first(statement.args) : nothing
+    return callee isa Core.MethodInstance && Base.isdispatchtuple(callee.specTypes) # lint: non-public-access  an `:invoke` operand is a method instance
+end
+cut_off(::Any)::Bool = false
+
+"""
+The method instances `ir`, an optimized method body, invokes that inference cut off (`cut_off`).
+Each nests its argument types deeper than its caller's, so a walk that followed one, or any other
+instance of its method, would infer a new instance at every step and never finish.
+"""
+function cut_off_instances(ir::COMPILER.IRCode)::Vector{Core.MethodInstance} # lint: runtime-dispatch # lint: abstract-local # lint: non-public-access  IR statements are untyped; the cut-off operands are method instances
+    found = Core.MethodInstance[] # lint: non-public-access  the cut-off operands are method instances
+    for statement in ir.stmts.stmt
+        if cut_off(statement)
+            push!(found, first(statement.args))
+        end
+    end
+    return found
+end
+
+"""The methods of the `cut_off_instances` of `ir`."""
+cut_off_methods(ir::COMPILER.IRCode)::Vector{Method} = Method[instance.def for instance in cut_off_instances(ir)] # lint: non-public-access  the walk reads optimized IR
 
 """Whether `callee`, a method instance, is of a method `package` defines."""
 defined_in(callee::Core.MethodInstance, package::Package)::Bool = callee.def isa Method && belongs(callee.def.module, package)

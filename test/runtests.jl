@@ -437,6 +437,33 @@ end
         @test !Corset.installed(Base.PkgId(Base.UUID("00000000-0000-0000-0000-000000000001"), "NotInstalled"))
     end
 
+    @testset "recursion-limit: a call inference cuts off, whose argument types nest deeper each time" begin
+        source = """
+        module Recursive
+        grow(x, n::Int) = n == 0 ? x : grow((x,), n - 1)
+        start(n::Int) = grow(1, n)
+        fib(n::Int)::Int = n <= 1 ? n : fib(n - 1) + fib(n - 2)
+        ping(n::Int)::Int = n <= 0 ? 0 : pong(n - 1)
+        pong(n::Int)::Int = n <= 0 ? 1 : ping(n - 1) + 1
+        end
+        """
+        tree = write_tree(mktempdir(), ["recursive.jl" => source])
+        holder = Module(:Holder)
+        Base.include(holder, joinpath(tree, "recursive.jl"))
+        recursive = holder.Recursive
+        # The walk stops at the cut: each `grow` frame would otherwise inline a deeper one, forever.
+        frames = entry_frames(Type[Tuple{typeof(recursive.start), Int}], recursive)
+        @test [frame.method.name for frame in frames] == [:start]
+        sites = Corset.recursion_limits(Repository(tree), frames, recursive)
+        @test site_keys(sites) == ["recursive.jl start"]
+        @test site_lines(sites) == [3]
+        @test occursin("grow", only(sites).detail)
+        settled = entry_frames(Type[Tuple{typeof(recursive.fib), Int}, Tuple{typeof(recursive.ping), Int}], recursive)
+        @test Set(frame.method.name for frame in settled) == Set([:fib, :ping, :pong])
+        @test isempty(Corset.recursion_limits(Repository(tree), settled, recursive))
+        @test !Corset.cut_off(:(f(x)))
+    end
+
     @testset "float64_ops: Float64 operations in optimized IR" begin
         @test float64_ops(fixture.widened, (Float32,)) > 0
         @test float64_ops(fixture.narrow, (Float32,)) == 0

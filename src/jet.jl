@@ -54,9 +54,9 @@ installed(id::Base.PkgId)::Bool = !isnothing(Base.locate_package(id)) # lint: no
 One site per `JET.report_call` report on the frames `inferred` (as `audited_frames` keeps them under
 `comments`) whose innermost frame is a method of `mod`'s package in `repository`'s files (JET's
 `target_modules` scope, extensions and submodules included), keyed by method and report kind and
-placed at that frame's line. A call that fails on only some branches of a union split is left out
-(`partial_union_split`). The same report reached from several frames is one site. JET loads from the
-load path on first use.
+placed at that frame's line. A call that fails on only some branches of a union split counts: the
+`Nothing` of a `findfirst` that nothing checks throws when it arrives. The same report reached from
+several frames is one site. JET loads from the load path on first use.
 """
 function call_report_sites( # lint: runtime-dispatch # lint: abstract-local # lint: unmarked-mutation  JET loads at run time, reads only the frames' signature types, and its results are duck-typed
         repository::Repository, inferred::AbstractVector{Inferred}, mod::Module;
@@ -78,20 +78,12 @@ end
 function call_report_site(repository::Repository, jet::Module, report::Any, package::Package)::Vector{Site} # lint: runtime-dispatch # lint: abstract-local  JET reports are duck-typed
     frame = last(report.vst)
     method = frame.linfo.def
-    if !(method isa Method && belongs(method.module, package) && in_repository(repository, method)) || partial_union_split(report)
+    if !(method isa Method && belongs(method.module, package) && in_repository(repository, method))
         return Site[]
     end
     key = "$(method_key(repository, method)) $(nameof(typeof(report)))"
     return [Site(key, string(frame.file), frame.line, report_message(jet, report))]
 end
-
-"""
-Whether JET report `report` is a call that fails on only some branches of a union split (JET's
-"(1/2 union split)"): the value is a `Union` whose other members have a method, as for the `Nothing`
-branch of a `findfirst` result the code has already checked.
-"""
-partial_union_split(report::Any)::Bool = # lint: runtime-dispatch  JET reports are duck-typed
-    hasproperty(report, :union_split) && report.union_split > 0 && length(report.t) < report.union_split
 
 """The first line of JET's message for `report`."""
 function report_message(jet::Module, report::Any)::String # lint: runtime-dispatch  JET reports are duck-typed

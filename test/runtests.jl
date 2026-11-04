@@ -435,8 +435,8 @@ end
         signature = Tuple{typeof(holder.total), Vector{String}}
         @test !isempty(JET.get_reports(JET.report_call(signature)))
         @test isempty(Corset.call_report_sites(repository, entry_frames(Type[signature], holder), holder))
-        # A call that fails on one branch of a union split (`+(::Nothing, ::Int)`) is left out, and so is a
-        # frame whose file is outside the repository.
+        # A call that fails on one branch of a union split (`+(::Nothing, ::Int)` on an unchecked `findfirst`)
+        # counts like any other; a frame whose file is outside the repository does not.
         split_source = """
         first_after(values::Vector{Int})::Int = findfirst(iszero, values) + 1
         mismatched(value::Int)::Int = value + "one"
@@ -445,9 +445,11 @@ end
         split = Module(:Split)
         Base.include(split, joinpath(split_tree, "split.jl"))
         split_frames = entry_frames(Type[Tuple{typeof(split.first_after), Vector{Int}}, Tuple{typeof(split.mismatched), Int}], split)
-        @test any(report -> Corset.partial_union_split(report), JET.get_reports(JET.report_call(Tuple{typeof(split.first_after), Vector{Int}})))
-        @test site_keys(Corset.call_report_sites(Repository(split_tree), split_frames, split)) == ["split.jl mismatched MethodErrorReport"]
+        @test Set(site_keys(Corset.call_report_sites(Repository(split_tree), split_frames, split))) ==
+            Set(["split.jl first_after MethodErrorReport", "split.jl mismatched MethodErrorReport"])
         @test isempty(Corset.call_report_sites(Repository(mktempdir()), split_frames, split))
+        # A module rule reads the loaded package through `loaded_module`; with none, `can_run` skips it.
+        @test_throws ArgumentError Corset.loaded_module(Corset.Context(Repository(mktempdir()), (), nothing))
         @test Corset.installed(Corset.JET_ID)
         @test !Corset.installed(Base.PkgId(Base.UUID("00000000-0000-0000-0000-000000000001"), "NotInstalled"))
     end

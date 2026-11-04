@@ -211,12 +211,16 @@ Replace this process with a Julia process whose active project is `root`, runnin
 Corset's own environment stays on the load path after the project's, so the project's versions of shared
 dependencies win, and the default environment (`@v#.#`) comes last, so a JET installed there runs the `jet` rule. Where `execv` does not exist the command runs as a child and its exit code is returned.
 """
-function relaunch(root::AbstractString, args::AbstractVector{<:AbstractString})::Int # COV_EXCL_LINE
+function relaunch(root::AbstractString, args::AbstractVector{<:AbstractString})::Int # COV_EXCL_LINE # lint: jet  execv replaces the process, so on POSIX it leaves only by throwing when execv fails
     # COV_EXCL_START
     # execv replaces the process before it can write its coverage
     ENV[INNER_VARIABLE] = "1"
+    corset_project = Base.active_project()
+    if isnothing(corset_project)
+        throw(UsageError("corset relaunches in the project's environment and keeps its own on the load path, but no project is active"))
+    end
     ENV["JULIA_LOAD_PATH"] = join(
-        ["@", dirname(Base.active_project()), "@stdlib", "@v#.#"],
+        ["@", dirname(corset_project), "@stdlib", "@v#.#"],
         ifelse(Sys.iswindows(), ";", ":"),
     )
     command = `$(Base.julia_cmd()) --startup-file=no --project=$root -e "using Corset; exit(Corset.main(ARGS))" -- $args`
@@ -443,7 +447,7 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
     if loads
         mod = load_package(root)
         own_methods = defined_methods(mod)
-        if any(reads_signatures, enabled_rules(config))
+        if any(reads_signatures, enabled_rules(config))::Bool
             sources = seed_sources(config, root, options.entries, mod, err; own_methods)
         end
         if !isempty(sources)
@@ -481,7 +485,7 @@ function check_project(
     project = project_root(root)
     config = load_config(project)
     frames = nothing
-    if any(reads_signatures, enabled_rules(config))
+    if any(reads_signatures, enabled_rules(config))::Bool
         frames = seeded_frames(Pair{String, Vector{Type}}["signatures" => Type[signatures...]], mod)
     end
     findings, _ = run_rules(config, project; mod, frames, update_baseline)

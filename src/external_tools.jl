@@ -38,7 +38,11 @@ function fatou_sites(repository::Repository, directories::Tuple{Vararg{String}})
 end
 
 """The site of `found`, a `FATOU_FINDING` match, in the repository at `root`."""
-fatou_site(root::AbstractString, found::RegexMatch)::Site = Site("$(found[1]) $(found[3])", joinpath(root, found[1]), parse(Int, found[2]), "")
+function fatou_site(root::AbstractString, found::RegexMatch)::Site
+    # Every group of `FATOU_FINDING` takes part in a match.
+    file, line, rule = found[1]::AbstractString, found[2]::AbstractString, found[3]::AbstractString
+    return Site("$file $rule", joinpath(root, file), parse(Int, line), "")
+end
 
 """One `Site` from `duplicate`, an item of a `jscpd --absolute` JSON report on `repository`."""
 function jscpd_site(repository::Repository, duplicate::AbstractDict)::Site

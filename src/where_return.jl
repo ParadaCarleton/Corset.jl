@@ -6,8 +6,8 @@ function is_where_return(node::SYNTAX.SyntaxNode)::Bool
     if SYNTAX.kind(node) !== SYNTAX.@K_str("function") || !SYNTAX.has_flags(node, SYNTAX.SHORT_FORM_FUNCTION_FLAG)
         return false
     end
-    signature = first(SYNTAX.children(node))
-    parts = SYNTAX.children(signature)
+    signature = first(node_children(node))
+    parts = node_children(signature)
     return SYNTAX.kind(signature) === SYNTAX.@K_str("::") && length(parts) == 2 &&
         SYNTAX.kind(first(parts)) === SYNTAX.@K_str("call") && SYNTAX.kind(last(parts)) === SYNTAX.@K_str("where")
 end
@@ -20,21 +20,21 @@ function identifier_names(node::SYNTAX.SyntaxNode)::Vector{String}
         end
         return String[]
     end
-    return collect(String, Iterators.flatten([identifier_names(child) for child in SYNTAX.children(node)]))
+    return collect(String, Iterators.flatten([identifier_names(child) for child in node_children(node)]))
 end
 
 """The variable names `where` clause `clause` introduces: `T`, `T<:B` or `{T, S<:B}`, each the first identifier of its entry."""
 function introduced_names(clause::SYNTAX.SyntaxNode)::Vector{String}
     if SYNTAX.kind(clause) === SYNTAX.@K_str("braces")
-        return [first(identifier_names(variable)) for variable in SYNTAX.children(clause)]
+        return [first(identifier_names(variable)) for variable in node_children(clause)]
     end
     return [first(identifier_names(clause))]
 end
 
 """Whether a variable the `where` clause of `signature` introduces occurs in the arguments of its call."""
 function binds_an_argument(signature::SYNTAX.SyntaxNode)::Bool
-    call, annotation = SYNTAX.children(signature)
-    return !isdisjoint(introduced_names(SYNTAX.children(annotation)[2]), identifier_names(call))
+    call, annotation = node_children(signature)
+    return !isdisjoint(introduced_names(node_children(annotation)[2]), identifier_names(call))
 end
 
 """Every short-form definition under syntax `node` whose `where` binds the return annotation, in source order."""
@@ -42,7 +42,7 @@ function where_return_nodes(node::SYNTAX.SyntaxNode)::Vector{SYNTAX.SyntaxNode}
     if SYNTAX.is_leaf(node)
         return SYNTAX.SyntaxNode[]
     end
-    below = SYNTAX.SyntaxNode[found for child in SYNTAX.children(node) for found in where_return_nodes(child)]
+    below = SYNTAX.SyntaxNode[found for child in node_children(node) for found in where_return_nodes(child)]
     if is_where_return(node)
         return vcat([node], below)
     end
@@ -64,13 +64,13 @@ end
 
 """The repair of where-return definition `node` in `source`: a `(` before its signature and a `)` after its return annotation."""
 function where_repair(source::Source, node::SYNTAX.SyntaxNode)::Repair{WhereParentheses}
-    signature = first(SYNTAX.children(node))
-    annotation = first(SYNTAX.children(last(SYNTAX.children(signature))))
+    signature = first(node_children(node))
+    annotation = first(node_children(last(node_children(signature))))
     return Repair(where_site(source, node), WhereParentheses(source.path, first(SYNTAX.byte_range(signature)), last(SYNTAX.byte_range(annotation)) + 1))
 end
 
 """Whether the `where` of where-return definition `node` binds a variable of its arguments, so the method needs it."""
-binds_its_arguments(node::SYNTAX.SyntaxNode)::Bool = binds_an_argument(first(SYNTAX.children(node)))
+binds_its_arguments(node::SYNTAX.SyntaxNode)::Bool = binds_an_argument(first(node_children(node)))
 
 """The repairs of the Julia file `source`: one per where-return definition whose `where` binds an argument."""
 where_repairs(source::Source)::Vector{Repair{WhereParentheses}} = where_repair.((source,), filter(binds_its_arguments, where_return_nodes(source.tree)))

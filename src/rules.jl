@@ -932,9 +932,9 @@ const SUBTYPE_KIND = SYNTAX.@K_str "<:"
 
 """The name a `struct` syntax node declares, whatever its parameters and supertype, as Julia names the type (`var"Odd Name"` gives `Symbol("Odd Name")`)."""
 function struct_name(node::SYNTAX.SyntaxNode)::Symbol
-    header = first(SYNTAX.children(node))
+    header = first(node_children(node))
     while SYNTAX.kind(header) in (CURLY_KIND, SUBTYPE_KIND)
-        header = first(SYNTAX.children(header))
+        header = first(node_children(header))
     end
     return Symbol(Expr(header))
 end
@@ -944,7 +944,7 @@ function struct_lines(node::SYNTAX.SyntaxNode)::Vector{Pair{Symbol, Int}}
     if SYNTAX.is_leaf(node)
         return Pair{Symbol, Int}[]
     end
-    nested = vcat(Pair{Symbol, Int}[], (struct_lines(child) for child in SYNTAX.children(node))...)
+    nested = vcat(Pair{Symbol, Int}[], (struct_lines(child) for child in node_children(node))...)
     if SYNTAX.kind(node) === STRUCT_KIND
         return vcat(struct_name(node) => first(SYNTAX.source_location(node)), nested)
     end
@@ -1010,7 +1010,7 @@ is_concrete_container(::Any)::Bool = false
 function resizes(node::Expr, name::Symbol)::Bool # lint: abstract-local  Expr nodes hold untyped arguments
     if node.head === :call &&
             length(node.args) >= 2 &&
-            first(node.args) in RESIZERS &&
+            (first(node.args) in RESIZERS)::Bool &&
             node.args[2] === name
         return true
     end
@@ -1251,7 +1251,7 @@ function float64_sites!(
         end
         return nothing
     end
-    children = SYNTAX.children(node)
+    children = node_children(node)
     if kind === QUOTE_KIND ||
             (
             kind === MACROCALL_KIND &&
@@ -1301,7 +1301,7 @@ function name_sites(
         end
         return Site[]
     end
-    children = SYNTAX.children(node)
+    children = node_children(node)
     if kind === QUOTE_KIND
         return Site[]
     end

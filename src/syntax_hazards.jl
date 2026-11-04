@@ -205,10 +205,10 @@ function folds_concatenation(call::Expr, shift::Integer)::Bool # lint: abstract-
     name = callee(call)
     position = get(FOLD_OPERATORS, name, 0) - shift
     arguments = call_arguments(call)
-    if call.head !== :call || !(1 <= position < length(arguments)) || !(called_name(arguments[position]) in CONCATENATIONS)
+    if call.head !== :call || !(1 <= position < length(arguments)) || !(called_name(arguments[position]) in CONCATENATIONS)::Bool
         return false
     end
-    return name !== :reduce || :init in keyword_names(call) || Meta.isexpr(arguments[position + 1], :generator)
+    return name !== :reduce || (:init in keyword_names(call))::Bool || Meta.isexpr(arguments[position + 1], :generator)
 end
 
 """Whether parsed expression `node` folds a concatenation piece by piece, in call or `do` form (`folds_concatenation`)."""

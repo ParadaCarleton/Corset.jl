@@ -196,10 +196,56 @@ end
 """The `hidden_inputs` sites of the lowered statement `entry` (index => statement) of `method`'s `code`."""
 function statement_hidden_inputs(code::Core.CodeInfo, method::Method, entry::Pair)::Vector{Site}
     reads = filter(is_hidden_input, global_reads(last(entry)))
+    if entry_point(method)
+        reads = filter(!is_process_stream, reads)
+    end
     if isempty(reads)
         return Site[]
     end
-    return Site.(string.([read.name for read in reads]), string(method.file), statement_line(code, method, first(entry)), "")
+    file = string(method.file)
+    line = statement_line(code, method, first(entry))
+    return [Site(string(read.name), file, read_line(file, line, read.name), "") for read in reads]
+end
+
+"""The standard streams of the process, which a command-line entry point reads to hand them down."""
+const PROCESS_STREAMS = (:stdin, :stdout, :stderr)
+
+"""The global `@main` sets in the module it marks, beside the `main` function it makes the entry point."""
+const MAIN_ENTRY_POINT = Symbol("#__main_is_entrypoint__#")
+
+"""
+Whether `method` is the command-line entry point `@main` marks: a method of its module's `main`, or the
+keyword body or an anonymous function of one (`#main#…`). A `main` without `@main` is not one.
+"""
+entry_point(method::Method)::Bool = (method.name === :main || startswith(string(method.name), "#main#")) &&
+    isdefined(method.module, MAIN_ENTRY_POINT) && getfield(method.module, MAIN_ENTRY_POINT) === true
+
+"""Whether global `binding` is one of Base's standard streams (`PROCESS_STREAMS`)."""
+is_process_stream(binding::GlobalRef)::Bool = binding.name in PROCESS_STREAMS && isdefined(binding.mod, binding.name) &&
+    getfield(binding.mod, binding.name) === getfield(Base, binding.name)
+
+"""
+    read_line(file, line, name)
+
+The line of `file` that reads global `name` in the expression starting at `line`. Lowering places
+every global a statement reads on the statement's first line, so in a call over several lines
+(`build_map(x,\n    log = stderr,\n)`) the read sits on a later one. The first line of the expression
+that names `name` as a whole word; `line` when the file is gone or no line of the expression names it.
+"""
+function read_line(file::AbstractString, line::Integer, name::Symbol)::Int
+    if !isfile(file)
+        return line
+    end
+    lines = readlines(file)
+    if !(1 <= line <= length(lines))
+        return line
+    end
+    text = join(lines[line:end], "\n")
+    _, next = Meta.parse(text, 1; raise = false)
+    span = count(==('\n'), text[1:prevind(text, next)]) + 1
+    named = Regex("(?<![\\w!])\\Q$(name)\\E(?![\\w!])")
+    hit = findfirst(Base.Fix1(occursin, named), lines[line:min(line + span - 1, length(lines))])
+    return isnothing(hit) ? line : line + hit - 1
 end
 
 """

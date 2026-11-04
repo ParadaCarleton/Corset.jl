@@ -624,6 +624,35 @@ end
         @test Corset.is_hidden_input(GlobalRef(Base, :stdout))
     end
 
+    @testset "hidden-input: an `@main` entry point hands the process streams down; a site sits on its read's line" begin
+        source = """
+        module Cli
+        report(io::IO)::Nothing = println(io, "done")
+        log_to(io::IO; level::Int = 1)::Int = level
+        (@main)(args::Vector{String}; quiet::Bool = false)::Int = (report(stdout); 0)
+        helper()::Nothing = report(stderr)
+        spread()::Int = log_to(
+            stderr;
+            level = 2,
+        )
+        end
+        module Plain
+        main()::Nothing = print(stdout, "")
+        end
+        """
+        tree = write_tree(mktempdir(), ["cli.jl" => source])
+        holder = Module(:Holder)
+        Base.include(holder, joinpath(tree, "cli.jl"))
+        cli_sites = hidden_inputs(Repository(tree), holder.Cli)
+        @test Set((site.key, site.line) for site in cli_sites) == Set([("stderr", 5), ("stderr", 7)])
+        # A `main` that `@main` does not mark is no entry point.
+        @test [(site.key, site.line) for site in hidden_inputs(Repository(tree), holder.Plain)] == [("stdout", 12)]
+        file = joinpath(tree, "cli.jl")
+        @test Corset.read_line(joinpath(tree, "missing.jl"), 6, :stderr) == 6
+        @test Corset.read_line(file, 999, :stderr) == 999
+        @test Corset.read_line(file, 6, :no_such_name) == 6
+    end
+
     @testset "abstract-local: a homogeneous variadic tuple is concrete in use, a bare Tuple is not" begin
         @test !Corset.abstract_local_type(Tuple{Vararg{String}})
         @test Corset.abstract_local_type(Tuple)

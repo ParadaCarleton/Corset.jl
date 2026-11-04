@@ -267,8 +267,9 @@ end
 """Whether `open` call `node` opens its file to write: a mode `"w"`, `"a"`, `"w+"`, `"a+"` or `"r+"`, or `write`, `append` or `truncate` set to `true`."""
 function opens_to_write(node::Expr)::Bool # lint: abstract-local # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
     keywords = collect(Any, Iterators.flatten([argument.args for argument in node.args if Meta.isexpr(argument, :parameters)]))
-    return any(in(WRITE_MODES), filter(Base.Fix2(isa, String), call_arguments(node))) ||
-        any(keyword -> Meta.isexpr(keyword, :kw) && first(keyword.args) in WRITE_KEYWORDS && last(keyword.args) === true, keywords)
+    modes = String[argument for argument in call_arguments(node) if argument isa String]
+    return any(in(WRITE_MODES), modes) ||
+        any(keyword -> Meta.isexpr(keyword, :kw) && (first(keyword.args) in WRITE_KEYWORDS)::Bool && last(keyword.args) === true, keywords)
 end
 
 """Whether parsed expression `node` writes a file whose path mentions one of `variables`: `write(path, text)`, or `open(path, "w")`."""

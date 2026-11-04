@@ -421,18 +421,33 @@ end
     end
 
     @testset "jet rule: report_call on the frames, one site per report in the package" begin
-        sites = Corset.call_report_sites(repository, inferred, fixture)
-        broken = filter(site -> endswith(site.key, "fixture.jl broken MethodErrorReport"), sites)
+        # The rule reads only frames in the repository's files: the fixture's own directory.
+        fixture_repository = Repository(dirname(string(first(inferred).method.file)))
+        sites = Corset.call_report_sites(fixture_repository, inferred, fixture)
+        broken = filter(site -> site.key == "fixture.jl broken MethodErrorReport", sites)
         @test !isempty(broken)
         @test all(site -> site.line == 60 && !isempty(site.detail), broken)
         @test allunique(sites)
-        @test isempty(Corset.call_report_sites(repository, filter(item -> item.method.name === :reads_limit, inferred), fixture))
+        @test isempty(Corset.call_report_sites(fixture_repository, filter(item -> item.method.name === :reads_limit, inferred), fixture))
         # `sum` of strings fails inside Base (`add_sum`, `reduce_empty`): JET reports it, the package's rule does not.
         holder = Module(:Holder)
         Core.eval(holder, :(total(words::Vector{String})::String = sum(words)))
         signature = Tuple{typeof(holder.total), Vector{String}}
         @test !isempty(JET.get_reports(JET.report_call(signature)))
         @test isempty(Corset.call_report_sites(repository, entry_frames(Type[signature], holder), holder))
+        # A call that fails on one branch of a union split (`+(::Nothing, ::Int)`) is left out, and so is a
+        # frame whose file is outside the repository.
+        split_source = """
+        first_after(values::Vector{Int})::Int = findfirst(iszero, values) + 1
+        mismatched(value::Int)::Int = value + "one"
+        """
+        split_tree = write_tree(mktempdir(), ["split.jl" => split_source])
+        split = Module(:Split)
+        Base.include(split, joinpath(split_tree, "split.jl"))
+        split_frames = entry_frames(Type[Tuple{typeof(split.first_after), Vector{Int}}, Tuple{typeof(split.mismatched), Int}], split)
+        @test any(report -> Corset.partial_union_split(report), JET.get_reports(JET.report_call(Tuple{typeof(split.first_after), Vector{Int}})))
+        @test site_keys(Corset.call_report_sites(Repository(split_tree), split_frames, split)) == ["split.jl mismatched MethodErrorReport"]
+        @test isempty(Corset.call_report_sites(Repository(mktempdir()), split_frames, split))
         @test Corset.installed(Corset.JET_ID)
         @test !Corset.installed(Base.PkgId(Base.UUID("00000000-0000-0000-0000-000000000001"), "NotInstalled"))
     end

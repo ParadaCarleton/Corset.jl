@@ -42,10 +42,10 @@ function holds_own_struct(@nospecialize(data::Any), owner::Module, depth::Intege
         return false
     elseif data isa Union{AbstractArray, AbstractSet, AbstractDict}
         # A concrete element type can still hold anything (a `Pair` with an abstract value type); only bits types cannot.
-        return !isbitstype(eltype(data)) && any(holds_own_struct(element, owner, depth - 1) for element in data) # lint: runtime-dispatch  reflects on values of unknown type
+        return !isbitstype(eltype(data)) && any(holds_own_struct(element, owner, depth - 1) for element in data)::Bool # lint: runtime-dispatch  reflects on values of unknown type
     end
     return isstructtype(typeof(data)) &&
-        any(holds_own_struct(getfield(data, index), owner, depth - 1) for index in 1:nfields(data) if isdefined(data, index))
+        any(holds_own_struct(getfield(data, index), owner, depth - 1) for index in 1:nfields(data) if isdefined(data, index))::Bool
 end
 
 """

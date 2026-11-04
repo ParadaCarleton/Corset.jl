@@ -726,7 +726,7 @@ end
 """Whether parsed type expression `annotation` is a `Union` with `Nothing` among its members."""
 mentions_nothing(annotation::Expr)::Bool = annotation.head === :curly &&
     first(annotation.args) === :Union &&
-    :Nothing in annotation.args[2:end]
+    (:Nothing in annotation.args[2:end])::Bool
 mentions_nothing(::Any)::Bool = false
 
 # The edge of `exp`'s Float32 and Float64 ranges, written as a literal guard.
@@ -739,7 +739,7 @@ Whether parsed source `node` itself is an overflow or underflow guard: a call to
 is_range_guard(node::Real)::Bool = node in EXP_RANGE_LITERALS
 is_range_guard(node::Expr)::Bool = node.head === :call &&
     (
-    first(node.args) in (:floatmin, :floatmax) ||
+    (first(node.args) in (:floatmin, :floatmax))::Bool ||
         (first(node.args) === :isfinite && any(calls_exp, node.args[2:end]))
 )
 is_range_guard(::Any)::Bool = false
@@ -1002,7 +1002,7 @@ function is_concrete_container(annotation::Expr)::Bool
     if first(annotation.args) === :Union
         return any(is_concrete_container, annotation.args[2:end])
     end
-    return first(annotation.args) in CONCRETE_CONTAINERS
+    return (first(annotation.args) in CONCRETE_CONTAINERS)::Bool
 end
 is_concrete_container(::Any)::Bool = false
 
@@ -1136,7 +1136,7 @@ function package_type(head::Symbol, scope::Module)::Bool # lint: abstract-local 
         return false
     end
     named = getglobal(scope, head)
-    return named isa Type && !(parentmodule(named) in (Base, Core))
+    return named isa Type && !(parentmodule(named) in (Base, Core))::Bool
 end
 package_type(::Any, ::Module)::Bool = false
 

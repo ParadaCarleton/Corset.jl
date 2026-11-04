@@ -9,7 +9,7 @@ using .Entries: Entries
 const INNER_VARIABLE = "CORSET_INNER"
 
 """Rethrow an ArgParse error so `run_command` catches it and exits with 2."""
-rethrow_arg_error(::ArgParseSettings, err::ArgParseError)::Nothing = throw(err)
+rethrow_arg_error(::ArgParseSettings, err::ArgParseError)::Nothing = throw(err) # lint: jet  ArgParse's error handler rethrows by design
 
 """Add the argument or option `name` to `settings` with the ArgParse `options` (`help`, `action`, `default`, ...)."""
 option!(settings::ArgParseSettings, name::AbstractString; options...)::Nothing = (
@@ -193,10 +193,7 @@ function command_options(parsed::AbstractDict)::Union{RulesOptions, CheckOptions
 end
 
 """Whether any rule `config` leaves on reads the loaded package."""
-reads_package(config::Config)::Bool = any(
-    rule -> rule isa ModuleRule,
-    enabled_rules(config),
-)
+reads_package(config::Config)::Bool = !isempty(module_rule_names(enabled_rules(config)))
 
 """The package at `root`, loaded in the running process."""
 function load_package(root::AbstractString)::Module

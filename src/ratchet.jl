@@ -158,7 +158,7 @@ end
 
 """The comment `found`, an `OPT_OUT` match in a comment token that starts at byte `start`, placed by `lines`."""
 opt_out_comment(lines::SYNTAX.SourceFile, start::Integer, found::RegexMatch)::OptOutComment =
-    OptOutComment(found[1], opt_out_form(found[2]), SYNTAX.source_line(lines, start + found.offset - 1))
+    OptOutComment(found[1]::AbstractString, opt_out_form(found[2]), SYNTAX.source_line(lines, start + found.offset - 1))
 
 """The form an `OPT_OUT` suffix (`file`, `begin`, `end` or none) gives its comment."""
 opt_out_form(suffix::AbstractString)::Symbol = Symbol(suffix)

@@ -28,9 +28,38 @@ function Context(
         inferred::AbstractVector{Inferred} = Inferred[], candidates::CandidateSearch = CandidateSearch(inferred),
         own_methods::AbstractVector{Method} = defined_methods(mod),
     )::Context
-    sources = Source.((repository,), repository_sources(repository, directories))
+    sources, parse_errors = parsed_sources(repository, directories)
     parsed = Dict{String, Vector{OptOutComment}}(source.path => source.comments for source in sources)
-    return Context(repository, directories, mod, inferred, candidates, own_methods, sources, merge(parsed, frame_comments(repository, inferred, parsed)), parse_error_findings(all_sources(repository, directories)))
+    return Context(repository, directories, mod, inferred, candidates, own_methods, sources, merge(parsed, frame_comments(repository, inferred, parsed)), parse_errors)
+end
+
+"""
+The parsed Julia files under `directories` of `repository` (`repository_sources`), and a deny-level
+`parse-error` finding for each file that does not parse, at its first error. Each file is parsed once,
+by `Source`.
+"""
+function parsed_sources(repository::Repository, directories::Tuple{Vararg{String}})::Tuple{Vector{Source}, Vector{Finding}}
+    sources = Source[]
+    failures = Finding[]
+    for path in repository_sources(repository, directories)
+        try
+            push!(sources, Source(repository, path))
+        catch error_
+            if error_ isa SYNTAX.ParseError # lint: non-public-access  `parseall` throws it, and Base exports no public name for it
+                push!(failures, parse_error_finding(repository, path, error_))
+            else
+                rethrow() # COV_EXCL_LINE
+            end
+        end
+    end
+    return sources, failures
+end
+
+"""The `parse-error` finding for file `path` of `repository`, at the first error `failure` reports."""
+function parse_error_finding(repository::Repository, path::AbstractString, failure::SYNTAX.ParseError)::Finding # lint: non-public-access  `parseall` throws it, and Base exports no public name for it
+    diagnostic = first(Iterators.filter(diagnostic -> diagnostic.level === :error, failure.diagnostics))
+    line = SYNTAX.source_line(failure.source, SYNTAX.first_byte(diagnostic))
+    return Finding("parse-error", :deny, Site(file_key(repository, path), path, line, diagnostic.message))
 end
 
 """

@@ -461,7 +461,22 @@ end
     )
     output, code = captured_main(["check", broken, "--no-load", "--format", "concise"])
     @test code == 1
-    @test occursin("[parse-error]", output)
-    @test occursin("src/Broken.jl", output)
+    @test occursin("src/Broken.jl:1: deny: [parse-error] src/Broken.jl", output)
     @test occursin("[where-return]", output)
+
+    # The finding sits at the first error's line; `--fix` leaves the file alone and fixes the others.
+    midway = package_tree("name = \"Demo\"\n", SOURCE_TREE ∪ ["src/Broken.jl" => "g(x) = x\nh(x) = (\n"])
+    output, code = captured_main(["check", midway, "--no-load", "--format", "concise", "--fix"])
+    @test code == 1
+    @test occursin("src/Broken.jl:2: deny: [parse-error] src/Broken.jl (Expected `)` or `,`)\n", output)
+    @test read(joinpath(midway, "src", "Broken.jl"), String) == "g(x) = x\nh(x) = (\n"
+    @test occursin("(f(x::T)::T) where {T}", read(joinpath(midway, "src", "Demo.jl"), String))
+end
+
+@testset "a file with only a parse warning is valid Julia: it is checked, not a finding" begin
+    warned = package_tree("name = \"Demo\"\n", SOURCE_TREE ∪ ["src/Warned.jl" => "import Base: (+)\nk(x::T)::T where {T} = x\n"])
+    output, code = captured_main(["check", warned, "--no-load", "--format", "concise"])
+    @test code == 0
+    @test !occursin("parse-error", output)
+    @test occursin("src/Warned.jl:2: warn: [where-return]", output)
 end

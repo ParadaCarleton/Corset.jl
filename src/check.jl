@@ -2,13 +2,6 @@
 
 using diffutils_jll: diffutils_jll
 
-"""One site a rule found, with the level it was found at."""
-struct Finding
-    rule::String
-    level::Symbol
-    site::Site
-end
-
 """The allowances the baseline file of `repository` holds for `rule`: none when there is no file or no table."""
 function allowances(repository::Repository, rule::AbstractString)::Dict{String, Union{Int, String}}
     if isnothing(repository.baseline) || !isfile(repository.baseline)
@@ -127,12 +120,6 @@ function fix_diff(config::Config, root::AbstractString)::String
     return join(file_diff.(labels, joinpath.(original.root, labels), joinpath.(copies, labels)))
 end
 
-"""A deny-level `parse-error` finding for each of `paths` that does not parse."""
-function parse_error_findings(paths::AbstractVector{String})::Vector{Finding}
-    failures = [path => parse_failure(path) for path in paths]
-    return Finding[Finding("parse-error", :deny, Site(basename(path), path, 1, failure)) for (path, failure) in failures if !isempty(failure)]
-end
-
 """
     run_rules(config, root; mod = nothing, frames = nothing, fix = false, update_baseline = false, own_methods = defined_methods(mod))
 
@@ -176,7 +163,7 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
         end
     end
     comments = context.comments
-    findings = parse_error_findings(all_sources(repository_, directories))
+    findings = context.parse_errors
     for rule in runnable
         append!(
             findings,

@@ -235,6 +235,19 @@ end
 repository_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String} =
     filter(path -> isempty(parse_failure(path)), all_sources(repository, directories))
 
+"""One site a rule found, with the level it was found at."""
+struct Finding
+    rule::String
+    level::Symbol
+    site::Site
+end
+
+"""A deny-level `parse-error` finding for each of `paths` that does not parse."""
+function parse_error_findings(paths::AbstractVector{String})::Vector{Finding}
+    failures = [path => parse_failure(path) for path in paths]
+    return Finding[Finding("parse-error", :deny, Site(basename(path), path, 1, failure)) for (path, failure) in failures if !isempty(failure)]
+end
+
 """The baseline entry left after `found` sites against `entry`: a note stays, a count falls to `found`."""
 remaining(entry::AbstractString, ::Integer)::String = entry
 remaining(entry::Integer, found::Integer)::Int = min(entry, found)

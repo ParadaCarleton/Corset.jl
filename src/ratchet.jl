@@ -6,6 +6,9 @@ using TOML: TOML
 
 const SYNTAX = Base.JuliaSyntax # lint: non-public-access  the registered JuliaSyntax lags the parser Julia 1.13 ships
 
+"""The children of syntax node `node`: none for a leaf, where JuliaSyntax's `children` gives `nothing`."""
+node_children(node::SYNTAX.SyntaxNode)::Vector{SYNTAX.SyntaxNode} = something(SYNTAX.children(node), SYNTAX.SyntaxNode[])
+
 # The baseline file holds one table per rule, named as in the rule's opt-out comment. A string
 # is a named offender's note ("unassigned" waits on a decision, "kept: …" is deliberate) and
 # allows it at any number of sites; an integer allows that many sites. `TOML.print` drops comments.
@@ -158,7 +161,7 @@ end
 
 """The comment `found`, an `OPT_OUT` match in a comment token that starts at byte `start`, placed by `lines`."""
 opt_out_comment(lines::SYNTAX.SourceFile, start::Integer, found::RegexMatch)::OptOutComment =
-    OptOutComment(found[1], opt_out_form(found[2]), SYNTAX.source_line(lines, start + found.offset - 1))
+    OptOutComment(found[1]::AbstractString, opt_out_form(found[2]), SYNTAX.source_line(lines, start + found.offset - 1))
 
 """The form an `OPT_OUT` suffix (`file`, `begin`, `end` or none) gives its comment."""
 opt_out_form(suffix::AbstractString)::Symbol = Symbol(suffix)
@@ -217,22 +220,20 @@ all_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{
     collect(String, Iterators.flatten(julia_files.(joinpath.(repository.root, directories), (repository.skipped_directories,)))),
 )
 
-"""The first line of the parse error `path` raises, or `nothing` when the file parses."""
-function parse_failure(path::AbstractString)::Union{String, Nothing}
-    try
-        SYNTAX.parseall(SYNTAX.SyntaxNode, read(path, String); filename = path)
-    catch error_
-        if error_ isa SYNTAX.ParseError
-            return last(first(split(sprint(showerror, error_), '\n'; keepempty = false), 2))
-        end
-        rethrow()
+"""The message of the first parse error in `path`, or an empty string when the file parses."""
+function parse_failure(path::AbstractString)::String
+    stream = SYNTAX.ParseStream(read(path, String))
+    SYNTAX.parse!(stream; rule = :all)
+    errors = filter(diagnostic -> diagnostic.level === :error, stream.diagnostics)
+    if isempty(errors)
+        return ""
     end
-    return nothing
+    return first(errors).message
 end
 
 """The Julia files under `directories` of `repository` that parse; `run_rules` reports the rest as `parse-error` findings."""
 repository_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String} =
-    filter(path -> isnothing(parse_failure(path)), all_sources(repository, directories))
+    filter(path -> isempty(parse_failure(path)), all_sources(repository, directories))
 
 """The baseline entry left after `found` sites against `entry`: a note stays, a count falls to `found`."""
 remaining(entry::AbstractString, ::Integer)::String = entry

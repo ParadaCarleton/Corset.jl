@@ -56,7 +56,7 @@ function judge(
 end
 
 """Whether `rule` reads the frames inference gives the entry signatures (`entry_frames`)."""
-reads_signatures(rule::Rule)::Bool = rule isa Union{AbstractLocalRule, BangRule, UnmarkedMutationRule, RuntimeDispatchRule, WidenedReturnRule, FloatWideningRule, JetRule}
+reads_signatures(rule::Rule)::Bool = rule isa Union{AbstractLocalRule, BangRule, UnmarkedMutationRule, RuntimeDispatchRule, WidenedReturnRule, FloatWideningRule, RecursionLimitRule, JetRule}
 
 """
 Whether `rule` has what it reads: the loaded package `mod` for a module rule, `frames` for a rule that
@@ -172,7 +172,7 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
     comments = context.comments
     findings = Finding[
         Finding("parse-error", :deny, Site(basename(path), path, 1, parse_failure(path)))
-            for path in all_sources(repository_, directories) if !isnothing(parse_failure(path))
+            for path in all_sources(repository_, directories) if !isempty(parse_failure(path))
     ]
     for rule in runnable
         append!(

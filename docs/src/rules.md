@@ -16,7 +16,7 @@ A `pedantic` rule enforces house style that Rust allows, or is a noisy heuristic
 
 | Group | Rules |
 | --- | --- |
-| `default` | `abstract-field`, `abstract-local`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anonymous-function`, `jet`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anonymous-function`, `quadratic-vcat`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anonymous-function`, `where-return`, `widened-return` |
+| `default` | `abstract-field`, `abstract-local`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anonymous-function`, `jet`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anonymous-function`, `quadratic-vcat`, `recursion-limit`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anonymous-function`, `where-return`, `widened-return` |
 | `pedantic` | `c-type`, `concrete-return`, `file-length`, `float64`, `jscpd`, `nothing-return`, `one-letter`, `quadratic-scan`, `range-guard`, `ref`, `repeated-prefix`, `struct-constant`, `wide-struct` |
 
 `corset rules` prints each rule's group and level. `[preferences.Corset.levels]` and the `--allow`,
@@ -97,6 +97,25 @@ an `:invoke` edge is read too. One site per method and source line.
 
 Repair: make the callee's argument types inferable, or put a function barrier around the untyped part.
 Opt out a deliberate barrier on the method's first line.
+
+### `recursion-limit`: `recursion_limits(repo, entry_frames(seeds, mod), mod)`
+
+Calls to a method of the package that inference cut off at its recursion limit, because the
+argument types nest deeper with every call:
+
+```julia
+grow(x, n::Int) = n == 0 ? x : grow((x,), n - 1)   # Int, Tuple{Int}, Tuple{Tuple{Int}}, …
+```
+
+The cut-off callee keeps no inferred code, so it is never optimized together with its caller, and
+each depth infers and compiles a new specialization. The site is the call, in the frame where
+inference stopped. JET's optimization analysis reports the frames past it as
+`OptimizationFailureReport`. `entry_frames` follows no instance of a cut-off method, so its walk
+ends on such code. A cut-off call to another module's method (Base's `Dict` built from a
+generator over untyped data, say) is not reported.
+
+Repair: keep the argument types fixed across the recursion (a loop, or an accumulator of one type),
+or put a function barrier where the type is allowed to change.
 
 ### `widened-return`: `widened_returns(repo, entry_frames(seeds, mod))`
 
@@ -198,7 +217,7 @@ Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 
 ## Rules with fixers
 
-Two rules come with a fixer. `Corset.fix!(rule, repo, directories)` applies one: the rule's
+Three rules come with a fixer. `Corset.fix!(rule, repo, directories)` applies one: the rule's
 `fix_plan` proposes one repair per site, and `fix!` drops every repair a `# lint:` comment opts out
 (line, block and file forms) before it writes. It computes every file before it writes any, and
 returns the sites it repaired.
@@ -223,6 +242,13 @@ f(x::T)::T where {T} = x      # parses as f(x::T)::(T where {T}); T is not the m
 
 Its fixer parenthesizes those whose `where` binds a variable of the arguments.
 
+### `quadratic-vcat`: `quadratic_concatenations(file)`
+
+Its fixer rewrites `reduce(vcat, pieces; init = T[])` as `collect(T, Iterators.flatten(pieces))`, and
+the folds inside `pieces` with it. It leaves `init = Any[]` and every other fold alone: `vcat` appends a
+piece that is not a vector whole, where `flatten` iterates it, and only a `T` other than `Any` turns that
+difference into a conversion error instead of a different result.
+
 ## Rules that call other tools
 
 ### `fatou`: `fatou_sites(repo, directories)`
@@ -246,6 +272,7 @@ when its innermost frame is a method of the package (JET's `target_modules`), an
 method and the report's kind and placed at its line, so an opt-out goes on the reported line. The
 same report reached from several frames is one site.
 
-The rule leaves out `JET.report_opt`: `runtime-dispatch` reports its runtime dispatches and
-`impure-anonymous-function` its captured `Core.Box`es. In tests, [`@call_sites`](@ref) and
+The rule leaves out `JET.report_opt`: `runtime-dispatch` reports its runtime dispatches,
+`impure-anonymous-function` its captured `Core.Box`es, and `recursion-limit` the calls where its
+optimization failures start. In tests, [`@call_sites`](@ref) and
 [`@opt_sites`](@ref) run either analysis on one call. See the [guide](guide.md#JET).

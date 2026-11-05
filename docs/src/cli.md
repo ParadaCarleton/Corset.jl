@@ -18,6 +18,21 @@ You can also run it via `julia -m Corset`:
 julia --project -m Corset check
 ```
 
+### Corset as a test dependency
+
+A package that lists Corset only under `[extras]` and `[targets] test` can't load it from its own
+environment, so `julia --project -m Corset` fails with "Package Corset not found". Activate the test
+target's environment with [TestEnv.jl](https://github.com/JuliaTesting/TestEnv.jl) first:
+
+```bash
+julia -e 'using Pkg; Pkg.add("TestEnv")'
+julia --project=. -e 'using TestEnv; TestEnv.activate(); using Corset; exit(Corset.main(ARGS))' -- check .
+```
+
+`corset check` then relaunches in the package's own project and keeps the test environment on the load
+path for Corset and its dependencies. Corset's own CI runs this command in its `corset` job, so the job
+can be copied into a downstream package as is.
+
 ## Commands
 
 ### `corset check`
@@ -33,7 +48,7 @@ corset check [path] [options]
 #### Options
 
 - `--format <format>`: Output format (`human`, `concise`, or `json`). Default is `human`.
-- `--fix`: Rewrite files in place for rules that provide an automated fixer (such as `where-return` and `misplaced-import`).
+- `--fix`: Rewrite files in place for rules that provide an automated fixer (`where-return`, `misplaced-import`, and `quadratic-vcat`).
 - `--diff`: Print a unified diff of the changes `--fix` would make without modifying any files on disk. Exits with code `1` if changes are detected, `0` if clean. It rejects `--fix` and the flags it would ignore: `--format`, `--deny-warnings`, `--update-baseline`, `--entries` and `--candidate-limit`.
 - `--pedantic`: Enable rules in the `:pedantic` group (house style and noisy heuristics) in addition to the `:default` rules (likely bugs, performance traps, and patterns Rust rejects without an explicit marker). The [rules page](rules.md#Groups) lists both groups.
 - `--deny-warnings`: Exit nonzero on warnings in addition to deny-level findings.

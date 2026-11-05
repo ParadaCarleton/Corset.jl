@@ -9,7 +9,7 @@ using .Entries: Entries
 const INNER_VARIABLE = "CORSET_INNER"
 
 """Rethrow an ArgParse error so `run_command` catches it and exits with 2."""
-rethrow_arg_error(::ArgParseSettings, err::ArgParseError)::Nothing = throw(err)
+rethrow_arg_error(::ArgParseSettings, err::ArgParseError)::Nothing = throw(err) # lint: jet  ArgParse's error handler rethrows by design
 
 """Add the argument or option `name` to `settings` with the ArgParse `options` (`help`, `action`, `default`, ...)."""
 option!(settings::ArgParseSettings, name::AbstractString; options...)::Nothing = (
@@ -193,10 +193,7 @@ function command_options(parsed::AbstractDict)::Union{RulesOptions, CheckOptions
 end
 
 """Whether any rule `config` leaves on reads the loaded package."""
-reads_package(config::Config)::Bool = any(
-    rule -> rule isa ModuleRule,
-    enabled_rules(config),
-)
+reads_package(config::Config)::Bool = !isempty(module_rule_names(enabled_rules(config)))
 
 """The package at `root`, loaded in the running process."""
 function load_package(root::AbstractString)::Module
@@ -214,12 +211,16 @@ Replace this process with a Julia process whose active project is `root`, runnin
 Corset's own environment stays on the load path after the project's, so the project's versions of shared
 dependencies win, and the default environment (`@v#.#`) comes last, so a JET installed there runs the `jet` rule. Where `execv` does not exist the command runs as a child and its exit code is returned.
 """
-function relaunch(root::AbstractString, args::AbstractVector{<:AbstractString})::Int # COV_EXCL_LINE
+function relaunch(root::AbstractString, args::AbstractVector{<:AbstractString})::Int # COV_EXCL_LINE # lint: jet  execv replaces the process, so on POSIX it leaves only by throwing when execv fails
     # COV_EXCL_START
     # execv replaces the process before it can write its coverage
     ENV[INNER_VARIABLE] = "1"
+    corset_project = Base.active_project()
+    if isnothing(corset_project)
+        throw(UsageError("corset relaunches in the project's environment and keeps its own on the load path, but no project is active"))
+    end
     ENV["JULIA_LOAD_PATH"] = join(
-        ["@", dirname(Base.active_project()), "@stdlib", "@v#.#"],
+        ["@", dirname(corset_project), "@stdlib", "@v#.#"],
         ifelse(Sys.iswindows(), ";", ":"),
     )
     command = `$(Base.julia_cmd()) --startup-file=no --project=$root -e "using Corset; exit(Corset.main(ARGS))" -- $args`
@@ -446,7 +447,7 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
     if loads
         mod = load_package(root)
         own_methods = defined_methods(mod)
-        if any(reads_signatures, enabled_rules(config))
+        if any(reads_signatures, enabled_rules(config))::Bool
             sources = seed_sources(config, root, options.entries, mod, err; own_methods)
         end
         if !isempty(sources)
@@ -484,7 +485,7 @@ function check_project(
     project = project_root(root)
     config = load_config(project)
     frames = nothing
-    if any(reads_signatures, enabled_rules(config))
+    if any(reads_signatures, enabled_rules(config))::Bool
         frames = seeded_frames(Pair{String, Vector{Type}}["signatures" => Type[signatures...]], mod)
     end
     findings, _ = run_rules(config, project; mod, frames, update_baseline)
@@ -533,4 +534,4 @@ function run_command(args::AbstractVector{<:AbstractString}, out::IO, err::IO)::
 end
 
 """`run_command` on the process's standard streams, as they are when the command starts."""
-(@main)(args::AbstractVector{<:AbstractString})::Int = run_command(args, stdout, stderr) # lint: hidden-input
+(@main)(args::AbstractVector{<:AbstractString})::Int = run_command(args, stdout, stderr)

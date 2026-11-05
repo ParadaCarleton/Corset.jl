@@ -59,7 +59,10 @@ jobs:
           version: "1"
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
-      - run: julia --project=. -e 'using Corset; exit(Corset.main(ARGS))' -- check . --pedantic --deny-warnings
+      # TestEnv activates the test target's environment, so this step also works in packages that list
+      # Corset only as a test dependency.
+      - run: julia -e 'using Pkg; Pkg.add("TestEnv")'
+      - run: julia --project=. -e 'using TestEnv; TestEnv.activate(); using Corset; exit(Corset.main(ARGS))' -- check . --pedantic --deny-warnings
   format:
     runs-on: ubuntu-latest
     steps:

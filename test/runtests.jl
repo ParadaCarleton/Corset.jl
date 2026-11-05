@@ -82,6 +82,13 @@ function where_fixed(text::AbstractString)::String
     return read(joinpath(tree, "source.jl"), String)
 end
 
+"""The text the quadratic-vcat fixer leaves of `text`, written to a fresh file."""
+function flatten_fixed(text::AbstractString)::String
+    tree = write_tree(mktempdir(), ["source.jl" => text])
+    Corset.fix!(Corset.QuadraticVcatRule(), Repository(tree), (".",))
+    return read(joinpath(tree, "source.jl"), String)
+end
+
 """A module of `count` structs, each one field wider than the last, and `count` functions returning a capturing closure."""
 function generated_module(count::Integer)::Module
     generated = Module(:Generated)
@@ -421,20 +428,66 @@ end
     end
 
     @testset "jet rule: report_call on the frames, one site per report in the package" begin
-        sites = Corset.call_report_sites(repository, inferred, fixture)
-        broken = filter(site -> endswith(site.key, "fixture.jl broken MethodErrorReport"), sites)
+        # The rule reads only frames in the repository's files: the fixture's own directory.
+        fixture_repository = Repository(dirname(string(first(inferred).method.file)))
+        sites = Corset.call_report_sites(fixture_repository, inferred, fixture)
+        broken = filter(site -> site.key == "fixture.jl broken MethodErrorReport", sites)
         @test !isempty(broken)
         @test all(site -> site.line == 60 && !isempty(site.detail), broken)
         @test allunique(sites)
-        @test isempty(Corset.call_report_sites(repository, filter(item -> item.method.name === :reads_limit, inferred), fixture))
+        @test isempty(Corset.call_report_sites(fixture_repository, filter(item -> item.method.name === :reads_limit, inferred), fixture))
         # `sum` of strings fails inside Base (`add_sum`, `reduce_empty`): JET reports it, the package's rule does not.
+        # The method is in a repository file, so the rule analyzes it; both reports are raised inside Base.
+        summed_tree = write_tree(mktempdir(), ["total.jl" => "total(words::Vector{String})::String = sum(words)\n"])
         holder = Module(:Holder)
-        Core.eval(holder, :(total(words::Vector{String})::String = sum(words)))
+        Base.include(holder, joinpath(summed_tree, "total.jl"))
         signature = Tuple{typeof(holder.total), Vector{String}}
         @test !isempty(JET.get_reports(JET.report_call(signature)))
-        @test isempty(Corset.call_report_sites(repository, entry_frames(Type[signature], holder), holder))
+        @test isempty(Corset.call_report_sites(Repository(summed_tree), entry_frames(Type[signature], holder), holder))
+        # A call that fails on one branch of a union split (`+(::Nothing, ::Int)` on an unchecked `findfirst`)
+        # counts like any other; a frame whose file is outside the repository does not.
+        split_source = """
+        first_after(values::Vector{Int})::Int = findfirst(iszero, values) + 1
+        mismatched(value::Int)::Int = value + "one"
+        """
+        split_tree = write_tree(mktempdir(), ["split.jl" => split_source])
+        split = Module(:Split)
+        Base.include(split, joinpath(split_tree, "split.jl"))
+        split_frames = entry_frames(Type[Tuple{typeof(split.first_after), Vector{Int}}, Tuple{typeof(split.mismatched), Int}], split)
+        @test Set(site_keys(Corset.call_report_sites(Repository(split_tree), split_frames, split))) ==
+            Set(["split.jl first_after MethodErrorReport", "split.jl mismatched MethodErrorReport"])
+        @test isempty(Corset.call_report_sites(Repository(mktempdir()), split_frames, split))
+        # A module rule reads the loaded package through `loaded_module`; with none, `can_run` skips it.
+        @test_throws ArgumentError Corset.loaded_module(Corset.Context(Repository(mktempdir()), (), nothing))
         @test Corset.installed(Corset.JET_ID)
         @test !Corset.installed(Base.PkgId(Base.UUID("00000000-0000-0000-0000-000000000001"), "NotInstalled"))
+    end
+
+    @testset "recursion-limit: a call inference cuts off, whose argument types nest deeper each time" begin
+        source = """
+        module Recursive
+        grow(x, n::Int) = n == 0 ? x : grow((x,), n - 1)
+        start(n::Int) = grow(1, n)
+        fib(n::Int)::Int = n <= 1 ? n : fib(n - 1) + fib(n - 2)
+        ping(n::Int)::Int = n <= 0 ? 0 : pong(n - 1)
+        pong(n::Int)::Int = n <= 0 ? 1 : ping(n - 1) + 1
+        end
+        """
+        tree = write_tree(mktempdir(), ["recursive.jl" => source])
+        holder = Module(:Holder)
+        Base.include(holder, joinpath(tree, "recursive.jl"))
+        recursive = holder.Recursive
+        # The walk stops at the cut: each `grow` frame would otherwise inline a deeper one, forever.
+        frames = entry_frames(Type[Tuple{typeof(recursive.start), Int}], recursive)
+        @test [frame.method.name for frame in frames] == [:start]
+        sites = Corset.recursion_limits(Repository(tree), frames, recursive)
+        @test site_keys(sites) == ["recursive.jl start"]
+        @test site_lines(sites) == [3]
+        @test occursin("grow", only(sites).detail)
+        settled = entry_frames(Type[Tuple{typeof(recursive.fib), Int}, Tuple{typeof(recursive.ping), Int}], recursive)
+        @test Set(frame.method.name for frame in settled) == Set([:fib, :ping, :pong])
+        @test isempty(Corset.recursion_limits(Repository(tree), settled, recursive))
+        @test !Corset.cut_off(:(f(x)))
     end
 
     @testset "float64_ops: Float64 operations in optimized IR" begin
@@ -597,6 +650,35 @@ end
         @test Corset.is_hidden_input(GlobalRef(Base, :stdout))
     end
 
+    @testset "hidden-input: an `@main` entry point hands the process streams down; a site sits on its read's line" begin
+        source = """
+        module Cli
+        report(io::IO)::Nothing = println(io, "done")
+        log_to(io::IO; level::Int = 1)::Int = level
+        (@main)(args::Vector{String}; quiet::Bool = false)::Int = (report(stdout); 0)
+        helper()::Nothing = report(stderr)
+        spread()::Int = log_to(
+            stderr;
+            level = 2,
+        )
+        end
+        module Plain
+        main()::Nothing = print(stdout, "")
+        end
+        """
+        tree = write_tree(mktempdir(), ["cli.jl" => source])
+        holder = Module(:Holder)
+        Base.include(holder, joinpath(tree, "cli.jl"))
+        cli_sites = hidden_inputs(Repository(tree), holder.Cli)
+        @test Set((site.key, site.line) for site in cli_sites) == Set([("stderr", 5), ("stderr", 7)])
+        # A `main` that `@main` does not mark is no entry point.
+        @test [(site.key, site.line) for site in hidden_inputs(Repository(tree), holder.Plain)] == [("stdout", 12)]
+        file = joinpath(tree, "cli.jl")
+        @test Corset.read_line(joinpath(tree, "missing.jl"), 6, :stderr) == 6
+        @test Corset.read_line(file, 999, :stderr) == 999
+        @test Corset.read_line(file, 6, :no_such_name) == 6
+    end
+
     @testset "abstract-local: a homogeneous variadic tuple is concrete in use, a bare Tuple is not" begin
         @test !Corset.abstract_local_type(Tuple{Vararg{String}})
         @test Corset.abstract_local_type(Tuple)
@@ -652,6 +734,42 @@ end
             write(path, kept)
             @test isempty(where_return_sites(parsed(path)))
         end
+    end
+end
+
+@testset "quadratic-vcat: the fixer flattens `reduce(vcat, pieces; init = T[])`" begin
+    @test flatten_fixed("x = reduce(vcat, (f(p) for p in ps); init = String[])\n") ==
+        "x = collect(String, Iterators.flatten(f(p) for p in ps))\n"
+    @test flatten_fixed("y = reduce(vcat, xs, init = Vector{Int}[])\n") == "y = collect(Vector{Int}, Iterators.flatten(xs))\n"
+    @test flatten_fixed("z = reduce(\n    vcat,\n    (g(a) for a in as);\n    init = A.B[],\n)\n") ==
+        "z = collect(A.B, Iterators.flatten(g(a) for a in as))\n"
+    @testset "a fold inside the pieces of another is flattened with it" begin
+        nested = "w = reduce(vcat, (reduce(vcat, (h(b) for b in bs); init = Int[]) for bs in groups); init = Int[])\n"
+        @test flatten_fixed(nested) == "w = collect(Int, Iterators.flatten(collect(Int, Iterators.flatten(h(b) for b in bs)) for bs in groups))\n"
+    end
+    @testset "a fold whose pieces may not be vectors, or that is not reduce(vcat, …; init = T[]), is left alone" begin
+        for kept in (
+                "a = reduce(vcat, pairs; init = Any[])\n",
+                "b = reduce(vcat, (f(p) for p in ps))\n",
+                "c = reduce(hcat, columns; init = Int[])\n",
+                "d = foldl(vcat, pieces; init = Int[])\n",
+                "e = reduce(vcat, pieces; init = start)\n",
+                "g = reduce(vcat, pieces; init = Int[], dims = 1)\n",
+                "h = reduce(vcat, pieces; base = Int[])\n",
+                "k = reduce(vcat, pieces; init = Int[1])\n",
+                "m = reduce(vcat; init = Int[])\n",
+            )
+            @test flatten_fixed(kept) == kept
+        end
+    end
+    @testset "the fixer leaves a fold a `# lint: quadratic-vcat` comment opts out, on any line it spans" begin
+        broken = "x = reduce(vcat, xs; init = Int[])\n"
+        fixed = "x = collect(Int, Iterators.flatten(xs))\n"
+        spanning = "y = reduce(\n    vcat, ys; # lint: quadratic-vcat  deliberate\n    init = Int[])\n"
+        tree = write_tree(mktempdir(), ["line.jl" => spanning * broken, "plain.jl" => broken])
+        fixed_sites = Corset.fix!(Corset.QuadraticVcatRule(), Repository(tree), (".",))
+        @test sort!([(basename(site.file), site.line) for site in fixed_sites]) == [("line.jl", 4), ("plain.jl", 1)]
+        @test tree_texts(tree) == Dict("line.jl" => spanning * fixed, "plain.jl" => fixed)
     end
 end
 

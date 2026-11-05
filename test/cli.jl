@@ -221,7 +221,7 @@ end
         @test read(joinpath(baselined, "base.toml"), String) == before
     end
 
-    @testset "--update-baseline seeds a missing baseline" begin
+    @testset "update_baseline (`corset baseline`) seeds a missing baseline" begin
         seeded = package_tree(
             "name = \"Demo\"\n[preferences.Corset]\nbaseline = \"base.toml\"\n",
             SOURCE_TREE,
@@ -355,9 +355,20 @@ end
     redirect_stderr(devnull) do
         @test captured_main(["check", root, "--no-load", "--entries", "bogus"])[2] == 2
         @test captured_main(["check", root, "--no-load", "--entries", "tests"])[2] == 2
-        for flags in (["--format", "json"], ["--format", "human"], ["--deny-warnings"], ["--update-baseline"], ["--entries", "workload"], ["--candidate-limit", "3"])
+        for flags in (["--format", "json"], ["--format", "human"], ["--deny-warnings"], ["--entries", "workload"], ["--candidate-limit", "3"])
             @test captured_main(["check", root, "--diff", flags...]) == ("", 2)
         end
+    end
+    baselined = package_tree("name = \"Demo\"\n[preferences.Corset]\nbaseline = \"base.toml\"\n", SOURCE_TREE)
+    @test captured_main(["check", baselined, "--no-load", "--deny-warnings"])[2] == 1
+    @test captured_main(["baseline", baselined, "--no-load"]) == ("", 0)
+    @test occursin("where-return", read(joinpath(baselined, "base.toml"), String))
+    @test captured_main(["check", baselined, "--no-load", "--deny-warnings"]) == ("", 0)
+    @test Corset.command_options(Corset.parse_args(["baseline"], Corset.argument_settings())).update_baseline
+    @test !Corset.command_options(Corset.parse_args(["check"], Corset.argument_settings())).update_baseline
+    redirect_stderr(devnull) do
+        @test captured_main(["baseline", root, "--no-load"])[2] == 2
+        @test captured_main(["baseline", root, "--fix"])[2] == 2
     end
     configured = package_tree("name = \"Demo\"\n[preferences.Corset]\nentry_points = \"entries.jl:signatures\"\n", SOURCE_TREE)
     @test_throws Corset.UsageError Corset.checked_options(Corset.command_options(Corset.parse_args(["check", "--entries", "workload"], Corset.argument_settings())), load_config(configured))

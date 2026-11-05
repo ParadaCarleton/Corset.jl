@@ -132,7 +132,7 @@ end
         repository = Repository(mktempdir())
         sites = [Site("first", "", 0, ""), Site("second", "", 0, ""), Site("second", "", 0, "")]
         @test (@test_logs (:error, r"rule: offenders past no baseline") offenders!(repository, "rule", sites)) == ["first", "second"]
-        @test ratchet!(repository, "rule", Site[]) == String[]
+        @test ratchet!(repository, "rule", Site[]; coverage = 0) == String[]
         described = [Site("first", "", 0, "local `x`::Any"), Site("first", "", 0, "local `y`::Any"), Site("second", "", 0, "")]
         @test (@test_logs (:error, r"first = 2 \(local `x`::Any; local `y`::Any\)\nsecond = 1\n?$") offenders!(repository, "rule", described)) == ["first", "second"]
     end
@@ -172,7 +172,7 @@ end
         @test isempty(offenders!(repository, "rule", [sites; Site("noted", "", 0, "")]))
         @test offenders!(repository, "rule", [sites; Site("counted", "", 0, "")]) == ["counted"]
         @test offenders!(repository, "rule", [Site("fresh", "", 0, "")]; scopes = ("noted",)) == ["fresh"]
-        @test ratchet!(repository, "rule", [Site("counted", "", 0, "")]) == String[]
+        @test ratchet!(repository, "rule", [Site("counted", "", 0, "")]; coverage = 0) == String[]
         @test TOML.parsefile(baseline)["rule"] == Dict("counted" => 1, "noted" => "kept: deliberate")
     end
 
@@ -461,6 +461,15 @@ end
         @test_throws ArgumentError Corset.loaded_module(Corset.Context(Repository(mktempdir()), (), nothing))
         @test Corset.installed(Corset.JET_ID)
         @test !Corset.installed(Base.PkgId(Base.UUID("00000000-0000-0000-0000-000000000001"), "NotInstalled"))
+    end
+
+    @testset "under --code-coverage entry_frames warns once and ratchet! throws, since the frames differ from users' code" begin
+        @test_logs (:warn, r"--code-coverage") Corset.warn_coverage!(1)
+        @test_logs (:warn, r"--code-coverage") Corset.warn_coverage!(2)
+        @test_logs Corset.warn_coverage!(0)
+        @test isnothing(Corset.warn_coverage!(0))
+        @test_throws r"refuses to run under --code-coverage" ratchet!(Repository(mktempdir()), "rule", Site[]; coverage = 1)
+        @test isnothing(Corset.refuse_coverage(0))
     end
 
     @testset "recursion-limit: a call inference cuts off, whose argument types nest deeper each time" begin

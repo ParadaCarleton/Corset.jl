@@ -29,11 +29,17 @@ function argument_settings()::ArgParseSettings
     option!(settings, "check"; help = "run the rules over a project", action = :command)
     option!(
         settings,
+        "baseline";
+        help = "seed the baseline file with the rules' current offenders and lower it where they fell",
+        action = :command,
+    )
+    option!(
+        settings,
         "rules";
         help = "list the rules, their groups and their levels",
         action = :command,
     )
-    for command in ("check", "rules")
+    for command in ("check", "baseline", "rules")
         option!(
             settings[command],
             "path";
@@ -72,33 +78,35 @@ function argument_settings()::ArgParseSettings
         help = "exit nonzero on warnings, not only on deny-level findings",
         action = :store_true,
     )
+    for command in ("check", "baseline")
+        run_options!(settings[command])
+    end
+    return settings
+end
+
+"""Add to `settings` the options `corset check` and `corset baseline` share: which rules run, and how."""
+function run_options!(settings::ArgParseSettings)::Nothing
     option!(
-        check,
-        "--update-baseline";
-        help = "seed and lower the baseline file",
-        action = :store_true,
-    )
-    option!(
-        check,
+        settings,
         "--no-load";
         help = "do not load the package; skip the rules that read it",
         action = :store_true,
     )
     option!(
-        check,
+        settings,
         "--candidate-limit";
         help = "the most methods one runtime-dispatch site lists; 0 lists none (default: the config's, else $DEFAULT_CANDIDATE_LIMIT)",
         arg_type = Int,
     )
     option!(
-        check,
+        settings,
         "--entries";
         help = "where the typed rules' entry signatures come from, comma-separated: workload (compiled specializations and concrete declarations), tests (run the tests under --trace-compile) or none (default: workload)",
     )
-    option!(check, "--allow"; help = "turn a rule off (repeatable)", action = :append_arg)
-    option!(check, "--warn"; help = "set a rule to warn (repeatable)", action = :append_arg)
-    option!(check, "--deny"; help = "set a rule to deny (repeatable)", action = :append_arg)
-    return settings
+    option!(settings, "--allow"; help = "turn a rule off (repeatable)", action = :append_arg)
+    option!(settings, "--warn"; help = "set a rule to warn (repeatable)", action = :append_arg)
+    option!(settings, "--deny"; help = "set a rule to deny (repeatable)", action = :append_arg)
+    return nothing
 end
 
 """The directory of the project that contains `path`."""
@@ -147,7 +155,10 @@ struct RulesOptions
     pedantic::Bool
 end
 
-"""The options of `corset check`, as ArgParse parsed them; `overrides` are the `rule => level` pairs of `--allow`, `--warn` and `--deny`."""
+"""
+The options of `corset check`, as ArgParse parsed them; `overrides` are the `rule => level` pairs of
+`--allow`, `--warn` and `--deny`. `corset baseline` is a check with `update_baseline` set.
+"""
 struct CheckOptions
     path::String
     pedantic::Bool
@@ -162,15 +173,16 @@ struct CheckOptions
     entries::Union{Nothing, String}
 end
 
-function CheckOptions(arguments::AbstractDict)::CheckOptions
+"""The options of `corset check`, or of `corset baseline` when `update_baseline` is set, from its parsed `arguments`."""
+function CheckOptions(arguments::AbstractDict, update_baseline::Bool)::CheckOptions
     return CheckOptions(
         arguments["path"],
         arguments["pedantic"],
-        arguments["format"],
-        arguments["fix"],
-        arguments["diff"],
-        arguments["deny-warnings"],
-        arguments["update-baseline"],
+        get(arguments, "format", nothing),
+        get(arguments, "fix", false),
+        get(arguments, "diff", false),
+        get(arguments, "deny-warnings", false),
+        update_baseline,
         arguments["no-load"],
         vcat(level_overrides.((arguments,), ("allow", "warn", "deny"))...),
         arguments["candidate-limit"],
@@ -186,10 +198,11 @@ end
 
 """The typed options of the command ArgParse parsed into `parsed`."""
 function command_options(parsed::AbstractDict)::Union{RulesOptions, CheckOptions}
-    if parsed["%COMMAND%"] == "rules"
+    command::String = parsed["%COMMAND%"]
+    if command == "rules"
         return RulesOptions(parsed["rules"]["path"], parsed["rules"]["pedantic"])
     end
-    return CheckOptions(parsed["check"])
+    return CheckOptions(parsed[command], command == "baseline")
 end
 
 """Whether any rule `config` leaves on reads the loaded package."""
@@ -277,7 +290,6 @@ function diff_ignored(options::CheckOptions)::Vector{String}
     flags = [
         "--format" => !isnothing(options.format),
         "--deny-warnings" => options.deny_warnings,
-        "--update-baseline" => options.update_baseline,
         "--entries" => !isnothing(options.entries),
         "--candidate-limit" => !isnothing(options.candidate_limit),
     ]
@@ -286,9 +298,13 @@ end
 
 """
 `options`, checked under `config`: `--diff` with a flag it ignores, `--entries` with `--no-load` (the
-typed rules need the package), or an unknown `--entries` source throws.
+typed rules need the package), an unknown `--entries` source, or `corset baseline` in a project that
+names no baseline file throws.
 """
 function checked_options(options::CheckOptions, config::Config)::CheckOptions
+    if options.update_baseline && isnothing(config.baseline)
+        throw(UsageError("`corset baseline` writes the file `baseline` names in [preferences.Corset] of Project.toml, and it names none"))
+    end
     ignored = diff_ignored(options)
     if !isempty(ignored)
         throw(UsageError("--diff only prints the fixers' rewrites and ignores $(join(ignored, ", ")); drop them"))
@@ -428,7 +444,7 @@ function print_fix_diff(io::IO, config::Config, root::AbstractString, fix::Bool)
     return Int(!isempty(changes))
 end
 
-"""Run `corset check` with `options` (from the command line `args`); returns the exit code."""
+"""Run `corset check`, or `corset baseline`, with `options` (from the command line `args`); returns the exit code."""
 function run_options(options::CheckOptions, args::AbstractVector{<:AbstractString}, out::IO, err::IO)::Int
     root = project_root(options.path)
     config = with_overrides(load_config(root), options.pedantic, options.overrides, options.candidate_limit)
@@ -471,7 +487,7 @@ end
 `corset check` for a package `mod` already loaded in this process, the entry `signatures` given by the
 caller, and the configuration of the project at `root`. Prints the findings to `out` and returns the exit
 code: a test calls this once, `@test check_project(root, MyPackage, signatures) == 0`. `update_baseline`
-seeds and lowers the baseline file as `corset check --update-baseline` does.
+seeds and lowers the baseline file as `corset baseline` does.
 """
 function check_project(
         root::AbstractString,

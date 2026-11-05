@@ -1,6 +1,6 @@
 # Rules
 
-A rule name is the label you pass to [`ratchet!`](@ref) and write in opt-out comments. The names
+A rule name is the label you pass to [`offenders!`](@ref) and write in opt-out comments. The names
 below are conventions; any lowercase words joined by `-` work.
 
 Rules that need the compiler's answer read a loaded module. Rules about how code is written read
@@ -188,7 +188,7 @@ in a function, and spell an alias at its use sites.
 files = repository_sources(REPO, ("src",))
 locations = struct_locations(Corset.Source.(files))
 sites = [struct_site(T, locations) for T in module_structs(MyPackage) if !isempty(abstract_fields(T))]
-ratchet!(REPO, "abstract-field", sites)
+offenders!(REPO, "abstract-field", sites)
 ```
 
 ## Rules on source files

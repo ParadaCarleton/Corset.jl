@@ -1,4 +1,4 @@
-# The check every code-quality rule reports through. A rule hands `ratchet!` the sites it found. With no
+# The check every code-quality rule reports through. A rule hands `offenders!` the sites it found. With no
 # baseline every site fails; a baseline file allows the sites it holds and falls when a run finds fewer.
 
 using Test: @test
@@ -33,8 +33,8 @@ end
 The tree the rules read, and the settings that relax them. The defaults are the strict reading: every
 finding of every rule fails. `root` is the tree whose source the rules read (made absolute).
 
-- `baseline`: the TOML file of per-rule allowances that `ratchet!` holds findings to; `nothing` allows none.
-  It may be a link: `ratchet!` resolves it at each call, so a lowering lands in the file it points to.
+- `baseline`: the TOML file of per-rule allowances that `offenders!` holds findings to; `nothing` allows none.
+  It may be a link: `offenders!` resolves it at each call, so a lowering lands in the file it points to.
 - `one_letter_exempt`: the variable names the one-letter rule allows besides `_` (a project's own
   convention, such as an argument everywhere named `p`).
 - `skipped_directories`: directory names `repository_sources` leaves out wherever they sit, such as
@@ -390,7 +390,7 @@ Without a baseline (`Repository`'s default) every key is returned. With one, the
 `rule`'s table in the baseline file: the keys past their entry are returned, and a count the tally
 undercuts is lowered or deleted and the file rewritten. A note stays; one with no site is logged stale.
 A rule with no table fails every key it measures, naming `SEED_VARIABLE`; only `seed = true` writes the
-table from the tally (`corset check --update-baseline`, or `SEED_VARIABLE` set in the environment).
+table from the tally (`corset baseline`, or `SEED_VARIABLE` set in the environment).
 Several testsets may share one rule's table, and a run may not measure all of it (a partial copy of
 the tree): each passes the prefixes `scopes` that begin the keys it measures, and only entries under
 one of them can fall. `fix` tells the reader of the log how to repair an offender, such as the forms
@@ -415,7 +415,7 @@ function offenders!(
     path = realpath(baseline_file)
     baseline = read_baseline(path)
     if !haskey(baseline, rule) && !seed
-        missing_table = "no table in $path (seed it by running with $SEED_VARIABLE=1, or `corset check --update-baseline`)"
+        missing_table = "no table in $path (seed it with `corset baseline`, or by running with $SEED_VARIABLE=1)"
         return logged_over(rule, measured, detail_lines(kept), sort!(collect(keys(measured))), missing_table, fix)
     end
     if !haskey(baseline, rule)
@@ -447,16 +447,34 @@ function offenders!(
 end
 
 """
-    ratchet!(repository, rule, sites; scopes = ("",), fix = "", seed = seeding_requested())
+    ratchet!(repository, rule, sites; scopes = ("",), fix = "", seed = seeding_requested(), coverage)
 
 A test that `rule`'s offenders `sites` are all allowed: it fails on the keys `offenders!` returns, and
-returns them.
+returns them. It throws under `--code-coverage` (`coverage`, `Base.JLOptions().code_coverage` by
+default; see `refuse_coverage`).
 """
 function ratchet!(
         repository::Repository, rule::String, sites::AbstractVector{Site}; scopes::Tuple{Vararg{String}} = ("",), fix::String = "",
         seed::Bool = seeding_requested(),
+        coverage::Integer = Base.JLOptions().code_coverage, # lint: non-public-access  Base has no public accessor for the --code-coverage level
     )::Vector{String}
+    refuse_coverage(coverage)
     over = offenders!(repository, rule, sites; scopes, fix, seed)
     @test isempty(over)
     return over
+end
+
+"""
+Throw when `coverage` (`Base.JLOptions().code_coverage`) is not zero: a test suite run with
+`--code-coverage` compiles without inlining or constant folding, so the typed rules would read code
+users never run. `corset check` runs the rules in a process of its own.
+"""
+function refuse_coverage(coverage::Integer)::Nothing
+    if coverage != 0
+        error(
+            "ratchet! refuses to run under --code-coverage, which blocks inlining and constant folding, so the typed rules " *
+                "would read code users never run; enforce the rules with `corset check` in a CI job of its own",
+        )
+    end
+    return nothing
 end

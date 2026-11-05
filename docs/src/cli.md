@@ -49,16 +49,29 @@ corset check [path] [options]
 
 - `--format <format>`: Output format (`human`, `concise`, or `json`). Default is `human`.
 - `--fix`: Rewrite files in place for rules that provide an automated fixer (`where-return`, `misplaced-import`, and `quadratic-vcat`).
-- `--diff`: Print a unified diff of the changes `--fix` would make without modifying any files on disk. Exits with code `1` if changes are detected, `0` if clean. It rejects `--fix` and the flags it would ignore: `--format`, `--deny-warnings`, `--update-baseline`, `--entries` and `--candidate-limit`.
+- `--diff`: Print a unified diff of the changes `--fix` would make without modifying any files on disk. Exits with code `1` if changes are detected, `0` if clean. It rejects `--fix` and the flags it would ignore: `--format`, `--deny-warnings`, `--entries` and `--candidate-limit`.
 - `--pedantic`: Enable rules in the `:pedantic` group (house style and noisy heuristics) in addition to the `:default` rules (likely bugs, performance traps, and patterns Rust rejects without an explicit marker). The [rules page](rules.md#Groups) lists both groups.
 - `--deny-warnings`: Exit nonzero on warnings in addition to deny-level findings.
-- `--update-baseline`: Seed missing baseline entries and lower counts for improved sites.
 - `--no-load`: Skip loading the package module into Julia; runs only file and tree syntax rules. It rejects `--entries`, which only the typed rules read.
 - `--candidate-limit <count>`: The most candidate methods one runtime-dispatch site lists; `0` lists none. Overrides `candidate_limit`.
 - `--entries <sources>`: Where the typed rules (`abstract-local`, `bang`, `runtime-dispatch`, `unmarked-mutation`, `widened-return`, `float-widening`) get their entry signatures, as a comma-separated list. `workload` (the default) takes the specializations the package's precompile workload compiled and the methods whose declared signature is already concrete. `tests` runs the package's tests under `--trace-compile` and keeps the traced signatures of the package's methods; it runs the whole test suite and every process it starts beside the check, so it needs their memory too. `none` skips the typed rules. After the findings, the command prints how many signatures each source gave, how many the walk inferred, and the peak resident memory of the run.
 - `--allow <rule>`: Disable the specified rule (repeatable).
 - `--warn <rule>`: Set the specified rule to warn (repeatable).
 - `--deny <rule>`: Set the specified rule to deny (repeatable).
+
+### `corset baseline`
+
+Seed the baseline file with the rules' current offenders, and lower its entries where a run finds
+fewer sites than they allow.
+
+```bash
+corset baseline [path] [options]
+```
+
+It writes the file `baseline` names in the [configuration](#Configuration) and fails when that is
+unset. It takes `--pedantic`, `--no-load`, `--candidate-limit`, `--entries`, `--allow`, `--warn` and
+`--deny`, as `corset check` does, and exits `0` once the file is written. Commit the file; `corset check`
+then fails only on offenders the baseline doesn't allow.
 
 ### `corset rules`
 

@@ -1,5 +1,5 @@
 # Code rules checked on a loaded module and on its repository's Julia source: lowered code,
-# bindings, types and parsed text. Each rule reports its sites through `ratchet!`.
+# bindings, types and parsed text. Each rule reports its sites through `offenders!`.
 
 using .Entries: defined_methods
 using .Membership: Package, belongs, package_bindings
@@ -1235,7 +1235,7 @@ function constructs_own_type(node::Expr)::Bool
     return !isnothing(returned) && type_head(first(call.args)) === returned
 end
 
-"""The repair `ratchet!`'s `fix` names for a `concrete_returns` offender: the result annotations the rule accepts."""
+"""The repair `offenders!`'s `fix` names for a `concrete_returns` offender: the result annotations the rule accepts."""
 const CONCRETE_RETURN_FIX =
     "annotate the result generically: a type variable the arguments bind (`function f(x::T)::T where {T}`, " *
     "or `(f(x::T)::T) where {T} = …` on one line), `typeof(x)`, or an abstract type " *

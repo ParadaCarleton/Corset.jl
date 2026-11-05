@@ -1,8 +1,8 @@
 # Corset.jl
 
-Corset turns code-quality rules into tests. A rule is a function that reads a loaded module (its
-lowered and inferred code, bindings and types) or a source file, and returns the places where the
-code breaks it. [`ratchet!`](@ref) turns those places into one `@test`.
+Corset checks a package against code-quality rules. A rule is a function that reads a loaded module
+(its lowered and inferred code, bindings and types) or a source file, and returns the places where
+the code breaks it. [`corset check`](cli.md) runs the rules in CI.
 
 Corset checks things a linter cannot see because they need the compiler's answer: a local variable
 that infers as `Any`, a closure that boxes a captured variable, a function that reads a mutable
@@ -67,28 +67,24 @@ offenders!(repo, "abstract-local", abstract_locals(repo, entry_frames([Tuple{typ
 ```
 
 Each returned string is a key: the name of one offender. [`offenders!`](@ref) returns the keys
-and logs them; [`ratchet!`](@ref) does the same and fails a test if there are any.
+and logs them.
 
-## In a test suite
+## In CI
 
-```julia
-using Test
-using Corset: Repository, ratchet!, hidden_inputs, abstract_locals, entry_frames
-using MyPackage
+[`corset check`](cli.md) runs every rule over a package and exits nonzero on a finding. Give it a CI
+job of its own; with Corset in the package's test dependencies:
 
-const REPO = Repository(pkgdir(MyPackage))
-
-@testset "code rules" begin
-    ratchet!(REPO, "hidden-input", hidden_inputs(REPO, MyPackage))
-    ratchet!(REPO, "abstract-local", abstract_locals(REPO, entry_frames(SIGNATURES, MyPackage)))
-end
+```bash
+julia -e 'using Pkg; Pkg.add("TestEnv")'
+julia --project=. -e 'using TestEnv; TestEnv.activate(); using Corset; exit(Corset.main(ARGS))' -- check .
 ```
 
 With no further setup every offender fails. A package with existing offenders adopts Corset one
-rule at a time through a [baseline](guide.md#Adopting-Corset-on-an-existing-package).
+rule at a time through a [baseline](guide.md#Adopting-Corset-on-an-existing-package). The
+[Guide](guide.md#Where-to-run-the-rules) says why the rules run outside `Pkg.test`.
 
 ## Where to go next
 
-- [Guide](guide.md): wiring rules into `runtests.jl`, baselines, exemptions and opt-out comments.
+- [Guide](guide.md): where to run the rules, baselines, exemptions and opt-out comments.
 - [Rules](rules.md): every rule, what it finds and how to repair an offender.
 - [API](api.md): the exported names. The internals pages hold every other docstring.

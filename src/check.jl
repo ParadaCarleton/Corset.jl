@@ -127,6 +127,12 @@ function fix_diff(config::Config, root::AbstractString)::String
     return join(file_diff.(labels, joinpath.(original.root, labels), joinpath.(copies, labels)))
 end
 
+"""A deny-level `parse-error` finding for each of `paths` that does not parse."""
+function parse_error_findings(paths::AbstractVector{String})::Vector{Finding}
+    failures = [path => parse_failure(path) for path in paths]
+    return Finding[Finding("parse-error", :deny, Site(basename(path), path, 1, failure)) for (path, failure) in failures if !isempty(failure)]
+end
+
 """
     run_rules(config, root; mod = nothing, frames = nothing, fix = false, update_baseline = false, own_methods = defined_methods(mod))
 
@@ -170,10 +176,7 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
         end
     end
     comments = context.comments
-    findings = Finding[
-        Finding("parse-error", :deny, Site(basename(path), path, 1, parse_failure(path)))
-            for path in all_sources(repository_, directories) if !isempty(parse_failure(path))
-    ]
+    findings = parse_error_findings(all_sources(repository_, directories))
     for rule in runnable
         append!(
             findings,

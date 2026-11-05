@@ -896,7 +896,8 @@ end
 
 function Source(repository::Repository, path::AbstractString)::Source
     text = read(path, String)
-    tree = SYNTAX.parseall(SYNTAX.SyntaxNode, text; filename = path)
+    # A warning (`import Base: (+)`) flags valid Julia, so only an error throws (`SYNTAX.ParseError`).
+    tree = SYNTAX.parseall(SYNTAX.SyntaxNode, text; filename = path, ignore_warnings = true)
     located = Located[]
     locate!(located, Expr(tree), 0, Symbol("<top level>"), 0)
     return Source(path, file_key(repository, path), text, tree, located, opt_out_comments(path, text), countlines(IOBuffer(text)))

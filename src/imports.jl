@@ -381,9 +381,9 @@ import_sites(repository::Repository, moves::AbstractVector{ImportMove})::Vector{
 import_site(repository::Repository, move::ImportMove)::Site =
     Site("$(file_key(repository, move.file)) $(move.item.name)", move.file, move.statement.line, move.statement.last_line, "")
 
-"""The parsed Julia files of `directories` in `repository`."""
+"""The parsed Julia files of `directories` in `repository`; the fixers leave a file that does not parse alone."""
 directory_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{Source} =
-    Source.((repository,), repository_sources(repository, directories))
+    first(parsed_sources(repository, directories))
 
 """
     misplaced_imports(repository, directories)

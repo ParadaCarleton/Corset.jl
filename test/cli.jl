@@ -442,3 +442,15 @@ end
         @test captured_main(["check", "--format", "invalid"])[2] == 2
     end
 end
+
+@testset "a source file that does not parse is a finding and the other files are still checked" begin
+    broken = package_tree(
+        "name = \"Demo\"\n[preferences.Corset]\ndirectories = [\"src\"]\n",
+        SOURCE_TREE ∪ ["src/Broken.jl" => "f(x) = (\n"],
+    )
+    output, code = captured_main(["check", broken, "--no-load", "--format", "concise"])
+    @test code == 1
+    @test occursin("[parse-error]", output)
+    @test occursin("src/Broken.jl", output)
+    @test occursin("[where-return]", output)
+end

@@ -170,7 +170,10 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
         end
     end
     comments = context.comments
-    findings = Finding[]
+    findings = Finding[
+        Finding("parse-error", :deny, Site(basename(path), path, 1, parse_failure(path)))
+            for path in all_sources(repository_, directories) if !isnothing(parse_failure(path))
+    ]
     for rule in runnable
         append!(
             findings,

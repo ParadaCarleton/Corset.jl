@@ -212,10 +212,27 @@ entered_directory(entry::AbstractString, skipped::Tuple{Vararg{String}})::Bool =
 """Whether `entry` is a Julia file."""
 julia_file(entry::AbstractString)::Bool = !isdir(entry) && endswith(entry, ".jl")
 
-"""The Julia files under `directories` of `repository`; hidden directories and its `skipped_directories` are left out."""
-repository_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String} = sort!(
+"""The Julia files under `directories` of `repository`, parseable or not; hidden directories and its `skipped_directories` are left out."""
+all_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String} = sort!(
     collect(String, Iterators.flatten(julia_files.(joinpath.(repository.root, directories), (repository.skipped_directories,)))),
 )
+
+"""The first line of the parse error `path` raises, or `nothing` when the file parses."""
+function parse_failure(path::AbstractString)::Union{String, Nothing}
+    try
+        SYNTAX.parseall(SYNTAX.SyntaxNode, read(path, String); filename = path)
+    catch error_
+        if error_ isa SYNTAX.ParseError
+            return last(first(split(sprint(showerror, error_), '\n'; keepempty = false), 2))
+        end
+        rethrow()
+    end
+    return nothing
+end
+
+"""The Julia files under `directories` of `repository` that parse; `run_rules` reports the rest as `parse-error` findings."""
+repository_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String} =
+    filter(path -> isnothing(parse_failure(path)), all_sources(repository, directories))
 
 """The baseline entry left after `found` sites against `entry`: a note stays, a count falls to `found`."""
 remaining(entry::AbstractString, ::Integer)::String = entry

@@ -185,7 +185,7 @@
 
 [runtime-dispatch]
 "src/candidates.jl call_signature" = 1
-"src/check.jl anonymous function" = 15
+"src/check.jl anonymous function" = 16
 "src/check.jl enabled_rules" = 1
 "src/check.jl file_diff" = 1
 "src/check.jl fix_diff" = 3
@@ -230,7 +230,7 @@
 "src/mutation.jl view_sources" = 1
 "src/non_public_access.jl non_public_accesses" = 1
 "src/non_public_access.jl qualified_uses" = 3
-"src/ratchet.jl repository_sources" = 1
+"src/ratchet.jl all_sources" = 1
 "src/registry.jl check" = 2
 "src/rules.jl abstract_fields" = 1
 "src/rules.jl abstract_local_sites" = 3

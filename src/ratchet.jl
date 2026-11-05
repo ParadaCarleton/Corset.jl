@@ -217,7 +217,7 @@ julia_file(entry::AbstractString)::Bool = !isdir(entry) && endswith(entry, ".jl"
 
 """The Julia files under `directories` of `repository`, parseable or not; hidden directories and its `skipped_directories` are left out."""
 all_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String} = sort!(
-    String[file for directory in directories for file in julia_files(joinpath(repository.root, directory), repository.skipped_directories)],
+    collect(String, Iterators.flatten(julia_files.(joinpath.(repository.root, directories), (repository.skipped_directories,)))),
 )
 
 """The message of the first parse error in `path`, or an empty string when the file parses."""

@@ -215,10 +215,38 @@ entered_directory(entry::AbstractString, skipped::Tuple{Vararg{String}})::Bool =
 """Whether `entry` is a Julia file."""
 julia_file(entry::AbstractString)::Bool = !isdir(entry) && endswith(entry, ".jl")
 
-"""The Julia files under `directories` of `repository`; hidden directories and its `skipped_directories` are left out."""
-repository_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String} = sort!(
+"""The Julia files under `directories` of `repository`, parseable or not; hidden directories and its `skipped_directories` are left out."""
+all_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String} = sort!(
     collect(String, Iterators.flatten(julia_files.(joinpath.(repository.root, directories), (repository.skipped_directories,)))),
 )
+
+"""The message of the first parse error in `path`, or an empty string when the file parses."""
+function parse_failure(path::AbstractString)::String
+    stream = SYNTAX.ParseStream(read(path, String))
+    SYNTAX.parse!(stream; rule = :all)
+    errors = filter(diagnostic -> diagnostic.level === :error, stream.diagnostics)
+    if isempty(errors)
+        return ""
+    end
+    return first(errors).message
+end
+
+"""The Julia files under `directories` of `repository` that parse; `run_rules` reports the rest as `parse-error` findings."""
+repository_sources(repository::Repository, directories::Tuple{Vararg{String}})::Vector{String} =
+    filter(path -> isempty(parse_failure(path)), all_sources(repository, directories))
+
+"""One site a rule found, with the level it was found at."""
+struct Finding
+    rule::String
+    level::Symbol
+    site::Site
+end
+
+"""A deny-level `parse-error` finding for each of `paths` that does not parse."""
+function parse_error_findings(paths::AbstractVector{String})::Vector{Finding}
+    failures = [path => parse_failure(path) for path in paths]
+    return Finding[Finding("parse-error", :deny, Site(basename(path), path, 1, failure)) for (path, failure) in failures if !isempty(failure)]
+end
 
 """The baseline entry left after `found` sites against `entry`: a note stays, a count falls to `found`."""
 remaining(entry::AbstractString, ::Integer)::String = entry

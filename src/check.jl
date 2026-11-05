@@ -2,13 +2,6 @@
 
 using diffutils_jll: diffutils_jll
 
-"""One site a rule found, with the level it was found at."""
-struct Finding
-    rule::String
-    level::Symbol
-    site::Site
-end
-
 """The allowances the baseline file of `repository` holds for `rule`: none when there is no file or no table."""
 function allowances(repository::Repository, rule::AbstractString)::Dict{String, Union{Int, String}}
     if isnothing(repository.baseline) || !isfile(repository.baseline)
@@ -170,7 +163,7 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
         end
     end
     comments = context.comments
-    findings = Finding[]
+    findings = context.parse_errors
     for rule in runnable
         append!(
             findings,

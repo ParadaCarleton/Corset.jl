@@ -20,6 +20,7 @@ struct Context
     own_methods::Vector{Method}
     sources::Vector{Source}
     comments::Dict{String, Vector{OptOutComment}}
+    parse_errors::Vector{Finding}
 end
 
 function Context(
@@ -29,7 +30,7 @@ function Context(
     )::Context
     sources = Source.((repository,), repository_sources(repository, directories))
     parsed = Dict{String, Vector{OptOutComment}}(source.path => source.comments for source in sources)
-    return Context(repository, directories, mod, inferred, candidates, own_methods, sources, merge(parsed, frame_comments(repository, inferred, parsed)))
+    return Context(repository, directories, mod, inferred, candidates, own_methods, sources, merge(parsed, frame_comments(repository, inferred, parsed)), parse_error_findings(all_sources(repository, directories)))
 end
 
 """

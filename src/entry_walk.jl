@@ -105,13 +105,29 @@ followed(callee::Any, package::Package)::Bool = callee isa Core.MethodInstance &
 The `Inferred` frame of every method instance of `target`'s package (`belongs`) reachable from `seeds`
 (entry-point call signatures such as `Tuple{typeof(f), Int}`) along `frame_callees` edges, the seeds
 included. Each instance is inferred once; frames of other modules are walked through and dropped.
+Under `--code-coverage` it warns once (`warn_coverage!`), since the frames then differ from the code users run.
 """
-entry_frames(seeds::AbstractVector{<:Type}, target::Module)::Vector{Inferred} = walk_frames(
-    Package(target),
-    unique(collect(Core.MethodInstance, Iterators.flatten(selected_instances.(seeds)))),
-    Set{Core.MethodInstance}(),
-    Inferred[],
-)
+function entry_frames(seeds::AbstractVector{<:Type}, target::Module)::Vector{Inferred}
+    warn_coverage!(Base.JLOptions().code_coverage) # lint: non-public-access  Base has no public accessor for the --code-coverage level
+    return walk_frames(
+        Package(target),
+        unique(collect(Core.MethodInstance, Iterators.flatten(selected_instances.(seeds)))),
+        Set{Core.MethodInstance}(),
+        Inferred[],
+    )
+end
+
+"""
+Warn, once per logger, that the typed rules read code compiled under coverage when `coverage`
+(`Base.JLOptions().code_coverage`) is not zero: coverage blocks inlining and constant folding, so the
+frames differ from the code users run.
+"""
+function warn_coverage!(coverage::Integer)::Nothing
+    if coverage != 0
+        @warn "the typed rules read code compiled with --code-coverage, which blocks inlining and constant folding, so their findings can differ from the code users run; run them in `corset check`, outside Pkg.test" maxlog = 1
+    end
+    return nothing
+end
 
 """
 The `kept` frames, then the frames of `package` that the walk from `frontier` reaches, skipping the

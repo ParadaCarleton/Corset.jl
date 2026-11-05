@@ -1,5 +1,22 @@
 # Guide
 
+## Where to run the rules
+
+Run the rules with [`corset check`](cli.md) in a CI job of their own. The CLI page's
+[recipe](cli.md#Corset-as-a-test-dependency) works when Corset is only a test dependency.
+
+Don't run the rules inside `Pkg.test`:
+
+- **Coverage.** CI usually runs `Pkg.test` with `--code-coverage`, which blocks inlining and constant
+  folding. The typed rules (`abstract-local`, `runtime-dispatch`, `widened-return` and the others that
+  read `entry_frames`) would then read code users never run. `entry_frames` warns once when it runs
+  under coverage.
+- **Shared state.** The rules would see whatever the earlier test files loaded, defined or compiled,
+  so their results could depend on which tests ran and in what order.
+- **Mixed failures.** A rule's failure would show up as a failing test beside the package's real ones.
+
+`corset check` loads the package in a process of its own, without coverage.
+
 ## The pieces
 
 A **rule** is a function from code to a vector of [`Site`](@ref)s. A site has a `key` (the name of
@@ -8,9 +25,9 @@ the offender, such as `"src/Demo.jl total"`), a file, a line and a `detail` (wha
 
 A **[`Repository`](@ref)** is the tree the rules read, plus the settings that relax them.
 
-[`ratchet!`](@ref)`(repo, "rule-name", sites)` holds the sites to the repository's allowances and
-runs one `@test`. The rule name is a label you choose. It names the rule's table in the baseline file
-and the rule in opt-out comments. [`offenders!`](@ref) does the same without the `@test`.
+[`offenders!`](@ref)`(repo, "rule-name", sites)` holds the sites to the repository's allowances,
+logs the ones it doesn't allow and returns their keys. The rule name names the rule's table in the
+baseline file and the rule in opt-out comments.
 
 There are two kinds of rules.
 
@@ -21,26 +38,21 @@ There are two kinds of rules.
   lists a repository's files.
 
 ```julia
-@testset "code rules" begin
-    files = repository_sources(REPO, ("src",))
-    ratchet!(REPO, "nothing-return",
-        [site for file in files for site in nothing_returns(Corset.Source(REPO, file))])
-end
+files = repository_sources(REPO, ("src",))
+offenders!(REPO, "nothing-return", [site for file in files for site in nothing_returns(Corset.Source(REPO, file))])
 ```
 
 ## Adopting Corset on an existing package
 
 Turning on a rule in a mature package usually reports hundreds of offenders. A **baseline** makes
-that adoptable. It allows today's offenders, fails on new ones, and lowers itself as old ones are
-fixed.
+that adoptable. It allows today's offenders and fails on new ones. Name the file in `Project.toml`:
 
-```julia
-const REPO = Repository(pkgdir(MyPackage); baseline = joinpath(@__DIR__, "code_baseline.toml"))
+```toml
+[preferences.Corset]
+baseline = "code_baseline.toml"
 ```
 
-Create an empty `code_baseline.toml` and run the tests with `CORSET_SEED_BASELINE=1` set. A rule
-without a table fails and names that variable; with it set, the rule is seeded with its current
-offenders and passes:
+Run `corset baseline` to seed it with each rule's current offenders:
 
 ```toml
 [hidden-input]
@@ -55,39 +67,26 @@ such as `"kept: hot loop"`, is a note that allows any number.
 
 After that:
 
-- A **new** offender fails the test, because its key has no entry or the entry's count is exceeded.
-- A **fixed** offender lowers the file. When a run finds fewer sites than an entry allows, the entry
-  falls to the new count, or is deleted at zero, and the file is rewritten. Commit the change. The
-  allowance can only shrink. A note stays when its offender has no site left: the run logs it as
-  stale, and you delete it by hand.
-
-A testset that measures only part of a rule's keys passes the key prefixes it covers as `scopes`, so
-entries outside them never fall.
-
-```julia
-ratchet!(REPO, "abstract-local", sites; scopes = ("Parser.jl",))
-```
-
-## Telling the reader how to repair an offender
-
-`fix` adds a line to the failure log:
-
-```julia
-ratchet!(REPO, "concrete-return", sites; fix = Corset.CONCRETE_RETURN_FIX)
-```
+- A **new** offender fails `corset check`, because its key has no entry or the entry's count is exceeded.
+- A **fixed** offender lowers the file at the next `corset baseline`. An entry with
+  fewer sites than it allows falls to the new count, or is deleted at zero, and the file is rewritten.
+  Commit the change. The allowance can only shrink. A note stays when its offender has no site left:
+  the run logs it as stale, and you delete it by hand.
 
 ## Exemptions
 
-Two settings on the [`Repository`](@ref) relax rules for a whole project:
+Settings in `[preferences.Corset]` relax rules for a whole project:
 
-```julia
-Repository(root; one_letter_exempt = (:p,), skipped_directories = ("vendor",))
+```toml
+[preferences.Corset]
+one_letter_exempt = ["p"]
+skipped_directories = ["vendor"]
 ```
 
 `one_letter_exempt` lists variable names the one-letter rule allows besides `_`. A project's own
 convention, such as an argument everywhere named `p`, goes here. `skipped_directories` lists
-directory names that `repository_sources` leaves out wherever they sit. Hidden directories are
-always left out.
+directory names that Corset leaves out wherever they sit. Hidden directories are always left out.
+The [CLI page](cli.md#Configuration) lists every setting.
 
 ## Opting out one site
 
@@ -104,7 +103,7 @@ const CACHE = Ref(0)   # lint: hidden-input  memoized across calls on purpose
 | `# lint: RULE-file` | the whole file |
 
 Write the reason after the rule name. A `-begin` with no `-end` runs to the end of the file.
-`ratchet!` logs how many sites each rule's opt-outs removed.
+`offenders!` logs how many sites each rule's opt-outs removed.
 
 ## JET
 
@@ -114,7 +113,7 @@ into sites. Each report becomes one site keyed by scope, function and report kin
 ```julia
 sites = Site[]
 @call_sites "parse" sites target_modules = (MyPackage,) MyPackage.parse("1 + 2")
-ratchet!(REPO, "jet", sites)
+offenders!(REPO, "jet", sites)
 ```
 
 ## Float32 code paths

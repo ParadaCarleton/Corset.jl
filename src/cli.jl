@@ -68,6 +68,12 @@ function argument_settings()::ArgParseSettings
     )
     option!(
         check,
+        "--unsafe-fixes";
+        help = "with --fix, also run the fixes that can change behavior or inference",
+        action = :store_true,
+    )
+    option!(
+        check,
         "--diff";
         help = "print the changes --fix would make, write nothing, and exit 1 if there are any",
         action = :store_true,
@@ -164,6 +170,7 @@ struct CheckOptions
     pedantic::Bool
     format::Union{Nothing, String}
     fix::Bool
+    unsafe::Bool
     diff::Bool
     deny_warnings::Bool
     update_baseline::Bool
@@ -179,7 +186,8 @@ function CheckOptions(arguments::AbstractDict, update_baseline::Bool)::CheckOpti
         arguments["path"],
         arguments["pedantic"],
         get(arguments, "format", nothing),
-        get(arguments, "fix", false),
+        get(arguments, "fix", false) || get(arguments, "unsafe-fixes", false),
+        get(arguments, "unsafe-fixes", false),
         get(arguments, "diff", false),
         get(arguments, "deny-warnings", false),
         update_baseline,
@@ -470,7 +478,7 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
             frames = seeded_frames(sources, mod)
         end
     end
-    findings, skipped = run_rules(config, root; mod, frames, fix = options.fix, update_baseline = options.update_baseline, own_methods)
+    findings, skipped = run_rules(config, root; mod, frames, fix = options.fix, unsafe = options.unsafe, update_baseline = options.update_baseline, own_methods)
     print_findings(out, root, findings, something(options.format, "human"))
     if !isnothing(frames)
         println(err, seed_summary(sources, frames, Sys.maxrss()))
@@ -497,6 +505,8 @@ function check_project(
         format::AbstractString = "human",
         deny_warnings::Bool = false,
         update_baseline::Bool = false,
+        fix::Bool = false,
+        unsafe::Bool = false,
     )::Int
     project = project_root(root)
     config = load_config(project)
@@ -504,7 +514,7 @@ function check_project(
     if any(reads_signatures, enabled_rules(config))::Bool
         frames = seeded_frames(Pair{String, Vector{Type}}["signatures" => Type[signatures...]], mod)
     end
-    findings, _ = run_rules(config, project; mod, frames, update_baseline)
+    findings, _ = run_rules(config, project; mod, frames, update_baseline, fix, unsafe)
     print_findings(out, project, findings, format)
     return exit_code(findings, deny_warnings)
 end

@@ -71,17 +71,28 @@ is_on(config::Config, rule::Rule)::Bool = level(config, rule) !== :allow
 """The rules `config` leaves on."""
 enabled_rules(config::Config)::Tuple = filter(Base.Fix1(is_on, config), RULES)
 
-"""Run the fixer of every fixable rule in `rules` over the files under `directories` of `repository`."""
-apply_fixes!(::Tuple{}, ::Repository, ::Tuple{Vararg{String}})::Nothing = nothing
+"""
+Run the fixer of every fixable rule in `rules` over the files under `directories` of `repository`.
+A fixer that reads types needs the loaded package `mod` and its `frames`, and is skipped without them.
+"""
+apply_fixes!(::Tuple{}, ::Repository, ::Tuple{Vararg{String}}, ::Union{Module, Nothing}, ::Union{AbstractVector{Inferred}, Nothing}, ::Bool)::Nothing = nothing
 
-function apply_fixes!(rules::Tuple, repository::Repository, directories::Tuple{Vararg{String}})::Nothing
-    apply_fix!(first(rules), repository, directories)
-    return apply_fixes!(Base.tail(rules), repository, directories)
+function apply_fixes!(
+        rules::Tuple, repository::Repository, directories::Tuple{Vararg{String}}, mod::Union{Module, Nothing}, frames::Union{AbstractVector{Inferred}, Nothing}, unsafe::Bool,
+    )::Nothing
+    apply_fix!(first(rules), repository, directories, mod, frames, unsafe)
+    return apply_fixes!(Base.tail(rules), repository, directories, mod, frames, unsafe)
 end
 
-"""Run the fixer of `rule` over the files under `directories` of `repository`, when `rule` has one."""
-function apply_fix!(rule::Rule, repository::Repository, directories::Tuple{Vararg{String}})::Nothing
-    if fixable(rule)
+"""Run the fixer of `rule` over the files under `directories` of `repository`, when `rule` has one it can run."""
+function apply_fix!(
+        rule::Rule, repository::Repository, directories::Tuple{Vararg{String}}, mod::Union{Module, Nothing}, frames::Union{AbstractVector{Inferred}, Nothing}, unsafe::Bool,
+    )::Nothing
+    if typed_fixable(rule)
+        if mod isa Module && !isnothing(frames)
+            fix!(rule, repository, directories, mod, frames, unsafe)
+        end
+    elseif fixable(rule)
         fix!(rule, repository, directories)
     end
     return nothing
@@ -115,7 +126,7 @@ function fix_diff(config::Config, root::AbstractString)::String
         mkpath(dirname(joinpath(copies, directory)))
         cp(joinpath(original.root, directory), joinpath(copies, directory))
     end
-    apply_fixes!(enabled_rules(config), repository(config, copies), directories)
+    apply_fixes!(enabled_rules(config), repository(config, copies), directories, nothing, nothing, false)
     labels = relpath.(repository_sources(original, directories), original.root)
     return join(file_diff.(labels, joinpath.(original.root, labels), joinpath.(copies, labels)))
 end
@@ -135,6 +146,7 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
         mod::Union{Module, Nothing} = nothing,
         frames::Union{AbstractVector{Inferred}, Nothing} = nothing,
         fix::Bool = false,
+        unsafe::Bool = false,
         update_baseline::Bool = false,
         own_methods::AbstractVector{Method} = defined_methods(mod),
     )::Tuple{Vector{Finding}, Vector{String}}
@@ -144,7 +156,7 @@ function run_rules( # lint: abstract-local  loops over a tuple of different rule
     runnable = enabled[collect(can_run.(enabled, (mod,), (frames,)))]
     skipped = setdiff(module_rule_names(enabled), module_rule_names(runnable))
     if fix
-        apply_fixes!(runnable, repository_, directories)
+        apply_fixes!(runnable, repository_, directories, mod, frames, unsafe)
     end
     inferred = something(frames, Inferred[])
     context = Context(repository_, directories, mod; inferred, candidates = CandidateSearch(inferred; config.candidate_limit), own_methods)

@@ -98,8 +98,12 @@ Only a fixable rule has a method. A plan writes nothing; `fix!` applies it.
 """
 function fix_plan end
 
-"""Whether `rule` has a `fix_plan`."""
-fixable(rule::Rule)::Bool = hasmethod(fix_plan, Tuple{typeof(rule), Repository, Tuple{Vararg{String}}})
+"""Whether `rule` has a `fix_plan` that reads the loaded package: it takes the module and its inferred frames too."""
+typed_fixable(rule::Rule)::Bool =
+    hasmethod(fix_plan, Tuple{typeof(rule), Repository, Tuple{Vararg{String}}, Module, AbstractVector{Inferred}, Bool})
+
+"""Whether `rule` has a `fix_plan`, with or without the loaded package."""
+fixable(rule::Rule)::Bool = hasmethod(fix_plan, Tuple{typeof(rule), Repository, Tuple{Vararg{String}}}) || typed_fixable(rule)
 
 """
     fix!(rule, repository, directories)
@@ -109,6 +113,10 @@ Apply the `fix_plan` of `rule` (`apply_plan!`): every repair except those a `# l
 """
 fix!(rule::Rule, repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site} =
     apply_plan!(fix_plan(rule, repository, directories), rule_name(rule))
+
+"""Apply the typed `fix_plan` of `rule`, which reads the loaded package `mod` and its inferred `frames`; `unsafe` lets it change behavior."""
+fix!(rule::Rule, repository::Repository, directories::Tuple{Vararg{String}}, mod::Module, frames::AbstractVector{Inferred}, unsafe::Bool)::Vector{Site} =
+    apply_plan!(fix_plan(rule, repository, directories, mod, frames, unsafe), rule_name(rule))
 
 # The parameters a rule's body names, by what the rule reads.
 const RULE_PARAMETERS = (;
@@ -301,6 +309,12 @@ fix_plan(::QuadraticVcatRule, repository::Repository, directories::Tuple{Vararg{
 
 fix_plan(::ConcreteArgRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
     concrete_arg_plan(repository, directories)
+
+fix_plan(::AnnotationRule, repository::Repository, directories::Tuple{Vararg{String}}, mod::Module, frames::AbstractVector{Inferred}, unsafe::Bool)::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
+    annotation_plan(repository, directories, mod, frames, unsafe)
+
+fix_plan(::ConcreteReturnRule, repository::Repository, directories::Tuple{Vararg{String}}, mod::Module, frames::AbstractVector{Inferred}, unsafe::Bool)::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
+    concrete_return_plan(repository, directories, mod, frames, unsafe)
 
 """Every rule, ordered by name."""
 const RULES = Tuple(sort!([type() for kind in (ModuleRule, TreeRule, FileRule) for type in subtypes(kind)]; by = rule_name))

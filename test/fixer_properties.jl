@@ -11,6 +11,9 @@ const SYNTAX = Corset.SYNTAX
 # The rules whose fixers the generator below exercises.
 const GENERATED_FIXERS = Set(["misplaced-import", "quadratic-vcat", "where-return"])
 
+# The rules whose fixers only the example tests in runtests.jl exercise.
+const EXAMPLE_FIXERS = Set(["concrete-arg"])
+
 # The names generated packages import: bindings of Base.Iterators that Base does not export.
 const ITERATOR_NAMES = ("take", "drop", "cycle", "flatten", "partition", "product")
 
@@ -344,7 +347,7 @@ function fix_keeps_properties(package::PackageShape)::Bool
 end
 
 @testset "fixers: generated packages keep every fixer property" begin
-    @test Set(Corset.rule_name.(filter(Corset.fixable, Corset.RULES))) == GENERATED_FIXERS
+    @test Set(Corset.rule_name.(filter(Corset.fixable, Corset.RULES))) == union(GENERATED_FIXERS, EXAMPLE_FIXERS)
     report = @check max_examples = 300 db = false function fixed_package(package = PACKAGE_SHAPES)
         fix_keeps_properties(package)
     end

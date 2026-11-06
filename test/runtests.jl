@@ -1665,3 +1665,24 @@ include("fixer_properties.jl")
     undefined_names(lazy; scope = @__MODULE__)
     @test !isfile(marker)
 end
+
+"""The text the concrete-arg fixer leaves of `text`, written to a fresh file."""
+function concrete_arg_fixed(text::AbstractString)::String
+    tree = write_tree(mktempdir(), ["source.jl" => text])
+    Corset.fix!(Corset.ConcreteArgRule(), Repository(tree), (".",))
+    return read(joinpath(tree, "source.jl"), String)
+end
+
+@testset "concrete-arg: the fixer widens containers a method never resizes" begin
+    @test concrete_arg_fixed("f(x::Vector{Int}, y::Matrix)::Int = 1\n") == "f(x::AbstractVector{Int}, y::AbstractMatrix)::Int = 1\n"
+    @test concrete_arg_fixed("g(d::Dict{Symbol, Int}; w::Union{Nothing, Array{Float32, 2}} = nothing)::Int = 1\n") ==
+        "g(d::AbstractDict{Symbol, Int}; w::Union{Nothing, AbstractArray{Float32, 2}} = nothing)::Int = 1\n"
+    resizing = "function h!(x::Vector{Int}, y::Vector{Int})::Nothing\n    push!(x, 1)\n    return nothing\nend\n"
+    @test concrete_arg_fixed(resizing) == replace(resizing, "y::Vector" => "y::AbstractVector")
+    @test concrete_arg_fixed("f(x::Vector{Int}) = 1 # lint: concrete-arg  kept\n") == "f(x::Vector{Int}) = 1 # lint: concrete-arg  kept\n"
+    @test concrete_arg_fixed("function nothing_to_fix end\nf(x::Int, y::Vector{Int}) = x\n") == "function nothing_to_fix end\nf(x::Int, y::AbstractVector{Int}) = x\n"
+    @test concrete_arg_fixed("f(x::Base.Vector{Int}) = 1\n") == "f(x::Base.Vector{Int}) = 1\n"
+    fixed = concrete_arg_fixed("f(x::Vector{Int}, y::Array)::Int = 1\n")
+    tree = write_tree(mktempdir(), ["source.jl" => fixed])
+    @test isempty(Corset.concrete_arguments(Corset.Source(Repository(tree), joinpath(tree, "source.jl"))))
+end

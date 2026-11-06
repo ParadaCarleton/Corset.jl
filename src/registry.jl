@@ -293,5 +293,8 @@ fix_plan(::WhereReturnRule, repository::Repository, directories::Tuple{Vararg{St
 fix_plan(::QuadraticVcatRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
     flatten_plan(repository, directories)
 
+fix_plan(::ConcreteArgRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
+    concrete_arg_plan(repository, directories)
+
 """Every rule, ordered by name."""
 const RULES = Tuple(sort!([type() for kind in (ModuleRule, TreeRule, FileRule) for type in subtypes(kind)]; by = rule_name))

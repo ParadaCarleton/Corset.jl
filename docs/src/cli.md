@@ -48,7 +48,7 @@ corset check [path] [options]
 #### Options
 
 - `--format <format>`: Output format (`human`, `concise`, or `json`). Default is `human`.
-- `--fix`: Rewrite files in place for rules that provide an automated fixer (`where-return`, `misplaced-import`, and `quadratic-vcat`).
+- `--fix`: Rewrite files in place for rules that provide an automated fixer (`where-return`, `misplaced-import`, `quadratic-vcat` and `concrete-arg`).
 - `--diff`: Print a unified diff of the changes `--fix` would make without modifying any files on disk. Exits with code `1` if changes are detected, `0` if clean. It rejects `--fix` and the flags it would ignore: `--format`, `--deny-warnings`, `--entries` and `--candidate-limit`.
 - `--pedantic`: Enable rules in the `:pedantic` group (house style and noisy heuristics) in addition to the `:default` rules (likely bugs, performance traps, and patterns Rust rejects without an explicit marker). The [rules page](rules.md#Groups) lists both groups.
 - `--deny-warnings`: Exit nonzero on warnings in addition to deny-level findings.

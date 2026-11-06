@@ -35,6 +35,7 @@ end
             print_findings(devnull, root, findings, format)
         end
         print_rules(devnull, config)
+        prefix_statement(Pair{String, String}["using A: " => "b"], "using A: ")
         exit_code(findings, false)
         redirect_stderr(devnull) do
             redirect_stdout(devnull) do

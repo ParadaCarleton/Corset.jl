@@ -1,10 +1,10 @@
-# Two rules on argument annotations that accept less than they mean to. `enumerated-union`: a `Union`
+# Rules on argument annotations that accept less than they mean to. `enumerated-union`: a `Union`
 # that lists concrete types (`Union{Float32, Float64}`) where their common supertype (`AbstractFloat`)
 # says what the method takes. `invariant-parameter`: an abstract type parameter written without `<:`
 # (`AbstractVector{Real}`), which a container of a concrete subtype (`Vector{Float64}`) does not match.
 #
-# Both read parsed annotations and resolve their names by reflection, so the values they handle have no
-# static type: the helpers below opt out of the rules on inferred code that flag that.
+# The rules read parsed annotations and resolve their names by reflection, so the values they handle
+# have no static type: the helpers below opt out of the rules on inferred code that flag that.
 
 # lint: runtime-dispatch-begin  parsed `Expr` arguments and the types reflection returns have no static type
 # lint: unmarked-mutation-begin  only reads parsed annotations; the possible writes are the runtime dispatches

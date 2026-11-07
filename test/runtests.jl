@@ -580,9 +580,6 @@ end
         holder = Module(:FastPath)
         Base.include(holder, joinpath(root, "fast.jl"))
         @test site_keys(Corset.enumerated_unions(parsed(joinpath(root, "fast.jl")), holder)) == ["fast.jl alone"]
-        @test Corset.resolved_type(:(Base.Float32), Base) === Float32
-        @test Corset.resolved_type(QuoteNode(:name), Base) === :name
-        @test all(isa.(Corset.resolved_type.([:(Base.missing_name), :(Int{Float64}), :(Vector{Int, Int, Int}), :(f(x)), 1.5], (Base,)), Corset.Unresolved))
     end
 
     @testset "invariant-parameter: an abstract type parameter without <:" begin
@@ -590,6 +587,9 @@ end
         @test site_keys(sites) == ["source.jl summed", "source.jl nested", "source.jl bounded", "source.jl optional"]
         @test first(sites).detail == "`AbstractVector{Real}` takes only the parameter `Real` itself; write `AbstractVector{<:Real}`"
         @test sites[2].detail == "`Vector{Real}` takes only the parameter `Real` itself; write `Vector{<:Real}`"
+        @test Corset.resolved_type(:(Base.Float32), Base) === Float32
+        @test Corset.resolved_type(QuoteNode(:name), Base) === :name
+        @test all(isa.(Corset.resolved_type.([:(Base.missing_name), :(Int{Float64}), :(Vector{Int, Int, Int}), :(f(x)), 1.5], (Base,)), Corset.Unresolved))
     end
 
     @testset "float64: Float64 tokens and untyped float literals" begin

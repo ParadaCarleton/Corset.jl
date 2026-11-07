@@ -582,7 +582,7 @@ end
         @test site_keys(Corset.enumerated_unions(parsed(joinpath(root, "fast.jl")), holder)) == ["fast.jl alone"]
         @test Corset.resolved_type(:(Base.Float32), Base) === Float32
         @test Corset.resolved_type(QuoteNode(:name), Base) === :name
-        @test all(isa.(Corset.resolved_type.([:(Base.missing_name), :(Int{Float64}), :(Vector{Int, Int, Int}), :(f(x))], (Base,)), Corset.Unresolved))
+        @test all(isa.(Corset.resolved_type.([:(Base.missing_name), :(Int{Float64}), :(Vector{Int, Int, Int}), :(f(x)), 1.5], (Base,)), Corset.Unresolved))
     end
 
     @testset "invariant-parameter: an abstract type parameter without <:" begin

@@ -238,6 +238,15 @@ function is_statement(binding::SYNTAX.SyntaxNode)::Bool
     return last(node_children(parent)) !== binding || (!isnothing(parent.parent) && SYNTAX.kind(parent.parent) in DISCARDING_KINDS)
 end
 
+"""The field and variable names some code writes through (`name[…] = …`, `name .= …`, `f!(name)`)."""
+struct WrittenNames
+    fields::Set{String}
+    variables::Set{String}
+end
+
+"""Whether some code writes through `name`, as a field or as a variable."""
+is_written(written::WrittenNames, name::String)::Bool = name in written.fields || name in written.variables
+
 """The name an entry `name = call` (a keyword argument or a named-tuple entry) gives the call syntax `call`, or `""` when `call` is no such entry."""
 function entry_name(call::SYNTAX.SyntaxNode)::String
     entry = call.parent
@@ -251,13 +260,14 @@ end
 
 """
 The usage of the array that call syntax `call` builds: the entry or variable it is bound to, read in its scope, or else
-the call's own parent. An array that escapes under a name `written` holds (a name some code writes through) counts as written.
+the call's own parent. An array that escapes under a field or entry name some code writes through, or a local name some
+code writes through as a field, counts as written.
 """
-function call_usage(call::SYNTAX.SyntaxNode, written::AbstractSet{String})::Symbol
+function call_usage(call::SYNTAX.SyntaxNode, written::WrittenNames)::Symbol
     named = entry_name(call)
     binding = call.parent
     if !isempty(named)
-        return named in written ? :mutated : use_of(call)
+        return is_written(written, named) ? :mutated : use_of(call)
     elseif isnothing(binding) || SYNTAX.kind(binding) !== SYNTAX.@K_str("=") || last(node_children(binding)) !== call || SYNTAX.kind(binding.parent) in (CALL_KIND, PARAMETERS_KIND)
         return use_of(call)
     end
@@ -265,12 +275,14 @@ function call_usage(call::SYNTAX.SyntaxNode, written::AbstractSet{String})::Symb
     scopes = enclosing_scope(binding)
     if SYNTAX.kind(target) === SYNTAX.@K_str("::")
         return :ignored
+    elseif SYNTAX.kind(target) === SYNTAX.@K_str(".")
+        return is_written(written, callee_name(target)) ? :mutated : :escape
     elseif SYNTAX.kind(target) !== IDENTIFIER_KIND || isempty(scopes) || !is_statement(binding)
         return :escape
     end
     name = String(SYNTAX.sourcetext(target))
     usage = variable_usage(only(scopes), name, binding)
-    return usage === :escape && name in written ? :mutated : usage
+    return usage === :escape && name in written.fields ? :mutated : usage
 end
 
 """Whether syntax `argument` names a type: a capitalized name, a parametric type, or `typeof(…)`, `eltype(…)`, `promote_type(…)`."""
@@ -305,19 +317,25 @@ end
 """The name of the array syntax `node` holds: a variable, or the last field of `a.b.name`; `""` for anything else."""
 array_name(node::SYNTAX.SyntaxNode)::String = SYNTAX.kind(node) in (IDENTIFIER_KIND, SYNTAX.@K_str(".")) ? callee_name(node) : ""
 
-"""The names below syntax `node` that some code writes through (`name[…] = …`, `name .= …`, `f!(name)`), for a field or a variable alike."""
-function written_names(node::SYNTAX.SyntaxNode)::Vector{String}
-    names = String[name for child in node_children(node) for name in written_names(child)]
+"""The names below syntax `node` that some code writes through, as `:field => name` or `:variable => name`."""
+function written_names(node::SYNTAX.SyntaxNode)::Vector{Pair{Symbol, String}}
+    names = Pair{Symbol, String}[]
+    for child in node_children(node)
+        append!(names, written_names(child))
+    end
     name = array_name(node)
     if !isempty(name) && !isnothing(node.parent) && use_of(node) === :mutated
-        push!(names, name)
+        push!(names, (SYNTAX.kind(node) === IDENTIFIER_KIND ? :variable : :field) => name)
     end
     return names
 end
 
 """Every call of a Base constant-array constructor under syntax `node`, with the usage of its result, in source order."""
-function constant_array_calls(node::SYNTAX.SyntaxNode, written::AbstractSet{String})::Vector{ConstantArrayCall}
-    found = ConstantArrayCall[found for child in node_children(node) for found in constant_array_calls(child, written)]
+function constant_array_calls(node::SYNTAX.SyntaxNode, written::WrittenNames)::Vector{ConstantArrayCall}
+    found = ConstantArrayCall[]
+    for child in node_children(node)
+        append!(found, constant_array_calls(child, written))
+    end
     if !is_prefix_call(node) || in_signature(node)
         return found
     end
@@ -351,11 +369,27 @@ function constant_array_site(source::Source, call::ConstantArrayCall)::Site
 end
 
 """One constant-array site per call whose result no code writes (`constant_array_calls`): a written array has no FillArrays form."""
-constant_array_sites(sources::AbstractVector{Source})::Vector{Site} =
-    collect(Site, Iterators.flatten(constant_array_site.((source,), constant_array_calls(source.tree, written_in(sources))) for source in sources))
+function constant_array_sites(sources::AbstractVector{Source})::Vector{Site}
+    written = written_in(sources)
+    sites = Site[]
+    for source in sources
+        for call in constant_array_calls(source.tree, written)
+            push!(sites, constant_array_site(source, call))
+        end
+    end
+    return sites
+end
 
 """The names some file of `sources` writes through (`written_names`)."""
-written_in(sources::AbstractVector{Source})::Set{String} = Set(Iterators.flatten(written_names(source.tree) for source in sources))
+function written_in(sources::AbstractVector{Source})::WrittenNames
+    written = WrittenNames(Set{String}(), Set{String}())
+    for source in sources
+        for (kind, name) in written_names(source.tree)
+            push!(kind === :field ? written.fields : written.variables, name)
+        end
+    end
+    return written
+end
 
 """The FillArrays `constructor` that replaces the callee at the bytes `range` of the file `path`."""
 struct FillRewrite
@@ -365,12 +399,14 @@ struct FillRewrite
 end
 
 """The repairs of the Julia file `source`: one per constant-array call, the `:escape` ones too when `unsafe`."""
-function constant_array_repairs(source::Source, unsafe::Bool, written::AbstractSet{String})::Vector{Repair{FillRewrite}}
-    calls = filter(call -> call.usage === :safe || unsafe, constant_array_calls(source.tree, written))
-    return Repair{FillRewrite}[
-        Repair(constant_array_site(source, call), FillRewrite(source.path, SYNTAX.byte_range(first(node_children(call.node))), FILL_CONSTRUCTORS[Symbol(call.name)]))
-            for call in calls
-    ]
+function constant_array_repairs(source::Source, unsafe::Bool, written::WrittenNames)::Vector{Repair{FillRewrite}}
+    repairs = Repair{FillRewrite}[]
+    for call in constant_array_calls(source.tree, written)
+        if call.usage === :safe || unsafe
+            push!(repairs, Repair(constant_array_site(source, call), FillRewrite(source.path, SYNTAX.byte_range(first(node_children(call.node))), FILL_CONSTRUCTORS[Symbol(call.name)])))
+        end
+    end
+    return repairs
 end
 
 """The names `statement`, a `using` or `import`, brings in from FillArrays: its imported names, or `["*"]` for a bare `using FillArrays`."""
@@ -416,7 +452,9 @@ function import_edit(path::String, text::AbstractString, scope::SYNTAX.SyntaxNod
     end
     line = "using FillArrays: " * join(missing_names, ", ")
     if isempty(statements) && SYNTAX.kind(scope) === SYNTAX.@K_str("toplevel")
-        return [ByteRewrite(path, 1:0, line * "\n\n")]
+        # A shebang line must stay the first line of the file.
+        start = startswith(text, "#!") ? something(findfirst('\n', text), ncodeunits(text)) + 1 : 1
+        return [ByteRewrite(path, start:(start - 1), line * "\n\n")]
     elseif isempty(statements)
         first_statement = first(node_children(scope))
         start = first(SYNTAX.byte_range(first_statement))
@@ -433,10 +471,19 @@ function filled_file(edits::AbstractVector{FillRewrite}, path::String)::Pair{Str
     own = edits[[edit.path for edit in edits] .== path]
     text = read(path, String)
     root = SYNTAX.parseall(SYNTAX.SyntaxNode, text)
-    scopes = [import_scope(root, first(edit.range), root) for edit in own]
-    rewrites = ByteRewrite[ByteRewrite(path, edit.range, edit.constructor) for edit in own]
+    scopes = SYNTAX.SyntaxNode[]
+    rewrites = ByteRewrite[]
+    for edit in own
+        push!(scopes, import_scope(root, first(edit.range), root))
+        push!(rewrites, ByteRewrite(path, edit.range, edit.constructor))
+    end
     for scope in unique(SYNTAX.byte_range, scopes)
-        used = [edit.constructor for (edit, other) in zip(own, scopes) if SYNTAX.byte_range(other) == SYNTAX.byte_range(scope)]
+        used = String[]
+        for (edit, other) in zip(own, scopes)
+            if SYNTAX.byte_range(other) == SYNTAX.byte_range(scope)
+                push!(used, edit.constructor)
+            end
+        end
         append!(rewrites, import_edit(path, text, scope, used))
     end
     return path => rewritten(text, rewrites)
@@ -444,19 +491,32 @@ end
 
 const FILL_ARRAYS_UUID = "1a297f60-69ca-5386-bcde-b61e274b549b"
 
+"""The `[deps]` table of the Project.toml `text`, empty without one."""
+function project_deps(text::AbstractString)::Dict{String, Any}
+    return haskey(TOML.parse(text), "deps") ? TOML.parse(text)["deps"]::Dict{String, Any} : Dict{String, Any}()
+end
+
 """The Project.toml above the file `path`, as path => text, with FillArrays added to its `[deps]`; empty when it lists FillArrays already or no project exists."""
 function dependency_file(path::String)::Vector{Pair{String, String}}
-    project = Base.current_project(dirname(path))
-    if isnothing(project)
+    directory = dirname(path)
+    while !isfile(joinpath(directory, "Project.toml")) && dirname(directory) != directory
+        directory = dirname(directory)
+    end
+    project = joinpath(directory, "Project.toml")
+    if !isfile(project)
         return Pair{String, String}[]
     end
     text = read(project, String)
-    if occursin(r"(?m)^FillArrays\s*=", text)
+    if haskey(project_deps(text), "FillArrays")
         return Pair{String, String}[]
     end
     line = "FillArrays = \"$FILL_ARRAYS_UUID\"\n"
     text = endswith(text, "\n") ? text : text * "\n"
-    return [project => (occursin(r"(?m)^\[deps\]", text) ? replace(text, r"(?m)^\[deps\][ \t]*\n" => SubstitutionString("[deps]\n" * line); count = 1) : text * "\n[deps]\n" * line)]
+    added = occursin(r"(?m)^\[deps\][^\n]*\n", text) ? replace(text, r"(?m)^(\[deps\][^\n]*\n)" => SubstitutionString("\\1" * line); count = 1) : text * "\n[deps]\n" * line
+    if !haskey(project_deps(added), "FillArrays")
+        throw(ArgumentError("cannot list FillArrays in the [deps] of $project; add it by hand"))
+    end
+    return [project => added]
 end
 
 """The new text of each file `edits` touch, as path => text, with FillArrays added to the Project.toml above each."""
@@ -476,5 +536,9 @@ its function is repaired too, unless a name it is bound to is written elsewhere.
 function constant_array_plan(repository::Repository, directories::Tuple{Vararg{String}}, unsafe::Bool)::FixPlan{FillRewrite, typeof(filled_texts)}
     sources = directory_sources(repository, directories)
     written = written_in(sources)
-    return FixPlan(collect(Repair{FillRewrite}, Iterators.flatten(constant_array_repairs(source, unsafe, written) for source in sources)), filled_texts)
+    repairs = Repair{FillRewrite}[]
+    for source in sources
+        append!(repairs, constant_array_repairs(source, unsafe, written))
+    end
+    return FixPlan(repairs, filled_texts)
 end

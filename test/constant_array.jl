@@ -3,8 +3,8 @@
 """The `usage` of every constant-array call in `text`, by callee name, in source order."""
 function usages(text::AbstractString)::Vector{Pair{String, Symbol}}
     tree = write_tree(mktempdir(), ["source.jl" => text])
-    tree_node = parsed(joinpath(tree, "source.jl")).tree
-    return [call.name => call.usage for call in Corset.constant_array_calls(tree_node, Set(Corset.written_names(tree_node)))]
+    source = parsed(joinpath(tree, "source.jl"))
+    return [call.name => call.usage for call in Corset.constant_array_calls(source.tree, Corset.written_in([source]))]
 end
 
 """The text the `constant-array` fixer leaves of `text`; `unsafe` also repairs arrays that leave their function."""
@@ -209,5 +209,25 @@ end
 
 @testset "constant-array: a broadcast operator is no field access" begin
     @test usages("f(a, b) = a .+ b\ng(a, b) = (a .= b .* 2)\n") == []
-    @test Corset.written_names(parsed(joinpath(write_tree(mktempdir(), ["s.jl" => "g(a, b) = (a .= b .* 2)\n"]), "s.jl")).tree) == ["a"]
+    @test Corset.written_names(parsed(joinpath(write_tree(mktempdir(), ["s.jl" => "g(a, b) = (a .= b .* 2)\n"]), "s.jl")).tree) == [:variable => "a"]
+end
+
+@testset "constant-array: a field assignment, a local name, a CRLF project and a shebang" begin
+    sources_of(files) = Corset.directory_sources(Repository(write_tree(mktempdir(), files)), (".",))
+    field_target = "make(n) = begin\n    s = Holder()\n    s.buf = zeros(n)\n    return s\nend\n"
+    @test length(Corset.constant_array_sites(sources_of(["a.jl" => field_target]))) == 1
+    @test isempty(Corset.constant_array_sites(sources_of(["a.jl" => field_target, "b.jl" => "g(s) = (s.buf[1] = 2)\n"])))
+    @test Dict(filled_tree(["a.jl" => field_target, "b.jl" => "g(s) = (s.buf[1] = 2)\n"]; unsafe = true))["a.jl"] == field_target
+    local_out = "make(n) = begin\n    out = zeros(n)\n    return Holder(out)\nend\n"
+    @test length(Corset.constant_array_sites(sources_of(["a.jl" => local_out, "b.jl" => "g(out) = (out[1] = 2)\n"]))) == 1
+    @test isempty(Corset.constant_array_sites(sources_of(["a.jl" => local_out, "b.jl" => "g(job) = (job.out[1] = 2)\n"])))
+    source = "f(n) = sum(zeros(n))\n"
+    for project in ("name = \"D\"\r\n\r\n[deps]\r\nA = \"11111111-1111-1111-1111-111111111111\"\r\n", "name = \"D\"\n\n[deps] # packages\nA = \"11111111-1111-1111-1111-111111111111\"\n")
+        fixed = Dict(filled_tree(["Project.toml" => project, "src/demo.jl" => source]))
+        @test TOML.parse(fixed["Project.toml"])["deps"]["FillArrays"] == "1a297f60-69ca-5386-bcde-b61e274b549b"
+        @test startswith(fixed["src/demo.jl"], "using FillArrays: Zeros")
+    end
+    listed = "name = \"D\"\n\n[deps]\nFillArrays = \"1a297f60-69ca-5386-bcde-b61e274b549b\"\n"
+    @test Dict(filled_tree(["Project.toml" => listed, "src/demo.jl" => source]))["Project.toml"] == listed
+    @test Dict(filled_tree(["a.jl" => "#!/usr/bin/env julia\nf(n) = sum(zeros(n))\n"]))["a.jl"] == "#!/usr/bin/env julia\nusing FillArrays: Zeros\n\nf(n) = sum(Zeros(n))\n"
 end

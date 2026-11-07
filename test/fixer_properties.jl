@@ -12,7 +12,7 @@ const SYNTAX = Corset.SYNTAX
 const GENERATED_FIXERS = Set(["misplaced-import", "quadratic-vcat", "where-return"])
 
 # The rules whose fixers only the example tests in runtests.jl exercise.
-const EXAMPLE_FIXERS = Set(["concrete-arg"])
+const EXAMPLE_FIXERS = Set(["concrete-arg", "constant-array"])
 
 # The names generated packages import: bindings of Base.Iterators that Base does not export.
 const ITERATOR_NAMES = ("take", "drop", "cycle", "flatten", "partition", "product")

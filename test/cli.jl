@@ -188,7 +188,7 @@ end
     @test allunique(names)
     @test all(group in (:default, :pedantic) for group in rule_group.(RULES))
     @test sort!([rule_name(rule) for rule in RULES if rule_group(rule) === :pedantic]) == [
-        "c-type", "concrete-return", "file-length", "float64", "jscpd", "nothing-return", "one-letter",
+        "c-type", "concrete-return", "constant-array", "file-length", "float64", "jscpd", "nothing-return", "one-letter",
         "quadratic-scan", "range-guard", "ref", "repeated-prefix", "struct-constant", "wide-struct",
     ]
 end

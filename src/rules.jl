@@ -1455,7 +1455,7 @@ function one_letter_item_sites(source::Source, item::Located, exempt::Tuple{Vara
     if !isnothing(signature_call(item.node))
         line = definition_line(item.node, item.line)
     end
-    return fill(Site("$(source.name) $(item.enclosing)", source.path, line, ""), length(one_letter_names(item.node, exempt)))
+    return repeat([Site("$(source.name) $(item.enclosing)", source.path, line, "")], length(one_letter_names(item.node, exempt)))
 end
 
 """The files that define the constructors of struct `type`: where Julia evaluated its declaration."""

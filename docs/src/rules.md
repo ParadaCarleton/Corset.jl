@@ -17,7 +17,7 @@ A `pedantic` rule enforces house style that Rust allows, or is a noisy heuristic
 | Group | Rules |
 | --- | --- |
 | `default` | `abstract-field`, `abstract-local`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anonymous-function`, `jet`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anonymous-function`, `quadratic-vcat`, `recursion-limit`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anonymous-function`, `where-return`, `widened-return` |
-| `pedantic` | `c-type`, `concrete-return`, `file-length`, `float64`, `jscpd`, `nothing-return`, `one-letter`, `quadratic-scan`, `range-guard`, `ref`, `repeated-prefix`, `struct-constant`, `wide-struct` |
+| `pedantic` | `c-type`, `concrete-return`, `constant-array`, `file-length`, `float64`, `jscpd`, `nothing-return`, `one-letter`, `quadratic-scan`, `range-guard`, `ref`, `repeated-prefix`, `struct-constant`, `wide-struct` |
 
 `corset rules` prints each rule's group and level. `[preferences.Corset.levels]` and the `--allow`,
 `--warn` and `--deny` flags set the level of one rule.
@@ -230,6 +230,25 @@ A name counts as used only in the innermost `module` block that uses it, since a
 own imports; so no import moves into a file that holds only `module` blocks. A file included inside a
 `module` block belongs to that block's module: it takes only the block's imports. A name that a relative import
 (`using ..Parent: f`, `import .Sub.g`) takes from another module of the package keeps its imports.
+
+### `constant-array`: `constant_array_sites(file)`
+
+Calls of `zeros`, `ones`, `fill`, `trues` and `falses` (also `Base.zeros` and the like) that build an
+array no code writes. [FillArrays.jl](https://github.com/JuliaArrays/FillArrays.jl) stores such an array as
+one value: `Zeros`, `Ones`, `Fill`, `Trues` and `Falses`.
+
+A FillArrays array is immutable, so a written buffer has no such form and the rule stays silent on it.
+An array counts as written when its variable is assigned through (`x[i] = …`, `x .= …`, `@. x = …`), passed
+to a function whose name ends in `!`, or declared with a type (`x::Vector{Float32} = zeros(…)`). `fill` of
+an array, dictionary or comprehension aliases it, so the rule leaves that alone too.
+
+An array that leaves its function (returned, stored in a struct, bound at the top level, passed to a
+function without `!`, viewed or sliced) may be written elsewhere. The rule reports it, and only
+`--unsafe-fixes` rewrites it. The fixer rewrites the rest, adds `using FillArrays: Zeros, …` after the last
+import of the file (or at its top), and needs `FillArrays` in the package's `[deps]`.
+
+An index that is a name counts as a scalar, so `x[i]` reads an element; `x[idx]` with a vector `idx`
+returns a `Fill` slice.
 
 ### `where-return`: `where_return_sites(file)`
 

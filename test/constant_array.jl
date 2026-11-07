@@ -7,10 +7,10 @@ function usages(text::AbstractString)::Vector{Pair{String, Symbol}}
     return [call.name => call.usage for call in Corset.constant_array_calls(source.tree, Corset.written_in([source]))]
 end
 
-"""The text the `constant-array` fixer leaves of `text`; `unsafe` also repairs arrays that leave their function."""
-function filled(text::AbstractString; unsafe::Bool = false)::String
+"""The text the `constant-array` fixer leaves of `text`."""
+function filled(text::AbstractString)::String
     tree = write_tree(mktempdir(), ["source.jl" => text])
-    Corset.apply_plan!(Corset.constant_array_plan(Repository(tree), (".",), unsafe), "constant-array")
+    Corset.apply_plan!(Corset.constant_array_plan(Repository(tree), (".",)), "constant-array")
     return read(joinpath(tree, "source.jl"), String)
 end
 
@@ -86,12 +86,11 @@ end
     @test filled("module M\n    using A: a\n    f(n) = sum(zeros(n))\nend\n") == "module M\n    using A: a\n    using FillArrays: Zeros\n    f(n) = sum(Zeros(n))\nend\n"
     @testset "the fixer never turns a written array into a Fill" begin
         written = "function f(n)\n    x = zeros(n)\n    x[1] = 1\n    return x\nend\n"
-        @test filled(written; unsafe = true) == written
+        @test filled(written) == written
         escaping = "f(n) = Foo(zeros(n))\n"
         @test filled(escaping) == escaping
-        @test filled(escaping; unsafe = true) == "using FillArrays: Zeros\n\nf(n) = Foo(Zeros(n))\n"
         aliased = "f(n) = sum(fill([], n))\n"
-        @test filled(aliased; unsafe = true) == aliased
+        @test filled(aliased) == aliased
     end
     @testset "a call a `# lint: constant-array` comment opts out stays, with no import" begin
         kept = "f(n) = sum(zeros(n)) # lint: constant-array  summed once\n"
@@ -107,9 +106,9 @@ end
 end
 
 """The text of the `constant-array` fixer on the files `files` (name => text) of one tree, as name => text."""
-function filled_tree(files::AbstractVector{<:Pair{String, String}}; unsafe::Bool = false)::Vector{Pair{String, String}}
+function filled_tree(files::AbstractVector{<:Pair{String, String}})::Vector{Pair{String, String}}
     tree = write_tree(mktempdir(), files)
-    Corset.apply_plan!(Corset.constant_array_plan(Repository(tree), (".",), unsafe), "constant-array")
+    Corset.apply_plan!(Corset.constant_array_plan(Repository(tree), (".",)), "constant-array")
     return [name => read(joinpath(tree, name), String) for (name, _) in files]
 end
 
@@ -131,6 +130,9 @@ end
     end
     @testset "a reader returns a scalar only without a count or a keyword" begin
         @test usages(inside("y = first(x) + last(x) + sum(x) + maximum(abs, x)")) == ["zeros" => :safe]
+        @test usages(inside("println(x)")) == ["zeros" => :safe]
+        @test usages(inside("y = mean(x) + (x isa AbstractVector)")) == ["zeros" => :safe]
+        @test usages(inside("y = mean(x; dims = 1)")) == ["zeros" => :escape]
         for array_reader in ("first(x, 2)", "last(x, 2)", "sum(x; dims = 1)", "sum(x, dims = 1)", "maximum(x; dims = 1)", "extrema(x; dims = 2)")
             @test usages(inside("y = $array_reader")) == ["zeros" => :escape]
         end
@@ -204,7 +206,18 @@ end
     @test length(Corset.constant_array_sites(sources_of(["a.jl" => local_name]))) == 1
     @test isempty(Corset.constant_array_sites(sources_of(["a.jl" => local_name, "b.jl" => "mark(job) = (job.fresh[1] = true)\n"])))
     kept = "make(n) = (; sizes = zeros(Int, n))\n"
-    @test Dict(filled_tree(["a.jl" => kept, "b.jl" => "g(m) = (m.sizes[1] = 2)\n"]; unsafe = true))["a.jl"] == kept
+    @test Dict(filled_tree(["a.jl" => kept, "b.jl" => "g(m) = (m.sizes[1] = 2)\n"]))["a.jl"] == kept
+end
+
+@testset "constant-array: an array passed to any call is reported and never rewritten" begin
+    for passed in (
+            "write!(x)", "g(; image = x)", "g(x; precision_slope = x)", "scribble(x)", "row_buffer(x)", "Foo(x)", "g.(x)",
+            "setindex_all(x, 1)", "g(first(x, 2))",
+        )
+        text = "function f(n)\n    x = zeros(n)\n    $passed\n    return nothing\nend\n"
+        @test filled(text) == text
+        @test all(!=(:safe), last.(usages(text)))
+    end
 end
 
 @testset "constant-array: a broadcast operator is no field access" begin
@@ -217,7 +230,7 @@ end
     field_target = "make(n) = begin\n    s = Holder()\n    s.buf = zeros(n)\n    return s\nend\n"
     @test length(Corset.constant_array_sites(sources_of(["a.jl" => field_target]))) == 1
     @test isempty(Corset.constant_array_sites(sources_of(["a.jl" => field_target, "b.jl" => "g(s) = (s.buf[1] = 2)\n"])))
-    @test Dict(filled_tree(["a.jl" => field_target, "b.jl" => "g(s) = (s.buf[1] = 2)\n"]; unsafe = true))["a.jl"] == field_target
+    @test Dict(filled_tree(["a.jl" => field_target, "b.jl" => "g(s) = (s.buf[1] = 2)\n"]))["a.jl"] == field_target
     local_out = "make(n) = begin\n    out = zeros(n)\n    return Holder(out)\nend\n"
     @test length(Corset.constant_array_sites(sources_of(["a.jl" => local_out, "b.jl" => "g(out) = (out[1] = 2)\n"]))) == 1
     @test isempty(Corset.constant_array_sites(sources_of(["a.jl" => local_out, "b.jl" => "g(job) = (job.out[1] = 2)\n"])))
@@ -235,7 +248,7 @@ end
 @testset "constant-array: a Project.toml the fixer cannot extend fails loud, before any file changes" begin
     project = "name = \"D\"\nnote = \"\"\"\n[deps]\n\"\"\"\n"
     tree = write_tree(mktempdir(), ["Project.toml" => project, "src/demo.jl" => "f(n) = sum(zeros(n))\n"])
-    plan = Corset.constant_array_plan(Repository(tree), (".",), false)
+    plan = Corset.constant_array_plan(Repository(tree), (".",))
     @test_throws ArgumentError Corset.apply_plan!(plan, "constant-array")
     @test read(joinpath(tree, "src/demo.jl"), String) == "f(n) = sum(zeros(n))\n"
 end

@@ -8,7 +8,7 @@ const FILL_CONSTRUCTORS = (zeros = "Zeros", ones = "Ones", fill = "Fill", trues 
 # Base functions that only read their array arguments and return no array that aliases them.
 const PURE_READERS = (
     "length", "size", "axes", "eachindex", "firstindex", "lastindex", "ndims", "sum", "prod", "maximum", "minimum",
-    "extrema", "any", "all", "count", "first", "last", "isempty", "eltype", "dot", "norm", "iszero", "enumerate",
+    "extrema", "any", "all", "count", "first", "last", "isempty", "eltype", "dot", "norm", "iszero", "enumerate", "println", "mean", "isa",
 )
 
 # `first` and `last` with a count return an array.
@@ -364,7 +364,7 @@ end
 function constant_array_site(source::Source, call::ConstantArrayCall)::Site
     first_line = first(SYNTAX.source_location(call.node))
     last_line = first(SYNTAX.source_location(call.node.source, last(SYNTAX.byte_range(call.node))))
-    advice = call.usage === :safe ? "never written" : "may be written elsewhere (fix with --unsafe-fixes)"
+    advice = call.usage === :safe ? "never written" : "may be written elsewhere (check by hand: Corset rewrites no array that leaves its function)"
     return Site(source.name, source.path, first_line, last_line, "`$(call.name)` builds an array FillArrays stores as one value; $advice, so use `$(FILL_CONSTRUCTORS[Symbol(call.name)])`")
 end
 
@@ -398,11 +398,11 @@ struct FillRewrite
     constructor::String
 end
 
-"""The repairs of the Julia file `source`: one per constant-array call, the `:escape` ones too when `unsafe`."""
-function constant_array_repairs(source::Source, unsafe::Bool, written::WrittenNames)::Vector{Repair{FillRewrite}}
+"""The repairs of the Julia file `source`: one per constant-array call whose array no code writes or passes on."""
+function constant_array_repairs(source::Source, written::WrittenNames)::Vector{Repair{FillRewrite}}
     repairs = Repair{FillRewrite}[]
     for call in constant_array_calls(source.tree, written)
-        if call.usage === :safe || unsafe
+        if call.usage === :safe
             push!(repairs, Repair(constant_array_site(source, call), FillRewrite(source.path, SYNTAX.byte_range(first(node_children(call.node))), FILL_CONSTRUCTORS[Symbol(call.name)])))
         end
     end
@@ -526,19 +526,19 @@ function filled_texts(edits::AbstractVector{FillRewrite})::Vector{Pair{String, S
 end
 
 """
-    constant_array_plan(repository, directories, unsafe)
+    constant_array_plan(repository, directories)
 
 The `FixPlan` that writes `zeros`, `ones`, `fill`, `trues` and `falses` calls of `directories` as `Zeros`, `Ones`,
 `Fill`, `Trues` and `Falses`, imports those names from FillArrays into each module and lists FillArrays in the
-Project.toml `[deps]`. A call is repaired only when no code writes the array; with `unsafe`, an array that leaves
-its function is repaired too, unless a name it is bound to is written elsewhere.
+Project.toml `[deps]`. A call is repaired only when no code writes the array and it never leaves its function: an array passed to
+a call (as an argument or keyword), returned or stored may be written by the callee, so the rule only reports it.
 """
-function constant_array_plan(repository::Repository, directories::Tuple{Vararg{String}}, unsafe::Bool)::FixPlan{FillRewrite, typeof(filled_texts)}
+function constant_array_plan(repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{FillRewrite, typeof(filled_texts)}
     sources = directory_sources(repository, directories)
     written = written_in(sources)
     repairs = Repair{FillRewrite}[]
     for source in sources
-        append!(repairs, constant_array_repairs(source, unsafe, written))
+        append!(repairs, constant_array_repairs(source, written))
     end
     return FixPlan(repairs, filled_texts)
 end

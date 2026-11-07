@@ -263,8 +263,8 @@ forbidden_pattern_sites(context.repository, source)
 @rule FileRule "where-return" :default "short-form definitions whose where binds the return annotation" (context, source) ->
 where_return_sites(source)
 
-@rule FileRule "constant-array" :pedantic "zeros, ones, fill, trues and falses of an array no code writes, which FillArrays stores as one value" (context, source) ->
-constant_array_sites(source)
+@rule TreeRule "constant-array" :pedantic "zeros, ones, fill, trues and falses of an array no code writes, which FillArrays stores as one value" context ->
+constant_array_sites(context.sources)
 
 @rule FileRule "broad-catch" :default "catch blocks that handle every exception alike, rethrowing none" (context, source) ->
 broad_catches(source)

@@ -3,7 +3,8 @@
 """The `usage` of every constant-array call in `text`, by callee name, in source order."""
 function usages(text::AbstractString)::Vector{Pair{String, Symbol}}
     tree = write_tree(mktempdir(), ["source.jl" => text])
-    return [call.name => call.usage for call in Corset.constant_array_calls(parsed(joinpath(tree, "source.jl")).tree)]
+    tree_node = parsed(joinpath(tree, "source.jl")).tree
+    return [call.name => call.usage for call in Corset.constant_array_calls(tree_node, Set(Corset.written_names(tree_node)))]
 end
 
 """The text the `constant-array` fixer leaves of `text`; `unsafe` also repairs arrays that leave their function."""
@@ -16,7 +17,7 @@ end
 @testset "constant-array: an array no code writes is a violation, a written one is silent" begin
     @test usages("f(n) = sum(zeros(n))\n") == ["zeros" => :safe]
     @test usages("f(n) = length(Base.ones(Float32, n))\n") == ["ones" => :safe]
-    @test usages("function f(n)\n    x = zeros(n)\n    return sum(x) + x[1] + x[n - 1]\nend\n") == ["zeros" => :safe]
+    @test usages("function f(n)\n    x = zeros(n)\n    return sum(x) + x[1] + x[end - 1]\nend\n") == ["zeros" => :safe]
     @test usages("function f(n)\n    x = zeros(n)\n    for v in x\n        g(v)\n    end\nend\n") == ["zeros" => :safe]
     @testset "a written array has no FillArrays form" begin
         for written in (
@@ -103,4 +104,105 @@ end
     end
     @test Corset.level(Corset.load_config(mktempdir()), Corset.ConstantArrayRule()) === :allow
     @test Corset.fixable(Corset.ConstantArrayRule())
+end
+
+"""The text of the `constant-array` fixer on the files `files` (name => text) of one tree, as name => text."""
+function filled_tree(files::AbstractVector{<:Pair{String, String}}; unsafe::Bool = false)::Vector{Pair{String, String}}
+    tree = write_tree(mktempdir(), files)
+    Corset.apply_plan!(Corset.constant_array_plan(Repository(tree), (".",), unsafe), "constant-array")
+    return [name => read(joinpath(tree, name), String) for (name, _) in files]
+end
+
+@testset "constant-array: reads that alias or slice an array are no safe reads" begin
+    function inside(statement::String)::String
+        return "function f(n, idx)\n    x = zeros(n)\n    $statement\n    return nothing\nend\n"
+    end
+    @testset "a destructuring assignment writes" begin
+        @test usages(inside("x[1], x[2] = 1, 2")) == []
+        @test usages(inside("x[1], x[2] = x[2], x[1]")) == []
+        @test usages(inside("(x[1], y) = (1, 2)")) == []
+        @test usages(inside("y, z = x, 1")) == ["zeros" => :escape]
+    end
+    @testset "a name or a range as an index may slice" begin
+        for index in ("idx", "i", "idx + 1", "1:2", "[1]")
+            @test usages(inside("y = x[$index]")) == ["zeros" => :escape]
+        end
+        @test usages(inside("y = x[2] + x[end] + x[end - 1]")) == ["zeros" => :safe]
+    end
+    @testset "a reader returns a scalar only without a count or a keyword" begin
+        @test usages(inside("y = first(x) + last(x) + sum(x) + maximum(abs, x)")) == ["zeros" => :safe]
+        for array_reader in ("first(x, 2)", "last(x, 2)", "sum(x; dims = 1)", "sum(x, dims = 1)", "maximum(x; dims = 1)", "extrema(x; dims = 2)")
+            @test usages(inside("y = $array_reader")) == ["zeros" => :escape]
+        end
+    end
+    @testset "the broadcast macro writes through every assignment" begin
+        @test usages(inside("@. x += 1")) == []
+        @test usages(inside("@. x = 1")) == []
+        @test usages(inside("@. y = x + 1")) == ["zeros" => :escape]
+    end
+end
+
+@testset "constant-array: a call whose value may be the function's result escapes" begin
+    @test usages("function f(c)\n    if c\n        x = zeros(3)\n    end\nend\n") == ["zeros" => :escape]
+    @test usages("function f(c)\n    try\n        x = zeros(3)\n    catch\n    end\nend\n") == ["zeros" => :escape]
+    @test usages("function f(c)\n    begin\n        x = zeros(3)\n    end\nend\n") == ["zeros" => :escape]
+    @test usages("function f(c)\n    for i in 1:c\n        x = zeros(3)\n    end\n    return 1\nend\n") == ["zeros" => :safe]
+    @test usages("function f(c)\n    x = zeros(3)\n    return sum(x)\nend\n") == ["zeros" => :safe]
+end
+
+@testset "constant-array: zero, one and oneunit give a number only from a type" begin
+    @test usages("f(n, v) = sum(fill(zero(v), n))\n") == ["fill" => :escape]
+    @test usages("f(n, v) = sum(fill(one(v), n))\n") == ["fill" => :escape]
+    @test usages("f(n, v) = sum(fill(oneunit(v), n))\n") == ["fill" => :escape]
+    @test usages("f(n) = sum(fill(zero(Float32), n))\n") == ["fill" => :safe]
+    @test usages("f(n) = sum(fill(zero(T), n))\n") == ["fill" => :safe]
+    @test usages("f(n, v) = sum(fill(zero(eltype(v)), n))\n") == ["fill" => :safe]
+    @test usages("f(n, v) = sum(fill(one(typeof(v)), n))\n") == ["fill" => :safe]
+    @test usages("f(n) = sum(fill(zero(Vector{Int}), n))\n") == ["fill" => :safe]
+end
+
+@testset "constant-array: the fixer imports FillArrays into the module of each call" begin
+    @test filled("module Foo\nf(n) = sum(zeros(n))\nend\n") == "module Foo\nusing FillArrays: Zeros\nf(n) = sum(Zeros(n))\nend\n"
+    @test filled("module A\nusing X: x\nf(n) = sum(zeros(n))\nend\nmodule B\nusing Y: y\nend\n") ==
+        "module A\nusing X: x\nusing FillArrays: Zeros\nf(n) = sum(Zeros(n))\nend\nmodule B\nusing Y: y\nend\n"
+    two = "module A\nf(n) = sum(zeros(n))\nend\nmodule B\ng(n) = sum(ones(n))\nend\n"
+    @test filled(two) == "module A\nusing FillArrays: Zeros\nf(n) = sum(Zeros(n))\nend\nmodule B\nusing FillArrays: Ones\ng(n) = sum(Ones(n))\nend\n"
+    @test filled("using FillArrays: Zeros\nmodule A\nf(n) = sum(zeros(n))\nend\n") ==
+        "using FillArrays: Zeros\nmodule A\nusing FillArrays: Zeros\nf(n) = sum(Zeros(n))\nend\n"
+    @test filled("module A\n    module B\n        f(n) = sum(zeros(n))\n    end\nend\n") ==
+        "module A\n    module B\n        using FillArrays: Zeros\n        f(n) = sum(Zeros(n))\n    end\nend\n"
+end
+
+@testset "constant-array: the fixer lists FillArrays in the Project.toml above the file" begin
+    project = "name = \"Demo\"\n\n[deps]\nA = \"11111111-1111-1111-1111-111111111111\"\n"
+    source = "f(n) = sum(zeros(n))\n"
+    listed = "using FillArrays: Zeros\n\nf(n) = sum(Zeros(n))\n"
+    tree = Dict(filled_tree(["Project.toml" => project, "src/demo.jl" => source]))
+    @test tree["Project.toml"] == "name = \"Demo\"\n\n[deps]\nFillArrays = \"5789e2e9-d7fb-4bc7-8068-2c6fae9b9549\"\nA = \"11111111-1111-1111-1111-111111111111\"\n"
+    @test tree["src/demo.jl"] == listed
+    bare = Dict(filled_tree(["Project.toml" => "name = \"Demo\"\n", "src/demo.jl" => source]))
+    @test bare["Project.toml"] == "name = \"Demo\"\n\n[deps]\nFillArrays = \"5789e2e9-d7fb-4bc7-8068-2c6fae9b9549\"\n"
+    present = "name = \"Demo\"\n\n[deps]\nFillArrays = \"5789e2e9-d7fb-4bc7-8068-2c6fae9b9549\"\n"
+    @test Dict(filled_tree(["Project.toml" => present, "src/demo.jl" => source]))["Project.toml"] == present
+    @test Dict(filled_tree(["Project.toml" => "name = \"Demo\"", "src/demo.jl" => source]))["Project.toml"] ==
+        "name = \"Demo\"\n\n[deps]\nFillArrays = \"5789e2e9-d7fb-4bc7-8068-2c6fae9b9549\"\n"
+end
+
+@testset "constant-array: an array stored under a name some code writes through is written" begin
+    sources_of(files) = Corset.directory_sources(Repository(write_tree(mktempdir(), files)), (".",))
+    builder = "m(n) = (; sizes = zeros(Int, n), flags = fill(false, n))\n"
+    @test length(Corset.constant_array_sites(sources_of(["a.jl" => builder]))) == 2
+    field_write = Corset.constant_array_sites(sources_of(["a.jl" => builder, "b.jl" => "g(m) = (m.sizes[1] = 2)\n"]))
+    @test length(field_write) == 1
+    @test occursin("`fill`", only(field_write).detail)
+    argument_write = Corset.constant_array_sites(sources_of(["a.jl" => builder, "b.jl" => "g(flags) = fill!(flags, true)\n"]))
+    @test occursin("`zeros`", only(argument_write).detail)
+    keyword = "make(n) = Holder(buffer = zeros(n))\n"
+    @test length(Corset.constant_array_sites(sources_of(["a.jl" => keyword]))) == 1
+    @test isempty(Corset.constant_array_sites(sources_of(["a.jl" => keyword, "b.jl" => "g(h) = (h.buffer .= 0)\n"])))
+    local_name = "make(n) = begin\n    fresh = fill(false, n)\n    return Holder(fresh)\nend\n"
+    @test length(Corset.constant_array_sites(sources_of(["a.jl" => local_name]))) == 1
+    @test isempty(Corset.constant_array_sites(sources_of(["a.jl" => local_name, "b.jl" => "mark(job) = (job.fresh[1] = true)\n"])))
+    kept = "make(n) = (; sizes = zeros(Int, n))\n"
+    @test Dict(filled_tree(["a.jl" => kept, "b.jl" => "g(m) = (m.sizes[1] = 2)\n"]; unsafe = true))["a.jl"] == kept
 end

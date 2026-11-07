@@ -43,6 +43,11 @@ summed(count_::Int)::Float32 = sum(zeros(Float32, count_))
 written(count_::Int)::Vector{Float32} = (buffer = zeros(Float32, count_); buffer[1] = 1; buffer)
 '''
 
+[nan-initializer]
+source = '''
+filled(count_::Int)::Vector{Float32} = (buffer = zeros(Float32, count_); buffer .= 1; buffer)
+'''
+
 [concrete-arg]
 source = '''
 first_of(values::Vector{Int})::Int = first(values)

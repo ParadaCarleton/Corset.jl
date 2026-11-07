@@ -17,7 +17,7 @@ A `pedantic` rule enforces house style that Rust allows, or is a noisy heuristic
 | Group | Rules |
 | --- | --- |
 | `default` | `abstract-field`, `abstract-local`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anonymous-function`, `jet`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anonymous-function`, `quadratic-vcat`, `recursion-limit`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anonymous-function`, `where-return`, `widened-return` |
-| `pedantic` | `c-type`, `concrete-return`, `file-length`, `float64`, `jscpd`, `nothing-return`, `one-letter`, `quadratic-scan`, `range-guard`, `ref`, `repeated-prefix`, `struct-constant`, `wide-struct` |
+| `pedantic` | `c-type`, `concrete-return`, `constant-array`, `file-length`, `float64`, `jscpd`, `nothing-return`, `one-letter`, `quadratic-scan`, `range-guard`, `ref`, `repeated-prefix`, `struct-constant`, `wide-struct` |
 
 `corset rules` prints each rule's group and level. `[preferences.Corset.levels]` and the `--allow`,
 `--warn` and `--deny` flags set the level of one rule.
@@ -211,6 +211,7 @@ Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 | `file-length` | `long_file_sites(repo, source)` | source files longer than `Repository.file_line_limit` lines (default 1500) | split the file by topic |
 | `broad-catch` | `broad_catches(source)` | `catch` blocks that neither call `rethrow()` nor `throw` what they caught, so a missing file and an internal `error()` end alike; placed from the `try` line to the block's first line | test the exception with `isa`, handle the expected types and `rethrow()` the rest |
 | `quadratic-scan` | `quadratic_scans(source)` | a `for` loop, comprehension, generator, anonymous function passed to `map`, `count` and the like, or broadcast over a collection `xs` (a variable or field, also through `enumerate`, `zip` and `eachindex`) that calls `filter`, `findall`, `findfirst`, `findlast`, `count`, `any`, `all` or `in` on the same `xs` per element; `in.(xs, (xs,))` too | group `xs` once: a `Dict` from key to entries, or `sort` and `searchsorted` |
+| `constant-array` | `constant_array_sites(source)` | `zeros`, `ones`, `fill`, `trues` and `falses` of an array no code writes (a written buffer, a StaticArrays type and a `fill` of a mutable value are exempt) | `Zeros`, `Ones`, `Fill`, `Trues`, `Falses` from FillArrays.jl; `--unsafe-fixes` also rewrites arrays that leave their function |
 | `quadratic-vcat` | `quadratic_concatenations(source)` | a fold whose operator is `vcat`, `hcat`, `cat` or `hvcat` that runs one piece at a time: `reduce` with `init` (Base's one-allocation `reduce(vcat, ::AbstractVector{<:AbstractVector})` then does not apply) or over a generator, and every `foldl`, `foldr`, `mapreduce`, `mapfoldl` and `mapfoldr`, `do` form included. Each step copies the accumulator, so the fold is quadratic in the total length | `collect(T, Iterators.flatten(pieces))`, a flattening comprehension `T[x for piece in pieces for x in piece]`, or `reduce(vcat, pieces)` on a nonempty vector |
 | `non-atomic-write` | `non_atomic_writes(source)` | `write.(paths, texts)`, `foreach(write, paths, texts)`, and loops, comprehensions and mapped anonymous functions whose body calls `write(path, …)` or `open(path, "w")` (also `"a"`, `"w+"`, `"a+"`, `"r+"`, `write = true`, `append = true`, `truncate = true`) on a path built from the iteration variable; a crash halfway leaves some files rewritten. A function that calls `mv` or `rename` stages its writes and passes | compute every text, write each to a temporary file beside its target, then rename them all (`Corset.write_all!`) |
 | `forbidden-pattern` | `forbidden_pattern_sites(repo, source)` | lines that match a `Repository.forbidden_patterns` entry (`name`, `pattern`, `message`, optional `unless`, `skip_files`) | what the entry's `message` says |
@@ -230,6 +231,25 @@ A name counts as used only in the innermost `module` block that uses it, since a
 own imports; so no import moves into a file that holds only `module` blocks. A file included inside a
 `module` block belongs to that block's module: it takes only the block's imports. A name that a relative import
 (`using ..Parent: f`, `import .Sub.g`) takes from another module of the package keeps its imports.
+
+### `constant-array`: `constant_array_sites(file)`
+
+Calls of `zeros`, `ones`, `fill`, `trues` and `falses` (also `Base.zeros` and the like) that build an
+array no code writes. [FillArrays.jl](https://github.com/JuliaArrays/FillArrays.jl) stores such an array as
+one value: `Zeros`, `Ones`, `Fill`, `Trues` and `Falses`.
+
+A FillArrays array is immutable, so a written buffer has no such form and the rule stays silent on it.
+An array counts as written when its variable is assigned through (`x[i] = …`, `x .= …`, `@. x = …`), passed
+to a function whose name ends in `!`, or declared with a type (`x::Vector{Float32} = zeros(…)`). `fill` of
+an array, dictionary or comprehension aliases it, so the rule leaves that alone too.
+
+An array that leaves its function (returned, stored in a struct, bound at the top level, passed to a
+function without `!`, viewed or sliced) may be written elsewhere. The rule reports it, and only
+`--unsafe-fixes` rewrites it. The fixer rewrites the rest, adds `using FillArrays: Zeros, …` after the last
+import of the file (or at its top), and needs `FillArrays` in the package's `[deps]`.
+
+An index that is a name counts as a scalar, so `x[i]` reads an element; `x[idx]` with a vector `idx`
+returns a `Fill` slice.
 
 ### `where-return`: `where_return_sites(file)`
 

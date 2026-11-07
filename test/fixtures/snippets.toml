@@ -37,6 +37,12 @@ guess(callee::Function)::Type = Core.Compiler.return_type(callee, Tuple{})
 known(callee::Function)::Type = typeof(callee)
 '''
 
+[constant-array]
+source = '''
+summed(count_::Int)::Float32 = sum(zeros(Float32, count_))
+written(count_::Int)::Vector{Float32} = (buffer = zeros(Float32, count_); buffer[1] = 1; buffer)
+'''
+
 [concrete-arg]
 source = '''
 first_of(values::Vector{Int})::Int = first(values)

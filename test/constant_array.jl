@@ -130,8 +130,11 @@ end
     end
     @testset "a reader returns a scalar only without a count or a keyword" begin
         @test usages(inside("y = first(x) + last(x) + sum(x) + maximum(abs, x)")) == ["zeros" => :safe]
-        @test usages(inside("println(x)")) == ["zeros" => :safe]
-        @test usages(inside("y = mean(x) + (x isa AbstractVector)")) == ["zeros" => :safe]
+        @test usages(inside("y = mean(x)")) == ["zeros" => :safe]
+        # `Zeros(n) isa Vector` is false and printing shows `Zeros(2)`: these see the array's type.
+        for typed in ("y = x isa Vector", "println(x)", "print(x)", "show(x)", "y = string(x)", "y = typeof(x)")
+            @test usages(inside(typed)) == ["zeros" => :escape]
+        end
         @test usages(inside("y = mean(x; dims = 1)")) == ["zeros" => :escape]
         for array_reader in ("first(x, 2)", "last(x, 2)", "sum(x; dims = 1)", "sum(x, dims = 1)", "maximum(x; dims = 1)", "extrema(x; dims = 2)")
             @test usages(inside("y = $array_reader")) == ["zeros" => :escape]

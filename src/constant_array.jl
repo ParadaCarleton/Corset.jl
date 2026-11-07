@@ -8,7 +8,7 @@ const FILL_CONSTRUCTORS = (zeros = "Zeros", ones = "Ones", fill = "Fill", trues 
 # Base functions that only read their array arguments and return no array that aliases them.
 const PURE_READERS = (
     "length", "size", "axes", "eachindex", "firstindex", "lastindex", "ndims", "sum", "prod", "maximum", "minimum",
-    "extrema", "any", "all", "count", "first", "last", "isempty", "eltype", "dot", "norm", "iszero", "enumerate", "println", "mean", "isa",
+    "extrema", "any", "all", "count", "first", "last", "isempty", "eltype", "dot", "norm", "iszero", "enumerate", "mean",
 )
 
 # `first` and `last` with a count return an array.

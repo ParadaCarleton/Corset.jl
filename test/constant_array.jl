@@ -39,12 +39,17 @@ end
         @test usages("function f(n)\n    a = b = zeros(n)\n    return nothing\nend\n") == ["zeros" => :escape]
         @test usages("f(n) = [zeros(3) for _ in 1:n]\n") == ["zeros" => :escape]
     end
+    @testset "a rebinding of the name reads the array no more, a local declaration binds it" begin
+        @test usages("function f(n)\n    x = zeros(n)\n    total = sum(x)\n    x = 2\n    return total\nend\n") == ["zeros" => :safe]
+        @test usages("function f(n)\n    local x = zeros(n)\n    return sum(x)\nend\n") == ["zeros" => :safe]
+    end
     @testset "a write inside a closure counts, a field or keyword of the same name does not" begin
         @test usages("function f(n)\n    x = zeros(n)\n    foreach(i -> (x[i] = 1), 1:n)\n    return nothing\nend\n") == []
         @test usages("function f(n)\n    x = zeros(n)\n    return sum(x) + a.x[1] + g(x = 2)\nend\n") == ["zeros" => :safe]
     end
     @testset "a definition of the function is no call" begin
         @test usages("zeros(n::Foo) = 1\nfunction fill(a::Foo, n)\n    return 1\nend\n") == []
+        @test usages("ones(n::Foo)::Int = 1\nfunction trues(n::T)::Int where {T}\n    return 1\nend\n") == []
         @test usages("f(zeros) = zeros + 1\ng(x) = fill + x\n") == []
     end
     @testset "fill: only an immutable value is certainly safe, an aliasing one is silent" begin

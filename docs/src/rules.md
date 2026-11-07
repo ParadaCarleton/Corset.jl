@@ -17,7 +17,7 @@ A `pedantic` rule enforces house style that Rust allows, or is a noisy heuristic
 | Group | Rules |
 | --- | --- |
 | `default` | `abstract-field`, `abstract-local`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anonymous-function`, `jet`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anonymous-function`, `quadratic-vcat`, `recursion-limit`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anonymous-function`, `where-return`, `widened-return` |
-| `pedantic` | `c-type`, `concrete-return`, `constant-array`, `file-length`, `float64`, `jscpd`, `nothing-return`, `one-letter`, `quadratic-scan`, `range-guard`, `ref`, `repeated-prefix`, `struct-constant`, `wide-struct` |
+| `pedantic` | `c-type`, `concrete-return`, `constant-array`, `file-length`, `float64`, `jscpd`, `nan-initializer`, `nothing-return`, `one-letter`, `quadratic-scan`, `range-guard`, `ref`, `repeated-prefix`, `struct-constant`, `wide-struct` |
 
 `corset rules` prints each rule's group and level. `[preferences.Corset.levels]` and the `--allow`,
 `--warn` and `--deny` flags set the level of one rule.
@@ -212,6 +212,7 @@ Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 | `broad-catch` | `broad_catches(source)` | `catch` blocks that neither call `rethrow()` nor `throw` what they caught, so a missing file and an internal `error()` end alike; placed from the `try` line to the block's first line | test the exception with `isa`, handle the expected types and `rethrow()` the rest |
 | `quadratic-scan` | `quadratic_scans(source)` | a `for` loop, comprehension, generator, anonymous function passed to `map`, `count` and the like, or broadcast over a collection `xs` (a variable or field, also through `enumerate`, `zip` and `eachindex`) that calls `filter`, `findall`, `findfirst`, `findlast`, `count`, `any`, `all` or `in` on the same `xs` per element; `in.(xs, (xs,))` too | group `xs` once: a `Dict` from key to entries, or `sort` and `searchsorted` |
 | `constant-array` | `constant_array_sites(sources)` | `zeros`, `ones`, `fill`, `trues` and `falses` of an array no code writes (a written buffer, a StaticArrays type and a `fill` of a mutable value are exempt) | `Zeros`, `Ones`, `Fill`, `Trues`, `Falses` from FillArrays.jl; `--unsafe-fixes` also rewrites arrays that leave their function |
+| `nan-initializer` | `nan_initializer_sites(sources)` | `zeros`, `ones` and `fill` of an array that is then written (an array only accumulated into, `x[i] += …`, is exempt) | `fill(T(NaN), dims…)` when every element is provably written before any read; other written arrays are reported only |
 | `quadratic-vcat` | `quadratic_concatenations(source)` | a fold whose operator is `vcat`, `hcat`, `cat` or `hvcat` that runs one piece at a time: `reduce` with `init` (Base's one-allocation `reduce(vcat, ::AbstractVector{<:AbstractVector})` then does not apply) or over a generator, and every `foldl`, `foldr`, `mapreduce`, `mapfoldl` and `mapfoldr`, `do` form included. Each step copies the accumulator, so the fold is quadratic in the total length | `collect(T, Iterators.flatten(pieces))`, a flattening comprehension `T[x for piece in pieces for x in piece]`, or `reduce(vcat, pieces)` on a nonempty vector |
 | `non-atomic-write` | `non_atomic_writes(source)` | `write.(paths, texts)`, `foreach(write, paths, texts)`, and loops, comprehensions and mapped anonymous functions whose body calls `write(path, …)` or `open(path, "w")` (also `"a"`, `"w+"`, `"a+"`, `"r+"`, `write = true`, `append = true`, `truncate = true`) on a path built from the iteration variable; a crash halfway leaves some files rewritten. A function that calls `mv` or `rename` stages its writes and passes | compute every text, write each to a temporary file beside its target, then rename them all (`Corset.write_all!`) |
 | `forbidden-pattern` | `forbidden_pattern_sites(repo, source)` | lines that match a `Repository.forbidden_patterns` entry (`name`, `pattern`, `message`, optional `unless`, `skip_files`) | what the entry's `message` says |
@@ -253,6 +254,21 @@ the top of its body), and lists `FillArrays` in the `[deps]` of the nearest Proj
 An index counts as a scalar only when it is an integer literal, `end` or a sum of them: `x[i]` may be a
 vector slice, which is a `Fill` that a later write cannot change. `first(x, n)`, `last(x, n)` and any
 reader called with a keyword (`sum(x; dims = 1)`) return arrays, and `zero(x)` of an array is an array.
+
+### `nan-initializer`: `nan_initializer_sites(sources)`
+
+A `zeros`, `ones` or `fill` array that is then written holds a made-up start value, so an element no write
+reached passes for data. NaN shows it. The fixer rewrites `zeros(T, dims…)` and `ones(T, dims…)` as
+`fill(T(NaN), dims…)` (`fill(NaN, dims…)` for the default Float64) and `fill(v, dims…)` with a literal or
+`zero(T)`/`one(T)` value likewise, but only when it proves that every element is written before any read: the
+first statement after the binding that mentions the array is either `x .= rhs`, or a `for` loop over every
+index (`eachindex(x)`, or `axes(x, d)` per dimension) whose first statement mentioning `x` is
+`x[i, …] = rhs`, with `rhs` free of `x` and no `break`, `continue` or `return` in the loop.
+
+The rule reports without fixing a written array it cannot prove such an initializer, since an unwritten element may be
+read as its start value, and every integer or Bool array, which has no NaN (pick a sentinel by hand).
+An array accumulated into (`x[i] += …`, `x .+= …`) reads its start value and is silent, as is an array no code writes
+(`constant-array` covers that).
 
 ### `where-return`: `where_return_sites(file)`
 

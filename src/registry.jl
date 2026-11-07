@@ -266,6 +266,9 @@ where_return_sites(source)
 @rule TreeRule "constant-array" :pedantic "zeros, ones, fill, trues and falses of an array no code writes, which FillArrays stores as one value" context ->
 constant_array_sites(context.sources)
 
+@rule TreeRule "nan-initializer" :pedantic "zeros, ones and fill of an array that is then written, which an untouched element should show as NaN" context ->
+nan_initializer_sites(context.sources)
+
 @rule FileRule "broad-catch" :default "catch blocks that handle every exception alike, rethrowing none" (context, source) ->
 broad_catches(source)
 
@@ -296,7 +299,10 @@ fix_plan(::WhereReturnRule, repository::Repository, directories::Tuple{Vararg{St
 fix_plan(::ConstantArrayRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{FillRewrite, typeof(filled_texts)} =
     constant_array_plan(repository, directories, false)
 
-fix_plan(::QuadraticVcatRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
+fix_plan(::NanInitializerRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
+    nan_initializer_plan(repository, directories)
+
+fix_plan(::QuadraticVcatRule,repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
     flatten_plan(repository, directories)
 
 fix_plan(::ConcreteArgRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =

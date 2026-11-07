@@ -442,7 +442,7 @@ function filled_file(edits::AbstractVector{FillRewrite}, path::String)::Pair{Str
     return path => rewritten(text, rewrites)
 end
 
-const FILL_ARRAYS_UUID = "5789e2e9-d7fb-4bc7-8068-2c6fae9b9549"
+const FILL_ARRAYS_UUID = "1a297f60-69ca-5386-bcde-b61e274b549b"
 
 """The Project.toml above the file `path`, as path => text, with FillArrays added to its `[deps]`; empty when it lists FillArrays already or no project exists."""
 function dependency_file(path::String)::Vector{Pair{String, String}}

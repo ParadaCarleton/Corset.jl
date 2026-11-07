@@ -178,14 +178,14 @@ end
     source = "f(n) = sum(zeros(n))\n"
     listed = "using FillArrays: Zeros\n\nf(n) = sum(Zeros(n))\n"
     tree = Dict(filled_tree(["Project.toml" => project, "src/demo.jl" => source]))
-    @test tree["Project.toml"] == "name = \"Demo\"\n\n[deps]\nFillArrays = \"5789e2e9-d7fb-4bc7-8068-2c6fae9b9549\"\nA = \"11111111-1111-1111-1111-111111111111\"\n"
+    @test tree["Project.toml"] == "name = \"Demo\"\n\n[deps]\nFillArrays = \"1a297f60-69ca-5386-bcde-b61e274b549b\"\nA = \"11111111-1111-1111-1111-111111111111\"\n"
     @test tree["src/demo.jl"] == listed
     bare = Dict(filled_tree(["Project.toml" => "name = \"Demo\"\n", "src/demo.jl" => source]))
-    @test bare["Project.toml"] == "name = \"Demo\"\n\n[deps]\nFillArrays = \"5789e2e9-d7fb-4bc7-8068-2c6fae9b9549\"\n"
-    present = "name = \"Demo\"\n\n[deps]\nFillArrays = \"5789e2e9-d7fb-4bc7-8068-2c6fae9b9549\"\n"
+    @test bare["Project.toml"] == "name = \"Demo\"\n\n[deps]\nFillArrays = \"1a297f60-69ca-5386-bcde-b61e274b549b\"\n"
+    present = "name = \"Demo\"\n\n[deps]\nFillArrays = \"1a297f60-69ca-5386-bcde-b61e274b549b\"\n"
     @test Dict(filled_tree(["Project.toml" => present, "src/demo.jl" => source]))["Project.toml"] == present
     @test Dict(filled_tree(["Project.toml" => "name = \"Demo\"", "src/demo.jl" => source]))["Project.toml"] ==
-        "name = \"Demo\"\n\n[deps]\nFillArrays = \"5789e2e9-d7fb-4bc7-8068-2c6fae9b9549\"\n"
+        "name = \"Demo\"\n\n[deps]\nFillArrays = \"1a297f60-69ca-5386-bcde-b61e274b549b\"\n"
 end
 
 @testset "constant-array: an array stored under a name some code writes through is written" begin

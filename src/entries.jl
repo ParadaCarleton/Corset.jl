@@ -114,7 +114,7 @@ test files define) is dropped.
 function trace_signatures(mod::Module, trace::AbstractString)::Vector{Type}
     scope = trace_scope(mod)
     package = Package(mod)
-    return unique(Vector{Type}(filter(Base.Fix1(defines, package), traced_type.((scope,), readlines(trace)))))
+    return unique(collect(Type, filter(Base.Fix1(defines, package), traced_type.((scope,), readlines(trace)))))
 end
 
 """A module that binds every loaded package by name, and `mod`, so a trace line's qualified type names resolve."""

@@ -1687,3 +1687,108 @@ end
     tree = write_tree(mktempdir(), ["source.jl" => fixed])
     @test isempty(Corset.concrete_arguments(Corset.Source(Repository(tree), joinpath(tree, "source.jl"))))
 end
+
+"""The text the typed fixers of `rule` leave of `text`, a module `T`, after loading it and inferring the calls `signatures` name."""
+function typed_fixed(rule::Corset.Rule, text::AbstractString, signatures::Function; unsafe::Bool = false)::Tuple{String, Module}
+    tree = write_tree(mktempdir(), ["src/T.jl" => text])
+    path = joinpath(tree, "src", "T.jl")
+    loaded = Module(:Loaded)
+    Base.include(loaded, path)
+    mod = loaded.T
+    frames = reduce(vcat, Corset.typed_frames.(signatures(mod)))
+    Corset.fix!(rule, Repository(tree), ("src",), mod, frames, unsafe)
+    return read(path, String), mod
+end
+
+@testset "annotation: the fixer writes what inference found" begin
+    source = """
+    module T
+    twice(x) = x + x
+    function norm2(v, w)
+        return sum(abs2, v) + w
+    end
+    pick(flag, a) = flag ? a : nothing
+    mk(n) = zeros(Float32, n)
+    generic(x::T, y) where {T} = x
+    unobserved(x) = x
+    ok(x::Int)::Int = x
+    macro keep(expression)
+        return esc(expression)
+    end
+    @keep wrapped(x) = x + x
+    end
+    """
+    signatures(mod) = Type[
+        Tuple{typeof(mod.wrapped), Int}, Tuple{typeof(mod.twice), Float32}, Tuple{typeof(mod.norm2), Vector{Float32}, Float32}, Tuple{typeof(mod.pick), Bool, Int},
+        Tuple{typeof(mod.mk), Int}, Tuple{typeof(mod.generic), Int, Int}, Tuple{typeof(mod.ok), Int},
+    ]
+    fixed, _ = typed_fixed(Corset.AnnotationRule(), source, signatures)
+    @test occursin("twice(x::Real)::typeof(x) = x + x", fixed)
+    @test occursin("function norm2(v::AbstractVector{<:Real}, w::Real)::typeof(w)", fixed)
+    @test occursin("pick(flag, a) = flag", fixed)
+    @test occursin("mk(n::Real)::AbstractVector{<:AbstractFloat} = zeros", fixed)
+    @test occursin("(generic(x::T, y::Real)::typeof(x)) where {T} = x", fixed)
+    @test occursin("unobserved(x) = x", fixed)
+    @test occursin("ok(x::Int)::Int = x", fixed)
+    @test occursin("@keep wrapped(x) = x + x", fixed)
+    again = Module(:Again)
+    Base.include(again, joinpath(mktempdir(), "T.jl") |> path -> (write(path, fixed); path))
+    @test again.T.twice(2.0f0) === 4.0f0
+    @test again.T.norm2(Float32[1, 2], 1.0f0) === 6.0f0
+    @test again.T.generic(1, 2) === 1
+end
+
+@testset "concrete-return: the fixer widens only a declaration that converts nothing" begin
+    source = """
+    module T
+    keep(x::Vector{Float32})::Vector{Float32} = x
+    view_of(x::Vector{Float32})::Vector{Float32} = view(x, 1:2)
+    zeros_of(n::Int)::Vector{Float32} = zeros(Float32, n)
+    end
+    """
+    signatures(mod) = Type[Tuple{typeof(mod.keep), Vector{Float32}}, Tuple{typeof(mod.view_of), Vector{Float32}}, Tuple{typeof(mod.zeros_of), Int}]
+    fixed, _ = typed_fixed(Corset.ConcreteReturnRule(), source, signatures)
+    @test occursin("keep(x::Vector{Float32})::typeof(x) = x", fixed)
+    @test occursin("view_of(x::Vector{Float32})::Vector{Float32} = view", fixed)
+    @test occursin("zeros_of(n::Int)::AbstractVector{<:AbstractFloat} = zeros", fixed)
+    unsafe_fixed, _ = typed_fixed(Corset.ConcreteReturnRule(), source, signatures; unsafe = true)
+    @test !occursin("view_of(x::Vector{Float32})::Vector{Float32}", unsafe_fixed)
+end
+
+@testset "annotation: unsafe mode writes Union results and partial annotations" begin
+    source = "module T\npick(flag, a) = flag ? a : nothing\nend\n"
+    signatures(mod) = Type[Tuple{typeof(mod.pick), Bool, Int}]
+    safe, _ = typed_fixed(Corset.AnnotationRule(), source, signatures)
+    @test occursin("pick(flag, a) = flag", safe)
+    unsafe_fixed, _ = typed_fixed(Corset.AnnotationRule(), source, signatures; unsafe = true)
+    @test occursin("pick(flag::Bool, a::Real)::Union{Nothing, Real}", unsafe_fixed) || occursin("Union", unsafe_fixed)
+end
+
+@testset "unsafe fixes: heuristic result annotations" begin
+    source = """
+    module T
+    add(x::Int, y::Float32) = x + y
+    half(x::Int, y::Int) = x / y
+    is_big(x::Int) = x > 3
+    log_it(x::Int) = for _ in 1:x end
+    fill_in!(v::Vector{Int}) = (push!(v, 1); v)
+    squares(n::Int)::Vector{Int} = [i^2 for i in 1:n]
+    wrong(x::Int) = x > 1 ? 1.5 : 2
+    end
+    """
+    signatures(mod) = Type[
+        Tuple{typeof(mod.add), Int, Float32}, Tuple{typeof(mod.half), Int, Int}, Tuple{typeof(mod.is_big), Int},
+        Tuple{typeof(mod.log_it), Int}, Tuple{typeof(mod.fill_in!), Vector{Int}}, Tuple{typeof(mod.squares), Int}, Tuple{typeof(mod.wrong), Int},
+    ]
+    safe, _ = typed_fixed(Corset.AnnotationRule(), source, signatures)
+    @test !occursin("promote_type", safe)
+    fixed, _ = typed_fixed(Corset.AnnotationRule(), source, signatures; unsafe = true)
+    @test occursin("::promote_type(typeof(x), typeof(y))", fixed)
+    @test occursin("::float(promote_type(typeof(x), typeof(y)))", fixed)
+    @test occursin("is_big(x::Int)::Bool", fixed) || occursin("is_big(x::Int)::Bool", replace(fixed, "x::Real" => "x::Int"))
+    @test occursin("::Nothing", fixed)
+    @test occursin("::typeof(v)", fixed)
+    @test !occursin("wrong(x::Int)::", fixed)
+    widened, _ = typed_fixed(Corset.ConcreteReturnRule(), source, signatures; unsafe = true)
+    @test occursin("::AbstractVector{Int}", widened)
+end

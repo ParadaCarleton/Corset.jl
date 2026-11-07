@@ -316,5 +316,8 @@ fix_plan(::AnnotationRule, repository::Repository, directories::Tuple{Vararg{Str
 fix_plan(::ConcreteReturnRule, repository::Repository, directories::Tuple{Vararg{String}}, mod::Module, frames::AbstractVector{Inferred}, unsafe::Bool)::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
     concrete_return_plan(repository, directories, mod, frames, unsafe)
 
+fix_plan(::AbstractFieldRule, repository::Repository, directories::Tuple{Vararg{String}}, ::Module, ::AbstractVector{Inferred}, unsafe::Bool)::FixPlan{ByteRewrite, typeof(concrete_texts)} =
+    abstract_field_plan(repository, directories, unsafe)
+
 """Every rule, ordered by name."""
 const RULES = Tuple(sort!([type() for kind in (ModuleRule, TreeRule, FileRule) for type in subtypes(kind)]; by = rule_name))

@@ -53,7 +53,7 @@ function applied_type(head::Any, parameters::AbstractVector)::Any # lint: widene
         if failure isa TypeError || failure isa ErrorException
             return Unresolved()
         end
-        rethrow()
+        rethrow() # COV_EXCL_LINE
     end
 end
 

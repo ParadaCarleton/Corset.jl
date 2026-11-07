@@ -569,14 +569,20 @@ end
         @test first(sites).detail == "`Union{Float32, Float64}` lists subtypes of `AbstractFloat`: take `AbstractFloat`, or add a method that takes the rest beside this one"
         @test occursin("take `AbstractString`", sites[2].detail)
         @test occursin("take `Union{Nothing, Real}`", sites[3].detail)
-        root = write_tree(mktempdir(), ["fast.jl" => "fast(value::Union{Float32, Float64})::Int = 1\nfast(value::Real)::Int = 2\nalone(value::Union{Float32, Float64})::Int = 1\n"])
+        fast = join(
+            [
+                "fast(value::Union{Float32, Float64})::Int = 1", "fast(value::Real)::Int = 2", "alone(value::Union{Float32, Float64})::Int = 1",
+                "struct FirstFailure <: Exception end", "struct SecondFailure <: Exception end",
+                "handled(failure::Union{FirstFailure, SecondFailure})::Int = 1",
+            ], "\n"
+        )
+        root = write_tree(mktempdir(), ["fast.jl" => fast])
         holder = Module(:FastPath)
         Base.include(holder, joinpath(root, "fast.jl"))
         @test site_keys(Corset.enumerated_unions(parsed(joinpath(root, "fast.jl")), holder)) == ["fast.jl alone"]
         @test Corset.resolved_type(:(Base.Float32), Base) === Float32
-        @test Corset.resolved_type(:(Base.missing_name), Base) isa Corset.Unresolved
-        @test Corset.resolved_type(:(Vector{1.5}), Base) isa Corset.Unresolved
-        @test Corset.resolved_type(:(f(x)), Base) isa Corset.Unresolved
+        @test Corset.resolved_type(QuoteNode(:name), Base) === :name
+        @test all(isa.(Corset.resolved_type.([:(Base.missing_name), :(Int{Float64}), :(Vector{Int, Int, Int}), :(f(x))], (Base,)), Corset.Unresolved))
     end
 
     @testset "invariant-parameter: an abstract type parameter without <:" begin

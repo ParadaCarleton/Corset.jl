@@ -297,7 +297,7 @@ fix_plan(::WhereReturnRule, repository::Repository, directories::Tuple{Vararg{St
     where_plan(repository, directories)
 
 fix_plan(::ConstantArrayRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{FillRewrite, typeof(filled_texts)} =
-    constant_array_plan(repository, directories, false)
+    constant_array_plan(repository, directories)
 
 fix_plan(::NanInitializerRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
     nan_initializer_plan(repository, directories)

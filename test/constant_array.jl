@@ -231,3 +231,11 @@ end
     @test Dict(filled_tree(["Project.toml" => listed, "src/demo.jl" => source]))["Project.toml"] == listed
     @test Dict(filled_tree(["a.jl" => "#!/usr/bin/env julia\nf(n) = sum(zeros(n))\n"]))["a.jl"] == "#!/usr/bin/env julia\nusing FillArrays: Zeros\n\nf(n) = sum(Zeros(n))\n"
 end
+
+@testset "constant-array: a Project.toml the fixer cannot extend fails loud, before any file changes" begin
+    project = "name = \"D\"\nnote = \"\"\"\n[deps]\n\"\"\"\n"
+    tree = write_tree(mktempdir(), ["Project.toml" => project, "src/demo.jl" => "f(n) = sum(zeros(n))\n"])
+    plan = Corset.constant_array_plan(Repository(tree), (".",), false)
+    @test_throws ArgumentError Corset.apply_plan!(plan, "constant-array")
+    @test read(joinpath(tree, "src/demo.jl"), String) == "f(n) = sum(zeros(n))\n"
+end

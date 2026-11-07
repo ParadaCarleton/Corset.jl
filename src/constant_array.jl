@@ -61,7 +61,7 @@ end
 function callee_name(callee::SYNTAX.SyntaxNode)::String
     if SYNTAX.kind(callee) === IDENTIFIER_KIND
         return SYNTAX.sourcetext(callee)
-    elseif SYNTAX.kind(callee) === SYNTAX.@K_str(".") && SYNTAX.kind(last(node_children(callee))) === IDENTIFIER_KIND
+    elseif SYNTAX.kind(callee) === SYNTAX.@K_str(".") && !isempty(node_children(callee)) && SYNTAX.kind(last(node_children(callee))) === IDENTIFIER_KIND
         return SYNTAX.sourcetext(last(node_children(callee)))
     end
     return ""

@@ -206,3 +206,8 @@ end
     kept = "make(n) = (; sizes = zeros(Int, n))\n"
     @test Dict(filled_tree(["a.jl" => kept, "b.jl" => "g(m) = (m.sizes[1] = 2)\n"]; unsafe = true))["a.jl"] == kept
 end
+
+@testset "constant-array: a broadcast operator is no field access" begin
+    @test usages("f(a, b) = a .+ b\ng(a, b) = (a .= b .* 2)\n") == []
+    @test Corset.written_names(parsed(joinpath(write_tree(mktempdir(), ["s.jl" => "g(a, b) = (a .= b .* 2)\n"]), "s.jl")).tree) == ["a"]
+end

@@ -168,7 +168,17 @@ place each site with `struct_site(T, struct_locations(Corset.Source.(files)))`.
 
 - `abstract_fields` finds fields declared with an abstract type, or with a concrete container of one:
   `Vector{Any}`, `Base.RefValue{Any}` and `Dict{Tuple, Any}` are concrete, but every read from them is
-  dynamically dispatched. Repair: make the field type a type parameter of the struct.
+  dynamically dispatched. Repair: make the field type a type parameter of the struct. `--unsafe-fixes` writes the struct as a
+  `@concrete struct` (ConcreteStructs.jl) and each field `x::T` of an abstract type `T` of Base or of the checked
+  files as `x <: T`, imports `@concrete` and lists ConcreteStructs in the `[deps]`. It leaves what the macro
+  cannot express or would break: a struct with a bare, `const` or defaulted field, a constructor or a macro;
+  a struct that any checked file mentions other than as `S(x)`, `::S` or `<: S` (`Vector{S}`, `S{A}`,
+  `typeof(x) === S`, `sizeof(S)`, `export S`); a field whose bound names a parameter no field has as its whole type; `Any`,
+  concrete containers and unresolved type names; and any field of a mutable struct written anywhere
+  (`obj.f = v`, `setfield!`, `setproperty!`): the parameter is fixed by the first value, so a later `Vector`
+  assigned to a field built from a `Fill` throws a `convert` error.
+  The fixer sees only the checked directories: a use elsewhere or in a downstream package can break or change
+  silently, and the constructors of the type change, hence the unsafe tier.
 - `repeated_prefix` finds field names that repeat a word the type should say once. Fields
   `continuation_step` and `continuation_theta` belong in a `ContinuationControls`.
 

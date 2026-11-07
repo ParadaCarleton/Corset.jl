@@ -409,13 +409,13 @@ function constant_array_repairs(source::Source, unsafe::Bool, written::WrittenNa
     return repairs
 end
 
-"""The names `statement`, a `using` or `import`, brings in from FillArrays: its imported names, or `["*"]` for a bare `using FillArrays`."""
-function fill_arrays_names(statement::SYNTAX.SyntaxNode)::Vector{String}
+"""The names `statement`, a `using` or `import`, brings in from `package`: its imported names, or `["*"]` for a bare `using package`."""
+function package_names(statement::SYNTAX.SyntaxNode, package::AbstractString)::Vector{String}
     names = String[]
     for part in node_children(statement)
-        if SYNTAX.kind(part) === SYNTAX.@K_str(":") && SYNTAX.sourcetext(first(node_children(first(node_children(part))))) == "FillArrays"
+        if SYNTAX.kind(part) === SYNTAX.@K_str(":") && SYNTAX.sourcetext(first(node_children(first(node_children(part))))) == package
             append!(names, SYNTAX.sourcetext.(last.(node_children.(node_children(part)[2:end]))))
-        elseif SYNTAX.kind(statement) === SYNTAX.@K_str("using") && SYNTAX.kind(part) === SYNTAX.@K_str("importpath") && is_identifier(first(node_children(part)), "FillArrays")
+        elseif SYNTAX.kind(statement) === SYNTAX.@K_str("using") && SYNTAX.kind(part) === SYNTAX.@K_str("importpath") && is_identifier(first(node_children(part)), package)
             push!(names, "*")
         end
     end
@@ -442,15 +442,15 @@ function import_scope(node::SYNTAX.SyntaxNode, offset::Int, scope::SYNTAX.Syntax
     return scope
 end
 
-"""The edit that imports the FillArrays `constructors` the import `scope` of a file `text` uses but does not import: after its last import, or at its start."""
-function import_edit(path::String, text::AbstractString, scope::SYNTAX.SyntaxNode, constructors::AbstractVector{String})::Vector{ByteRewrite}
+"""The edit that imports the `package` `constructors` the import `scope` of a file `text` uses but does not import: after its last import, or at its start."""
+function import_edit(path::String, text::AbstractString, scope::SYNTAX.SyntaxNode, constructors::AbstractVector{String}, package::AbstractString)::Vector{ByteRewrite}
     statements = import_statements(scope)
-    imported = collect(String, Iterators.flatten(fill_arrays_names.(statements)))
+    imported = collect(String, Iterators.flatten(package_names.(statements, (package,))))
     missing_names = sort!(setdiff(unique(constructors), imported))
     if "*" in imported || isempty(missing_names)
         return ByteRewrite[]
     end
-    line = "using FillArrays: " * join(missing_names, ", ")
+    line = "using $package: " * join(missing_names, ", ")
     if isempty(statements) && SYNTAX.kind(scope) === SYNTAX.@K_str("toplevel")
         # A shebang line must stay the first line of the file.
         start = startswith(text, "#!") ? something(findfirst('\n', text), ncodeunits(text)) + 1 : 1
@@ -484,20 +484,18 @@ function filled_file(edits::AbstractVector{FillRewrite}, path::String)::Pair{Str
                 push!(used, edit.constructor)
             end
         end
-        append!(rewrites, import_edit(path, text, scope, used))
+        append!(rewrites, import_edit(path, text, scope, used, "FillArrays"))
     end
     return path => rewritten(text, rewrites)
 end
-
-const FILL_ARRAYS_UUID = "1a297f60-69ca-5386-bcde-b61e274b549b"
 
 """The `[deps]` table of the Project.toml `text`, empty without one."""
 function project_deps(text::AbstractString)::Dict{String, Any}
     return haskey(TOML.parse(text), "deps") ? TOML.parse(text)["deps"]::Dict{String, Any} : Dict{String, Any}()
 end
 
-"""The Project.toml above the file `path`, as path => text, with FillArrays added to its `[deps]`; empty when it lists FillArrays already or no project exists."""
-function dependency_file(path::String)::Vector{Pair{String, String}}
+"""The Project.toml above the file `path`, as path => text, with `package` (name => uuid) added to its `[deps]`; empty when it lists the package already or no project exists."""
+function dependency_file(path::String, package::Pair{String, String})::Vector{Pair{String, String}}
     directory = dirname(path)
     while !isfile(joinpath(directory, "Project.toml")) && dirname(directory) != directory
         directory = dirname(directory)
@@ -507,22 +505,24 @@ function dependency_file(path::String)::Vector{Pair{String, String}}
         return Pair{String, String}[]
     end
     text = read(project, String)
-    if haskey(project_deps(text), "FillArrays")
+    if haskey(project_deps(text), first(package))
         return Pair{String, String}[]
     end
-    line = "FillArrays = \"$FILL_ARRAYS_UUID\"\n"
+    line = "$(first(package)) = \"$(last(package))\"\n"
     text = endswith(text, "\n") ? text : text * "\n"
     added = occursin(r"(?m)^\[deps\][^\n]*\n", text) ? replace(text, r"(?m)^(\[deps\][^\n]*\n)" => SubstitutionString("\\1" * line); count = 1) : text * "\n[deps]\n" * line
-    if !haskey(project_deps(added), "FillArrays")
-        throw(ArgumentError("cannot list FillArrays in the [deps] of $project; add it by hand"))
+    if !haskey(project_deps(added), first(package))
+        throw(ArgumentError("cannot list $(first(package)) in the [deps] of $project; add it by hand"))
     end
     return [project => added]
 end
 
+const FILL_ARRAYS = "FillArrays" => "1a297f60-69ca-5386-bcde-b61e274b549b"
+
 """The new text of each file `edits` touch, as path => text, with FillArrays added to the Project.toml above each."""
 function filled_texts(edits::AbstractVector{FillRewrite})::Vector{Pair{String, String}}
     paths = unique(String[edit.path for edit in edits])
-    return vcat(filled_file.((edits,), paths), unique(first, Iterators.flatten(dependency_file.(paths))))
+    return vcat(filled_file.((edits,), paths), unique(first, Iterators.flatten(dependency_file.(paths, (FILL_ARRAYS,)))))
 end
 
 """

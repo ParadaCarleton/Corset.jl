@@ -1,5 +1,5 @@
-# Code rules checked on a loaded module and on its repository's Julia source: lowered code,
-# bindings, types and parsed text. Each rule reports its sites through `offenders!`.
+# The rules without a file of their own in this folder, and `Source`, the parsed file every source
+# rule reads: lowered code, bindings, types and parsed text. Each rule reports its sites through `offenders!`.
 
 using .Entries: defined_methods
 using .Membership: Package, belongs, package_bindings

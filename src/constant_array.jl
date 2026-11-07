@@ -20,6 +20,9 @@ const NUMBER_VALUES = (
     "UInt8", "UInt16", "UInt32", "UInt64", "UInt128", "Bool", "Complex", "ComplexF32", "ComplexF64", "Rational",
 )
 
+# StaticArrays types: `zeros(SVector{3})` and `fill(x, SVector{3})` build a static array, which FillArrays has no form for.
+const STATIC_ARRAY_TYPES = ("SVector", "SMatrix", "SArray", "MVector", "MMatrix", "MArray", "SizedVector", "SizedMatrix", "SizedArray")
+
 const LITERAL_KINDS = (SYNTAX.@K_str("Integer"), SYNTAX.@K_str("Float"), SYNTAX.@K_str("Float32"), SYNTAX.@K_str("Bool"), SYNTAX.@K_str("char"), SYNTAX.@K_str("string"))
 const ASSIGN_KINDS = (SYNTAX.@K_str("="), SYNTAX.@K_str(".="), SYNTAX.@K_str("op="), SYNTAX.@K_str(".op="))
 const SCOPE_KINDS = (SYNTAX.@K_str("function"), SYNTAX.@K_str("->"), SYNTAX.@K_str("let"), SYNTAX.@K_str("macro"))
@@ -252,7 +255,7 @@ function constant_array_calls(node::SYNTAX.SyntaxNode)::Vector{ConstantArrayCall
     end
     name = constructor_name(first(node_children(node)))
     arguments = filter(!keyword_part, node_children(node)[2:end])
-    if !(Symbol(name) in keys(FILL_CONSTRUCTORS)) || (name == "fill" && isempty(arguments))
+    if !(Symbol(name) in keys(FILL_CONSTRUCTORS)) || (name == "fill" && isempty(arguments)) || any(names_static_array, arguments)
         return found
     end
     usage = call_usage(node)
@@ -261,6 +264,14 @@ function constant_array_calls(node::SYNTAX.SyntaxNode)::Vector{ConstantArrayCall
         usage = value === :mutable ? :ignored : value === :unknown && usage === :safe ? :escape : usage
     end
     return usage in (:safe, :escape) ? vcat([ConstantArrayCall(node, name, usage)], found) : found
+end
+
+"""Whether syntax `argument` names a StaticArrays type, bare or with parameters."""
+function names_static_array(argument::SYNTAX.SyntaxNode)::Bool
+    if SYNTAX.kind(argument) === SYNTAX.@K_str("curly")
+        return names_static_array(first(node_children(argument)))
+    end
+    return callee_name(argument) in STATIC_ARRAY_TYPES
 end
 
 """The site of the constant-array `call` in `source`, at its lines."""

@@ -59,6 +59,11 @@ end
         @test usages("f(n) = sum(fill([], n))\n") == []
         @test usages("f(n) = sum(fill(Vector{Int}(), n))\n") == []
     end
+    @testset "a StaticArrays type builds a static array, which FillArrays has no form for" begin
+        for static in ("zeros(SVector{3, Float32})", "ones(StaticArrays.SMatrix{2, 2})", "fill(0.0f0, SVector{3, Float32})", "zeros(MVector{3})", "fill(1, SArray)")
+            @test usages("f() = sum($static)\n") == []
+        end
+    end
     @testset "trues and falses" begin
         @test usages("f(n) = count(falses(n)) + count(trues(n))\n") == ["falses" => :safe, "trues" => :safe]
         @test usages("function f(n)\n    mask = falses(n)\n    mask[1] = true\n    return mask\nend\n") == []

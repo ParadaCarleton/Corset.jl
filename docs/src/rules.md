@@ -16,7 +16,7 @@ A `pedantic` rule enforces house style that Rust allows, or is a noisy heuristic
 
 | Group | Rules |
 | --- | --- |
-| `default` | `abstract-field`, `abstract-local`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anonymous-function`, `jet`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anonymous-function`, `quadratic-vcat`, `recursion-limit`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anonymous-function`, `where-return`, `widened-return` |
+| `default` | `abstract-field`, `abstract-local`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anonymous-function`, `invariant-parameter`, `jet`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anonymous-function`, `quadratic-vcat`, `recursion-limit`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anonymous-function`, `where-return`, `widened-return` |
 | `pedantic` | `c-type`, `concrete-return`, `constant-array`, `file-length`, `float64`, `jscpd`, `nothing-return`, `one-letter`, `quadratic-scan`, `range-guard`, `ref`, `repeated-prefix`, `struct-constant`, `wide-struct` |
 
 `corset rules` prints each rule's group and level. `[preferences.Corset.levels]` and the `--allow`,
@@ -203,6 +203,7 @@ Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 | `return-type` | `return_type_calls` | calls of `Core.Compiler.return_type`, a guess at a result type | restructure so the type is known |
 | `concrete-arg` | `concrete_arguments` | arguments annotated `Vector`, `Matrix`, `Array` or `Dict` that the method never resizes | `AbstractVector{T}` and the like; they accept views, `OffsetArray` and GPU arrays |
 | `concrete-return` | `concrete_returns(source, mod)` | result types that name a concrete type, `Vector{E}` included; `AbstractMatrix{T}` passes; a constructor returning its own type is exempt | annotate by what the arguments bind; `Corset.CONCRETE_RETURN_FIX` is the log text |
+| `invariant-parameter` | `invariant_parameters(source, mod)` | an abstract type parameter written without `<:` in an argument annotation or `where` bound: `f(xs::AbstractVector{Real})` throws a `MethodError` for `f([1.0, 2.0])`. `Any` and the parameters of `Tuple`, `NTuple`, `Type` and `Val` pass | `AbstractVector{<:Real}`, which the detail spells, or a type parameter |
 | `annotation` | `missing_annotations` | methods with an unannotated argument or result | annotate |
 | `float64` | `float64_sites(source)` | `Float64` tokens and untyped float literals; `float-widening` reads where they widen a narrower argument | `zero(T)`, `T(0.5)` or `oftype(x, 0.5)` |
 | `ref` | `ref_sites(source)` | `Ref` and `RefValue` outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | Return the changed data from the function that computes it. A broadcast shield (`f.(Ref(x), xs)`) opts out with `# lint: ref` |

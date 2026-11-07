@@ -19,7 +19,7 @@ const UNTYPED_FILL = "!"
 
 # Kinds of syntax that end an iteration early or skip its writes.
 const BROADCAST_ASSIGN_KIND = SYNTAX.@K_str(".=")
-const EXIT_KINDS =(SYNTAX.@K_str("break"), SYNTAX.@K_str("continue"), SYNTAX.@K_str("return"))
+const EXIT_KINDS = (SYNTAX.@K_str("break"), SYNTAX.@K_str("continue"), SYNTAX.@K_str("return"))
 
 # How an initializer array is judged: `:initializer` (every element written before any read, fixable), `:unproven`
 # (written, but not provably an initializer) or `:nanless` (an integer or Bool array, which has no NaN).

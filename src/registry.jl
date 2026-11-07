@@ -302,7 +302,7 @@ fix_plan(::ConstantArrayRule, repository::Repository, directories::Tuple{Vararg{
 fix_plan(::NanInitializerRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
     nan_initializer_plan(repository, directories)
 
-fix_plan(::QuadraticVcatRule,repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
+fix_plan(::QuadraticVcatRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
     flatten_plan(repository, directories)
 
 fix_plan(::ConcreteArgRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =

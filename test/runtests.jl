@@ -557,6 +557,16 @@ end
         @test (@test_logs logged offenders!(Repository(mktempdir()), "concrete-return", sites; fix = CONCRETE_RETURN_FIX)) == site_keys(sites)
     end
 
+    @testset "invariant-parameter: an abstract type parameter without <:" begin
+        sites = found_in(source -> Corset.invariant_parameters(source, Base), "invariant-parameter")
+        @test site_keys(sites) == ["source.jl summed", "source.jl nested", "source.jl bounded", "source.jl optional"]
+        @test first(sites).detail == "`AbstractVector{Real}` takes only the parameter `Real` itself; write `AbstractVector{<:Real}`"
+        @test sites[2].detail == "`Vector{Real}` takes only the parameter `Real` itself; write `Vector{<:Real}`"
+        @test Corset.resolved_type(:(Base.Float32), Base) === Float32
+        @test Corset.resolved_type(QuoteNode(:name), Base) === :name
+        @test all(isa.(Corset.resolved_type.([:(Base.missing_name), :(Int{Float64}), :(Vector{Int, Int, Int}), :(f(x)), 1.5], (Base,)), Corset.Unresolved))
+    end
+
     @testset "float64: Float64 tokens and untyped float literals" begin
         @test site_lines(float64_sites(parsed(snippet_file("float64")))) == [1, 1]
     end

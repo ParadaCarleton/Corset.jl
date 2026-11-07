@@ -60,6 +60,17 @@ empty_result(value::Int)::Nothing = nothing
 Some(value::Int)::Some = Some{Int}(value)
 '''
 
+[enumerated-union]
+source = '''
+scaled(value::Union{Float32, Float64})::Float32 = value
+texts(text::Union{String, SubString{String}}, count_::Union{Int, Float64, Nothing})::Int = 1
+(bounded(value::T)::T) where {T <: Union{Float32, Float64}} = value
+const UFloat = Union{Float32, Float64}
+either(value::Union{Int, String})::Int = 1
+absent(value::Union{Nothing, Int})::Int = 1
+(variable(value::Union{T, Int})::Int) where {T} = 1
+'''
+
 [invariant-parameter]
 source = '''
 summed(values::AbstractVector{Real})::Int = 1

@@ -1,4 +1,4 @@
-# Rules on the structs a package defines: abstract fields, and field names that repeat a word.
+# Rules on the structs a package defines: abstract and union fields, and field names that repeat a word.
 
 """Struct types `mod`'s package defines, closures excluded; a type bound to two names counts once."""
 function module_structs(mod::Module)::Vector{DataType}
@@ -15,21 +15,36 @@ is_struct_binding(@nospecialize(value::Any))::Bool = value isa Type && !is_closu
 mutable_structs(mod::Module)::Vector{DataType} = filter(ismutabletype, module_structs(mod))
 
 """
-Fields of `type` declared with an abstract type (not a type parameter, not a `Union`), or
-with a concrete container of one: `Vector{Any}`, `Base.RefValue{Any}` and
-`Dict{Tuple, Any}` are concrete, but every read from them is dynamically dispatched.
+Fields of `type` declared with an abstract type (not a type parameter), a `Union` of two or more
+types besides `Nothing` and `Missing`, or a concrete container of either: `Vector{Any}`,
+`Base.RefValue{Any}` and `Dict{Tuple, Any}` are concrete, but every read from them is dynamically
+dispatched, and a `Union{Float32, Float64}` field leaves each read a union a parameter would fix.
 """
 function abstract_fields(type::DataType)::Vector{Symbol}
     field_names = collect(Symbol, fieldnames(type))
     return field_names[abstract_declaration.(fieldtype.((type,), field_names))]
 end
 
-"""Whether field type `declared` is abstract: not a type parameter, not a `Union`, and `holds_abstract`."""
-abstract_declaration(@nospecialize(declared::Any))::Bool = !(declared isa TypeVar) && !(declared isa Union) && holds_abstract(declared)
+"""Whether field type `declared` is abstract: not a type parameter, and `union_holds_abstract` for a `Union`, `holds_abstract` for any other type."""
+abstract_declaration(@nospecialize(declared::Any))::Bool =
+    !(declared isa TypeVar) && (declared isa Union ? union_holds_abstract(declared) : holds_abstract(declared))
+
+"""Whether `type` is one of the types a `Union` adds for an absent value, which a field may hold: `Nothing` and `Missing`."""
+absent_value(type::Any)::Bool = type === Nothing || type === Missing
+
+"""
+Whether the `Union` `declared` lists two or more members besides `Nothing` and `Missing`
+(`Union{Float32, Float64}`, `Union{T, Int}`), or one that `holds_abstract` (`Union{Nothing, Real}`).
+`Union{Nothing, Float64}` and `Union{Missing, T}` hold an absent value or one type, and pass.
+"""
+function union_holds_abstract(declared::Union)::Bool # lint: abstract-local  a Union's members are types and type variables
+    members = filter(!absent_value, Base.uniontypes(declared)) # lint: non-public-access  Base has no public accessor for a Union's members
+    return length(members) >= 2 || any(member -> member isa Type && holds_abstract(member), members)
+end
 
 """
 Whether `declared` is abstract or has an abstract type among its parameters, at any depth.
-Allowed: `Union`s (small, split by the compiler), `Type{T}`, a struct's own type parameters
+Allowed: a `Union` that `union_holds_abstract` passes, `Type{T}`, a struct's own type parameters
 (`Vector{E}` with `E` free), and value parameters (`SVector{16, E}`'s `Tuple{16}`).
 """
 function holds_abstract(declared::Type)::Bool # lint: abstract-local  reflects on values of unknown type
@@ -43,6 +58,7 @@ function holds_abstract(declared::Type)::Bool # lint: abstract-local  reflects o
 end
 
 abstract_parameter(parameter::Any)::Bool = parameter isa UnionAll ||
+    (parameter isa Union && union_holds_abstract(parameter)) ||
     (parameter isa DataType && !(parameter <: Type) && holds_abstract(parameter))
 
 """First word of a name in snake case: `SolverControls` and `solver_tolerance` both give `"solver"`."""

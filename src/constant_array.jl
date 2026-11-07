@@ -36,7 +36,7 @@ const LITERAL_KINDS = (SYNTAX.@K_str("Integer"), SYNTAX.@K_str("Float"), SYNTAX.
 const ASSIGN_KINDS = (SYNTAX.@K_str("="), SYNTAX.@K_str(".="), SYNTAX.@K_str("op="), SYNTAX.@K_str(".op="))
 const SCOPE_KINDS = (SYNTAX.@K_str("function"), SYNTAX.@K_str("->"), SYNTAX.@K_str("let"), SYNTAX.@K_str("macro"))
 const DISCARDING_KINDS = (SYNTAX.@K_str("for"), SYNTAX.@K_str("while"), SYNTAX.@K_str("module"))
-const IMPORT_KINDS =(SYNTAX.@K_str("using"), SYNTAX.@K_str("import"))
+const IMPORT_KINDS = (SYNTAX.@K_str("using"), SYNTAX.@K_str("import"))
 
 # How a constant-array call is used, as a Symbol: `:safe` if no one writes the array, `:escape` if it leaves
 # its function or is read in a way that may alias it, `:mutated` if it is written, `:ignored` if no FillArrays form fits.

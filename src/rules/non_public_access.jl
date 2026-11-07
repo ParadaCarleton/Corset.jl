@@ -13,21 +13,36 @@ using .Membership: Package
 Each name of another module that `mod` reaches by qualified access (`Base.JuliaSyntax`) or explicit
 import (`using Base: uniontypes`) though that module neither exports it nor declares it `public`.
 ExplicitImports reads `file` and the files it includes. A qualified access has a site per use; an
-explicit import has one per name, at its first import.
+explicit import has one per name, at its first import. The names of `DE_FACTO_PUBLIC`, such as
+`LinearAlgebra.BlasFloat`, are exempt.
 """
 function non_public_accesses(mod::Module, file::AbstractString = entry_file(mod))::Vector{Site}
     findings = improper_qualified_accesses(mod, file)
     accesses = unique(collect(NamedTuple, Iterators.flatten(qualified_uses.(first.(findings), last.(findings), (USES(file),)))))
-    imports = [row for (_, rows) in improper_explicit_imports(mod, file; strict = false) for row in rows if row.public_import === false]
+    imports = [row for (_, rows) in improper_explicit_imports(mod, file; strict = false) for row in rows if row.public_import === false && !de_facto_public(row.importing_from, row.name)]
     return [non_public_site.(accesses, getproperty.(accesses, :accessing_from)); non_public_site.(imports, getproperty.(imports, :importing_from))]
 end
+
+# Names their module keeps non-public that packages rely on as if public: LinearAlgebra's BLAS
+# element types, which name the types a BLAS-backed method takes.
+const DE_FACTO_PUBLIC = (
+    (:LinearAlgebra, :BlasFloat),
+    (:LinearAlgebra, :BlasReal),
+    (:LinearAlgebra, :BlasComplex),
+    (:LinearAlgebra, :BlasInt),
+    (:BLAS, :BlasInt),
+)
+
+"""Whether `name` of the module `owner` (or the module named `owner`) is in `DE_FACTO_PUBLIC`."""
+de_facto_public(owner::Module, name::Symbol)::Bool = de_facto_public(nameof(owner), name)
+de_facto_public(owner::Symbol, name::Symbol)::Bool = (owner, name) in DE_FACTO_PUBLIC
 
 """
 Every qualified use in `submodule`, from the ExplicitImports file `analysis`, of a non-public name
 that `findings` (ExplicitImports rows, one per name) report.
 """
 function qualified_uses(submodule::Module, findings::AbstractVector{T}, analysis::Any)::Vector{NamedTuple} where {T <: NamedTuple}
-    flagged = Set(access_key(row) for row in findings if !row.public_access && !row.self_qualified)
+    flagged = Set(access_key(row) for row in findings if !row.public_access && !row.self_qualified && !de_facto_public(row.accessing_from, row.name))
     resolved = QUALIFIED_USE.(filter(is_qualified, MODULE_USES(analysis, submodule).per_usage_info), (submodule,))
     found = filter(!isnothing, resolved)
     return found[in.(access_key.(found), (flagged,))]

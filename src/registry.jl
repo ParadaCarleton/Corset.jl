@@ -236,6 +236,12 @@ concrete_arguments(source)
 @rule FileRule "concrete-return" :pedantic "results annotated with a concrete type" (context, source) ->
 concrete_returns(source, scope(context))
 
+@rule FileRule "enumerated-union" :default "unions of concrete types that share a supertype narrower than Any, in argument annotations and aliases" (context, source) ->
+enumerated_unions(source, scope(context))
+
+@rule FileRule "invariant-parameter" :default "abstract type parameters of argument annotations written without <:, which no container of a subtype matches" (context, source) ->
+invariant_parameters(source, scope(context))
+
 @rule FileRule "annotation" :default "methods with an unannotated argument or result" (context, source) ->
 missing_annotations(source)
 

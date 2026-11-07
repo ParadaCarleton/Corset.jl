@@ -257,6 +257,8 @@ end
         offending = @test_logs (:info, r"1 site\(s\) opted out") (:error, r"Base\.JuliaSyntax = 1 ") offenders!(Repository(dirname(path)), "non-public-access", sites)
         @test offending == ["Base.JuliaSyntax", "Base.uniontypes"]
         @test "Base.JuliaSyntax" in site_keys(non_public_accesses(Corset))
+        @test Corset.de_facto_public(Module(:LinearAlgebra), :BlasFloat) && Corset.de_facto_public(:BLAS, :BlasInt)
+        @test !Corset.de_facto_public(Module(:LinearAlgebra), :checksquare) && !Corset.de_facto_public(Base, :BlasFloat)
     end
 
     @testset "non-public-access: a module whose submodule is in another file reads the file of its `module` block" begin
@@ -334,6 +336,9 @@ end
         @test nameof.(Corset.mutable_structs(fixture)) == [:Tally]
         @test abstract_fields(structs[:Holder]) == [:held]
         @test isempty(abstract_fields(structs[:Plain]))
+        variable = TypeVar(:T)
+        @test Corset.abstract_declaration.([Union{Float32, Float64}, Union{Nothing, Real}, Dict{Symbol, Union{Int, String}}, Union{variable, Int}]) == trues(4)
+        @test Corset.abstract_declaration.([Union{Nothing, Float64}, Vector{Union{Missing, Float64}}, Union{Nothing, variable}]) == falses(3)
         @test repeated_prefix(structs[:SolverControls]) == "solver"
         @test isnothing(repeated_prefix(structs[:Plain]))
         path = joinpath(root, "fixture.jl")
@@ -555,6 +560,30 @@ end
         @test site_keys(sites) == ["source.jl fixed", "source.jl squared"]
         logged = (:error, Regex("Fix: \\Q$CONCRETE_RETURN_FIX\\E"))
         @test (@test_logs logged offenders!(Repository(mktempdir()), "concrete-return", sites; fix = CONCRETE_RETURN_FIX)) == site_keys(sites)
+    end
+
+    @testset "enumerated-union: a union of concrete types that share a supertype" begin
+        sites = found_in(source -> Corset.enumerated_unions(source, Base), "enumerated-union")
+        @test site_keys(sites) == ["source.jl scaled", "source.jl texts", "source.jl texts", "source.jl bounded", "source.jl UFloat"]
+        @test site_lines(sites) == [1, 2, 2, 3, 4]
+        @test first(sites).detail == "`Union{Float32, Float64}` lists subtypes of `AbstractFloat`: take `AbstractFloat`, or add a method that takes the rest beside this one"
+        @test occursin("take `AbstractString`", sites[2].detail)
+        @test occursin("take `Union{Nothing, Real}`", sites[3].detail)
+        root = write_tree(mktempdir(), ["fast.jl" => "fast(value::Union{Float32, Float64})::Int = 1\nfast(value::Real)::Int = 2\nalone(value::Union{Float32, Float64})::Int = 1\n"])
+        holder = Module(:FastPath)
+        Base.include(holder, joinpath(root, "fast.jl"))
+        @test site_keys(Corset.enumerated_unions(parsed(joinpath(root, "fast.jl")), holder)) == ["fast.jl alone"]
+        @test Corset.resolved_type(:(Base.Float32), Base) === Float32
+        @test Corset.resolved_type(:(Base.missing_name), Base) isa Corset.Unresolved
+        @test Corset.resolved_type(:(Vector{1.5}), Base) isa Corset.Unresolved
+        @test Corset.resolved_type(:(f(x)), Base) isa Corset.Unresolved
+    end
+
+    @testset "invariant-parameter: an abstract type parameter without <:" begin
+        sites = found_in(source -> Corset.invariant_parameters(source, Base), "invariant-parameter")
+        @test site_keys(sites) == ["source.jl summed", "source.jl nested", "source.jl bounded", "source.jl optional"]
+        @test first(sites).detail == "`AbstractVector{Real}` takes only the parameter `Real` itself; write `AbstractVector{<:Real}`"
+        @test sites[2].detail == "`Vector{Real}` takes only the parameter `Real` itself; write `Vector{<:Real}`"
     end
 
     @testset "float64: Float64 tokens and untyped float literals" begin

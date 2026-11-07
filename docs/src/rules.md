@@ -16,7 +16,7 @@ A `pedantic` rule enforces house style that Rust allows, or is a noisy heuristic
 
 | Group | Rules |
 | --- | --- |
-| `default` | `abstract-field`, `abstract-local`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anonymous-function`, `jet`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anonymous-function`, `quadratic-vcat`, `recursion-limit`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anonymous-function`, `where-return`, `widened-return` |
+| `default` | `abstract-field`, `abstract-local`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `enumerated-union`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anonymous-function`, `invariant-parameter`, `jet`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anonymous-function`, `quadratic-vcat`, `recursion-limit`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anonymous-function`, `where-return`, `widened-return` |
 | `pedantic` | `c-type`, `concrete-return`, `constant-array`, `file-length`, `float64`, `jscpd`, `nothing-return`, `one-letter`, `quadratic-scan`, `range-guard`, `ref`, `repeated-prefix`, `struct-constant`, `wide-struct` |
 
 `corset rules` prints each rule's group and level. `[preferences.Corset.levels]` and the `--allow`,
@@ -43,6 +43,9 @@ Repair: pass the value as an argument, or return it from the function that compu
 Qualified accesses (`Base.JuliaSyntax`) and explicit imports (`using Base: uniontypes`)
 of a name its module neither exports nor declares `public`. Such a name can change in any release.
 ExplicitImports.jl finds them. A qualified access has a site per use, so an opt-out covers only its line.
+
+LinearAlgebra's BLAS element types (`BlasFloat`, `BlasReal`, `BlasComplex` and `BlasInt`) are not
+public, but packages name the types a BLAS-backed method takes with them, so they pass.
 
 Repair: use a public name, or opt the line out with the reason the internal is needed.
 
@@ -166,9 +169,11 @@ non-function `isbits` values, `String`s, `Symbol`s, and immutable structs, tuple
 Both take a struct type. Apply them to every struct a module defines with `module_structs(mod)` and
 place each site with `struct_site(T, struct_locations(Corset.Source.(files)))`.
 
-- `abstract_fields` finds fields declared with an abstract type, or with a concrete container of one:
+- `abstract_fields` finds fields declared with an abstract type, with a `Union` of two or more types
+  besides `Nothing` and `Missing` (`Union{Float32, Float64}`), or with a concrete container of either:
   `Vector{Any}`, `Base.RefValue{Any}` and `Dict{Tuple, Any}` are concrete, but every read from them is
-  dynamically dispatched. Repair: make the field type a type parameter of the struct.
+  dynamically dispatched, and every read of a union field is a union. `Union{Nothing, Float64}` and
+  `Vector{Union{Missing, Float64}}` pass. Repair: make the field type a type parameter of the struct.
 - `repeated_prefix` finds field names that repeat a word the type should say once. Fields
   `continuation_step` and `continuation_theta` belong in a `ContinuationControls`.
 
@@ -203,6 +208,8 @@ Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 | `return-type` | `return_type_calls` | calls of `Core.Compiler.return_type`, a guess at a result type | restructure so the type is known |
 | `concrete-arg` | `concrete_arguments` | arguments annotated `Vector`, `Matrix`, `Array` or `Dict` that the method never resizes | `AbstractVector{T}` and the like; they accept views, `OffsetArray` and GPU arrays |
 | `concrete-return` | `concrete_returns(source, mod)` | result types that name a concrete type, `Vector{E}` included; `AbstractMatrix{T}` passes; a constructor returning its own type is exempt | annotate by what the arguments bind; `Corset.CONCRETE_RETURN_FIX` is the log text |
+| `enumerated-union` | `enumerated_unions(source, mod)` | a `Union` of two or more concrete types besides `Nothing` and `Missing` whose common supertype is narrower than `Any`, in an argument annotation, a `where` bound or a `const` alias: `Union{Float32, Float64}` turns away `Float16`, `BigFloat` and automatic differentiation's dual numbers. `Union{Int, String}` shares only `Any` and passes, as does a union of the package's own types (its exceptions). A method beside a sibling that takes all its arguments (`f(x::Union{Float32, Float64})` beside `f(x::Real)`) is exempt: the union picks a fast path | the supertype the detail names (`AbstractFloat`), or a fallback method for the rest; `LinearAlgebra.BlasFloat` for a BLAS-backed method |
+| `invariant-parameter` | `invariant_parameters(source, mod)` | an abstract type parameter written without `<:` in an argument annotation or `where` bound: `f(xs::AbstractVector{Real})` throws a `MethodError` for `f([1.0, 2.0])`. `Any` and the parameters of `Tuple`, `NTuple`, `Type` and `Val` pass | `AbstractVector{<:Real}`, which the detail spells, or a type parameter |
 | `annotation` | `missing_annotations` | methods with an unannotated argument or result | annotate |
 | `float64` | `float64_sites(source)` | `Float64` tokens and untyped float literals; `float-widening` reads where they widen a narrower argument | `zero(T)`, `T(0.5)` or `oftype(x, 0.5)` |
 | `ref` | `ref_sites(source)` | `Ref` and `RefValue` outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | Return the changed data from the function that computes it. A broadcast shield (`f.(Ref(x), xs)`) opts out with `# lint: ref` |

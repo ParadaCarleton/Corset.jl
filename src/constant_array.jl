@@ -120,7 +120,7 @@ end
 
 """How the array that syntax `node` holds (the call itself, or an occurrence of the name it is bound to) is used, judged by its parent."""
 function use_of(node::SYNTAX.SyntaxNode)::Symbol
-    parent = node.parent
+    parent = something(node.parent)
     kind = SYNTAX.kind(parent)
     parts = node_children(parent)
     if kind === SYNTAX.@K_str("ref") && first(parts) === node

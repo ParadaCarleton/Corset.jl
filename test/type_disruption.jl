@@ -42,3 +42,11 @@ end
     findings, skipped = Corset.run_rules(Corset.load_config(unwaived), unwaived)
     @test "float-widening" in skipped
 end
+
+@testset "type-disruption: check is the union of the sub-check sites" begin
+    root = package_tree("name = \"Demo\"\n", ["src/Demo.jl" => "module Demo\nmade(n::Int) = Vector{Float32}(undef, n)\nend\n"])
+    context = Corset.Context(Corset.repository(Corset.load_config(root), root), ("src",), nothing)
+    by_check = Corset.grouped_sites!(Corset.TypeDisruptionRule(), context)
+    @test sort!(collect(keys(by_check))) == ["float-widening", "float64", "literal-array"]
+    @test length(Corset.check(Corset.TypeDisruptionRule(), context)) == sum(length, values(by_check)) == 1
+end

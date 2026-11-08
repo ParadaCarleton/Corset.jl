@@ -48,6 +48,11 @@ source = '''
 filled(count_::Int)::Vector{Float32} = (buffer = zeros(Float32, count_); buffer .= 1; buffer)
 '''
 
+[similar-array]
+source = '''
+buffer(template::AbstractVector{Float32})::AbstractVector{Float32} = Vector{Float32}(undef, length(template))
+'''
+
 [concrete-arg]
 source = '''
 first_of(values::Vector{Int})::Int = first(values)

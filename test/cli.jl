@@ -189,7 +189,7 @@ end
     @test all(group in (:default, :pedantic) for group in rule_group.(RULES))
     @test sort!([rule_name(rule) for rule in RULES if rule_group(rule) === :pedantic]) == [
         "c-type", "concrete-return", "constant-array", "file-length", "float64", "jscpd", "nan-initializer", "nothing-return", "one-letter",
-        "quadratic-scan", "range-guard", "ref", "repeated-prefix", "struct-constant", "wide-struct",
+        "quadratic-scan", "range-guard", "ref", "repeated-prefix", "similar-array", "struct-constant", "wide-struct",
     ]
 end
 
@@ -397,7 +397,7 @@ end
 @testset "corset: every pedantic rule reports on a source that breaks it" begin
     root = mktempdir()
     fixture = load_fixture(joinpath(root, "src"))
-    smells = join((SNIPPETS[name]["source"] for name in ("nothing-return", "range-guard", "return-type", "concrete-arg", "concrete-return", "constant-array", "nan-initializer", "float64", "c-type", "ref", "annotation", "one-letter", "fatou", "jscpd", "quadratic-scan")), "\n")
+    smells = join((SNIPPETS[name]["source"] for name in ("nothing-return", "range-guard", "return-type", "concrete-arg", "concrete-return", "constant-array", "nan-initializer", "similar-array", "float64", "c-type", "ref", "annotation", "one-letter", "fatou", "jscpd", "quadratic-scan")), "\n")
     write(joinpath(root, "src", "smells.jl"), smells)
     write(joinpath(root, "Project.toml"), "name = \"Demo\"\n[preferences.Corset]\nstruct_field_limit = 1\nfile_line_limit = 1\n")
     config = with_overrides(load_config(root), true, Pair{String, Symbol}[], nothing)

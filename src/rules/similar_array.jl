@@ -21,7 +21,7 @@ const CONTAINER_NAMES = ("Vector", "Matrix", "Array")
 const EXTENT_NAMES = ("length", "size")
 
 """
-One construction of a concrete array: its syntax `node`, the `form` (`:undef` for `C{T}(undef, dims…)`, `:conversion` for `C(x)`, `:similar_type` for `similar(C{T}, dims…)`; the empty growable forms `T[]` and `C{T}()` have no template to mirror and are not constructions), the `element` type text and, for `:undef` and `:similar_type`, the `template` variable and `extent` call it is sized by.
+One construction of a concrete array: its syntax `node`, the `form` (`:undef` for `C{T}(undef, dims…)`, `:conversion` for `C(x)`; the empty growable forms `T[]` and `C{T}()` have no template to mirror and are not constructions), the `element` type text and, for `:undef`, the `template` variable and `extent` call it is sized by.
 """
 struct ArrayConstruction
     node::SYNTAX.SyntaxNode
@@ -147,49 +147,11 @@ function extent_template(dimension::SYNTAX.SyntaxNode)::String
     return ""
 end
 
-"""The first parameter of the enclosing function that `similar_is_safe` accepts as the template of `node`, or `""`."""
-function template_parameter(node::SYNTAX.SyntaxNode)::String
-    signatures = enclosing_signatures(node)
-    if isempty(signatures)
-        return ""
-    end
-    for parameter in node_children(only(signatures))[2:end]
-        parts = node_children(parameter)
-        if SYNTAX.kind(parameter) === SYNTAX.@K_str("::") && length(parts) == 2 && SYNTAX.kind(first(parts)) === IDENTIFIER_KIND
-            name = String(SYNTAX.sourcetext(first(parts)))
-            if similar_is_safe(node, name)
-                return name
-            end
-        end
-    end
-    return ""
-end
-
-"""The `:similar_type` construction of `similar(C{T}, dims…)` with a literal `Vector`, `Matrix` or `Array` type, which names a concrete array type and inherits no storage from any array, as a vector that is empty when `node` is no such call."""
-function similar_type_constructions(node::SYNTAX.SyntaxNode)::Vector{ArrayConstruction}
-    parts = node_children(node)
-    if call_name(node) != "similar" || length(parts) < 3
-        return ArrayConstruction[]
-    end
-    head = parts[2]
-    curly = SYNTAX.kind(head) === SYNTAX.@K_str("curly")
-    name = callee_name(curly ? first(node_children(head)) : head)
-    if !(name in CONTAINER_NAMES)
-        return ArrayConstruction[]
-    end
-    element = curly && length(node_children(head)) >= 2 ? String(SYNTAX.sourcetext(node_children(head)[2])) : ""
-    dimensions = join(SYNTAX.sourcetext.(parts[3:end]), ", ")
-    template = isempty(element) || any(keyword_part, parts[3:end]) ? "" : template_parameter(node)
-    return [ArrayConstruction(node, :similar_type, element, template, dimensions)]
-end
-
 """The `ArrayConstruction` that syntax `node` is, as a vector that is empty when it is none."""
 function node_constructions(node::SYNTAX.SyntaxNode)::Vector{ArrayConstruction}
     parts = node_children(node)
     if SYNTAX.kind(node) !== CALL_KIND || !is_prefix_call(node)
         return ArrayConstruction[]
-    elseif call_name(node) == "similar"
-        return similar_type_constructions(node)
     end
     container, element = container_of(first(parts))
     arguments = filter(!keyword_part, parts[2:end])
@@ -229,8 +191,6 @@ function similar_array_site(source::Source, construction::ArrayConstruction)::Si
     last_line = first(SYNTAX.source_location(node.source, last(SYNTAX.byte_range(node))))
     advice = if !isempty(construction.template)
         "use `$(similar_text(construction))`"
-    elseif construction.form === :similar_type
-        "`similar` of a literal array type inherits no storage from any array; use `similar(x, T, dims…)` of an array whose storage it should follow, or thread an array type argument in (`::Type{A}` with `A <: AbstractVector`) and call `similar(A, dims…)`"
     elseif construction.form === :undef
         "no array known to be one (a parameter annotated as an array) sizes it, or its buffer is a copy destination; build it with `similar(x, T, dims)` of an array whose storage it should follow"
     else

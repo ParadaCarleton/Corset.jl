@@ -73,9 +73,11 @@ end
     for source in (
             "f(x::Vector{Float64}) = (x = other(); Vector{Float32}(undef, length(x)))\n", "f(x) = Vector{Float32}(undef, length(x))\n",
             "function f(x::Vector{Float64})\n    y::Vector{Float32} = Vector{Float32}(undef, length(x))\n    return y\nend\n",
+            "function (x::Vector{Float64})\n    return Vector{Float32}(undef, length(x))\nend\n", "Vector{Float32}(undef, length(x))\n",
         )
         @test first(literal_arrayed(source)) == source
     end
+    @test first(literal_arrayed("f(x::Vector{Float64}) where {T} = Vector{Float32}(undef, length(x))\n")) == "f(x::Vector{Float64}) where {T} = similar(x, Float32, length(x))\n"
     waived = "f(x::Vector{Float64}) = Vector{Float32}(undef, length(x)) # lint: literal-array\n"
     @test first(literal_arrayed(waived)) == waived
     @test last(literal_arrayed("f(x::Vector{Float64}) = Vector{Float32}(undef, length(x))\n")) == [1]

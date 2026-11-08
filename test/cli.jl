@@ -72,6 +72,13 @@ end
         @test config.levels == Dict("float64" => :deny, "where-return" => :deny)
     end
 
+    @testset "a level naming a renamed rule's old name fails loud as an unknown rule" begin
+        for old in ("abstract-local", "widened-return", "unstable-anonymous-function")
+            root = package_tree("name = \"Demo\"\n[preferences.Corset.levels]\n$old = \"allow\"\n", Pair[])
+            @test_throws Corset.UsageError load_config(root)
+        end
+    end
+
     @testset "candidate_limit: the config's, else the default; the CLI flag wins; a negative one fails loud" begin
         @test config.candidate_limit == Corset.DEFAULT_CANDIDATE_LIMIT
         limited = load_config(package_tree("name = \"D\"\n[preferences.Corset]\ncandidate_limit = 9\n", Pair[]))
@@ -329,9 +336,9 @@ end
         "human",
     ) ==
         "deny[jet]: scope\n"
-    described = [Finding("impure-anonymous-function", :deny, Corset.Site("a.jl f", joinpath(root, "a.jl"), 3, "holds a Core.Box"))]
-    @test sprint(print_findings, root, described, "human") == "deny[impure-anonymous-function]: a.jl f\n  --> a.jl:3\n  = holds a Core.Box\n"
-    @test sprint(print_findings, root, described, "concise") == "a.jl:3: deny: [impure-anonymous-function] a.jl f (holds a Core.Box)\n"
+    described = [Finding("impure-anon-fun", :deny, Corset.Site("a.jl f", joinpath(root, "a.jl"), 3, "holds a Core.Box"))]
+    @test sprint(print_findings, root, described, "human") == "deny[impure-anon-fun]: a.jl f\n  --> a.jl:3\n  = holds a Core.Box\n"
+    @test sprint(print_findings, root, described, "concise") == "a.jl:3: deny: [impure-anon-fun] a.jl f (holds a Core.Box)\n"
     @test occursin("\"detail\":\"holds a Core.Box\"", sprint(print_findings, root, described, "json"))
 
     @test exit_code(findings, false) == 0

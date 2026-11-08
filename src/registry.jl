@@ -167,8 +167,8 @@ hidden_inputs(context.repository, loaded_module(context); context.own_methods)
 @rule ModuleRule "non-public-access" :default "qualified accesses and explicit imports of another module's non-public names" context ->
 non_public_accesses(loaded_module(context))
 
-@rule ModuleRule "abstract-local" :default "local variables whose inferred type is abstract or a union" context ->
-abstract_locals(context.repository, context.inferred; context.comments)
+@rule ModuleRule "unstable-variable" :default "local variables whose inferred type is abstract or a union" context ->
+unstable_variables(context.repository, context.inferred; context.comments)
 
 @rule ModuleRule "bang" :default "functions that always return nothing and have no ! in the name" context ->
 unmarked_effects(context.repository, context.inferred)
@@ -185,20 +185,20 @@ recursion_limits(context.repository, context.inferred, loaded_module(context); c
 @rule ModuleRule "float-widening" :default "statements whose float result is wider than every float argument of their method" context ->
 float_widenings(context.repository, context.inferred; search = context.candidates, context.comments)
 
-@rule ModuleRule "widened-return" :default "methods whose inferred result a caller cannot compile against concretely" context ->
-widened_returns(context.repository, context.inferred; context.comments)
+@rule ModuleRule "unstable-return" :default "methods whose inferred result a caller cannot compile against concretely" context ->
+unstable_returns(context.repository, context.inferred; context.comments)
 
 @rule ModuleRule "jet" :default "JET.report_call's error reports on the frames the signatures compile (JET installed)" context ->
 call_report_sites(context.repository, context.inferred, loaded_module(context); context.comments)
 
-@rule ModuleRule "impure-anonymous-function" :default "anonymous functions that capture mutable state, rebind a capture, or were never compiled (and, with strict_captures, any capture)" context ->
-impure_anonymous_functions(context.repository, loaded_module(context); context.own_methods)
+@rule ModuleRule "impure-anon-fun" :default "anonymous functions that capture mutable state, rebind a capture, or were never compiled (and, with strict_captures, any capture)" context ->
+impure_anon_funs(context.repository, loaded_module(context); context.own_methods)
 
-@rule ModuleRule "unstable-anonymous-function" :default "anonymous functions whose captures inference leaves abstract" context ->
-unstable_anonymous_functions(context.repository, loaded_module(context); context.own_methods)
+@rule ModuleRule "unstable-anon-fun" :default "anonymous functions whose captures inference leaves abstract" context ->
+unstable_anon_funs(context.repository, loaded_module(context); context.own_methods)
 
-@rule ModuleRule "overspecialized-anonymous-function" :default "anonymous functions that capture a type or function, compiling once per value" context ->
-overspecialized_anonymous_functions(context.repository, loaded_module(context); context.own_methods)
+@rule ModuleRule "overspecialized-anon-fun" :default "anonymous functions that capture a type or function, compiling once per value" context ->
+overspecialized_anon_funs(context.repository, loaded_module(context); context.own_methods)
 
 """The sites of the struct `types`, each placed at its declaration in `context`'s sources."""
 struct_sites(types::AbstractVector{DataType}, context::Context)::Vector{Site} = struct_site.(types, (declared(context),))

@@ -1,4 +1,4 @@
-# Frames for the `runtime-dispatch` and `widened-return` rules, typed over `Vector{Any}` arguments.
+# Frames for the `runtime-dispatch` and `unstable-return` rules, typed over `Vector{Any}` arguments.
 @noinline dispatching_control(values::AbstractVector{T}) where {T} = (first(values) + 1)::T
 function invoking_control(values::AbstractVector{T})::T where {T}
     return dispatching_control(values)
@@ -10,10 +10,10 @@ end
 function exempt(values) # lint: runtime-dispatch  the method's opt-out covers its body
     return first(values) + 1
 end
-function widened_exempt(values) # lint: widened-return  returns what it is given
+function widened_exempt(values) # lint: unstable-return  returns what it is given
     return first(values)
 end
-function opted_local(values) # lint: abstract-local  the method's opt-out covers its locals
+function opted_local(values) # lint: unstable-variable  the method's opt-out covers its locals
     head = first(values)
     return head === nothing
 end

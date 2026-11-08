@@ -10,7 +10,7 @@ Add the names a `using` or `import` statement binds to `names`.
 `using Mod: a, b` binds `a` and `b`; `using Mod` binds whatever `Mod` exports, so
 the module is loaded to ask it; `import Mod` binds `Mod` alone.
 """
-function import_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function import_names!( # lint: unstable-variable  walks Julia ASTs, whose nodes are untyped
         names,
         node,
     )
@@ -41,7 +41,7 @@ function import_names!( # lint: abstract-local  walks Julia ASTs, whose nodes ar
 end
 
 """The name a `struct`, `abstract type` or `module` declares, through `<:` and type parameters."""
-function declared_name( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function declared_name( # lint: unstable-variable  walks Julia ASTs, whose nodes are untyped
         declaration,
     )::Symbol
     while declaration isa Expr && declaration.head in (:curly, :(<:))
@@ -65,7 +65,7 @@ Add the names the arguments of a macro the scan does not know could bind, so a n
 macro defines (`@enum`, `@kwdef`, `@eval`) is never reported: every bare symbol, `x::T` and `x = v`
 target among `arguments`, alone or in a `begin` block.
 """
-function enum_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function enum_names!( # lint: unstable-variable  walks Julia ASTs, whose nodes are untyped
         names,
         arguments,
     )
@@ -82,7 +82,7 @@ function enum_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are 
 end
 
 """Add every name an assignment to `target` binds: `x`, `x::T`, and tuples of those, nested."""
-function assigned_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function assigned_names!( # lint: unstable-variable  walks Julia ASTs, whose nodes are untyped
         names,
         target,
     )
@@ -108,7 +108,7 @@ destructuring and imports.
 Over-approximated on purpose, so a reported name is one that nothing in reach
 defines.
 """
-function bound_names!( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function bound_names!( # lint: unstable-variable  walks Julia ASTs, whose nodes are untyped
         names,
         node,
     )
@@ -158,7 +158,7 @@ Return `node` with every `using` and `import` statement dropped.
 `using` is a top-level form, so a body carrying one cannot sit in a `let`. The
 names it binds are already in the defined set, so dropping it costs nothing.
 """
-function without_imports( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function without_imports( # lint: unstable-variable  walks Julia ASTs, whose nodes are untyped
         node,
     )
     if !(node isa Expr)
@@ -182,7 +182,7 @@ Resolve an `include` argument to a path, or `nothing` when it is not a literal.
 Only a string, `@__DIR__` and `joinpath` of those resolve; any other expression is
 never evaluated, because scanning a file must not run its code.
 """
-function included_path( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function included_path( # lint: unstable-variable  walks Julia ASTs, whose nodes are untyped
         argument,
         directory::AbstractString,
     )
@@ -194,7 +194,7 @@ function included_path( # lint: abstract-local  walks Julia ASTs, whose nodes ar
 end
 
 """The strings `argument` joins (`nothing` when any part is not a literal)."""
-function path_pieces( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function path_pieces( # lint: unstable-variable  walks Julia ASTs, whose nodes are untyped
         argument,
         directory::AbstractString,
     )
@@ -217,7 +217,7 @@ function path_pieces( # lint: abstract-local  walks Julia ASTs, whose nodes are 
 end
 
 """Add the names every file `node` includes by literal path binds to `names`, those files' includes too (`visited` stops cycles)."""
-function follow_includes!( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function follow_includes!( # lint: unstable-variable  walks Julia ASTs, whose nodes are untyped
         names,
         node,
         directory::AbstractString,
@@ -252,7 +252,7 @@ Add every name lowered code resolves against `scope` to `names`.
 Lowering resolves every local, so a name still reaching the module is either a
 real global or nothing at all.
 """
-function module_globals!( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function module_globals!( # lint: unstable-variable  walks Julia ASTs, whose nodes are untyped
         names,
         value,
         scope,
@@ -279,7 +279,7 @@ function module_globals!( # lint: abstract-local  walks Julia ASTs, whose nodes 
 end
 
 """The macro a macrocall's head `name` calls, unqualified (`Test.@testset` gives `@testset`); `Symbol("")` for any other head."""
-function macro_name( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function macro_name( # lint: unstable-variable  walks Julia ASTs, whose nodes are untyped
         name,
     )::Symbol
     if name isa Expr && name.head === :. && last(name.args) isa QuoteNode
@@ -289,14 +289,14 @@ function macro_name( # lint: abstract-local  walks Julia ASTs, whose nodes are u
 end
 
 """Whether `name` is `@testset` or a qualified spelling of it such as `Test.@testset`."""
-function is_testset_macro( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function is_testset_macro( # lint: unstable-variable  walks Julia ASTs, whose nodes are untyped
         name,
     )::Bool
     return macro_name(name) === Symbol("@testset")
 end
 
 """The `(line, node)` of every `@testset` under `node`, wherever a block, `let` or wrapper macro puts it; a testset's own body is not searched."""
-function testset_nodes( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function testset_nodes( # lint: unstable-variable  walks Julia ASTs, whose nodes are untyped
         node,
         line::Integer,
     )::Vector{Tuple{Int, Any}}
@@ -334,7 +334,7 @@ that quietly skips a testset reads exactly like one that cleared it.
 `scope` is the module the testsets run in, which owns the macros the bodies use
 and the names they resolve against. Pass `@__MODULE__`.
 """
-function undefined_names( # lint: abstract-local  walks Julia ASTs, whose nodes are untyped
+function undefined_names( # lint: unstable-variable  walks Julia ASTs, whose nodes are untyped
         path; scope = Main,
     )
     directory = dirname(abspath(path))

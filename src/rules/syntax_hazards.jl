@@ -42,7 +42,7 @@ end
 first_line(node::Expr, fallback::Integer)::Int = first([Int[argument.line for argument in node.args if argument isa LineNumberNode]; fallback])
 
 """The variable a parsed `try` expression `node` binds the caught exception to; `NO_NAME` when it binds none."""
-function catch_binding(node::Expr)::Symbol # lint: abstract-local  Expr nodes hold untyped arguments
+function catch_binding(node::Expr)::Symbol # lint: unstable-variable  Expr nodes hold untyped arguments
     binding = node.args[2]
     if binding isa Symbol
         return binding
@@ -201,7 +201,7 @@ keyword_names(node::Expr)::Vector{Symbol} = Symbol[ # lint: runtime-dispatch # l
 Whether `call`, with `shift` arguments moved to a `do` block, folds a concatenation one piece at a time.
 `reduce` does only with `init` or over a generator; on a vector it concatenates once.
 """
-function folds_concatenation(call::Expr, shift::Integer)::Bool # lint: abstract-local # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+function folds_concatenation(call::Expr, shift::Integer)::Bool # lint: unstable-variable # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
     name = callee(call)
     position = get(FOLD_OPERATORS, name, 0) - shift
     arguments = call_arguments(call)
@@ -265,7 +265,7 @@ function loop_variables(node::Expr)::Vector{Symbol} # lint: runtime-dispatch # l
 end
 
 """Whether `open` call `node` opens its file to write: a mode `"w"`, `"a"`, `"w+"`, `"a+"` or `"r+"`, or `write`, `append` or `truncate` set to `true`."""
-function opens_to_write(node::Expr)::Bool # lint: abstract-local # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
+function opens_to_write(node::Expr)::Bool # lint: unstable-variable # lint: runtime-dispatch # lint: unmarked-mutation  Expr nodes hold untyped arguments
     keywords = collect(Any, Iterators.flatten([argument.args for argument in node.args if Meta.isexpr(argument, :parameters)]))
     modes = String[argument for argument in call_arguments(node) if argument isa String]
     return any(in(WRITE_MODES), modes) ||

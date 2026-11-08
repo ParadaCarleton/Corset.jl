@@ -431,8 +431,8 @@ end
 Whether `method` declares argument `index` as an abstract `IO` (`io::IO`, `io::T where T <: IO`): it
 writes whatever stream its caller passes, an OS handle included, so a specialization's `IOBuffer` does not count.
 """
-function declared_io(method::Method, index::Integer)::Bool # lint: abstract-local  signature parameters are any type
-    parameters = collect(Any, Base.unwrap_unionall(method.sig).parameters) # lint: abstract-local  signature parameters are any type
+function declared_io(method::Method, index::Integer)::Bool # lint: unstable-variable  signature parameters are any type
+    parameters = collect(Any, Base.unwrap_unionall(method.sig).parameters) # lint: unstable-variable  signature parameters are any type
     declared = get(parameters, index, Any)
     if declared isa TypeVar
         declared = declared.ub

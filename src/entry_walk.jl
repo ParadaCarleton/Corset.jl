@@ -59,7 +59,7 @@ Whether optimized statement `statement` invokes a method instance inference cut 
 limit: an `:invoke` whose callee has a concrete signature but no `CodeInstance`, since inference kept
 no code for it.
 """
-function cut_off(statement::Expr)::Bool # lint: abstract-local  IR operands are untyped
+function cut_off(statement::Expr)::Bool # lint: unstable-variable  IR operands are untyped
     callee = statement.head === :invoke ? first(statement.args) : nothing
     return callee isa Core.MethodInstance && Base.isdispatchtuple(callee.specTypes) # lint: non-public-access  an `:invoke` operand is a method instance
 end
@@ -70,7 +70,7 @@ The method instances `ir`, an optimized method body, invokes that inference cut 
 Each nests its argument types deeper than its caller's, so a walk that followed one, or any other
 instance of its method, would infer a new instance at every step and never finish.
 """
-function cut_off_instances(ir::COMPILER.IRCode)::Vector{Core.MethodInstance} # lint: runtime-dispatch # lint: abstract-local # lint: non-public-access  IR statements are untyped; the cut-off operands are method instances
+function cut_off_instances(ir::COMPILER.IRCode)::Vector{Core.MethodInstance} # lint: runtime-dispatch # lint: unstable-variable # lint: non-public-access  IR statements are untyped; the cut-off operands are method instances
     found = Core.MethodInstance[] # lint: non-public-access  the cut-off operands are method instances
     for statement in ir.stmts.stmt
         if cut_off(statement)

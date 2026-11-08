@@ -4,13 +4,13 @@ using Test: @testset, @test, @test_logs, @test_throws
 using JET: JET
 using TOML: TOML
 using Corset: Corset
-using Corset: CONCRETE_RETURN_FIX, Repository, Site, Source, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, abstract_locals,
-    c_type_sites, impure_anonymous_functions, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
+using Corset: CONCRETE_RETURN_FIX, Repository, Site, Source, ratchet!, offenders!, @call_sites, @opt_sites, float64_ops, undefined_names, abstract_fields, unstable_variables,
+    c_type_sites, impure_anon_funs, concrete_arguments, concrete_returns, fatou_sites, float64_sites, hidden_inputs,
     jscpd_sites, misplaced_imports, missing_annotations, module_structs, non_public_accesses, nothing_returns,
     one_letter_sites, present_directories, range_guards, repeated_prefix, repeated_statements,
     repository_sources, return_type_calls, struct_locations, struct_site, unmarked_effects,
     where_return_sites, entry_frames, frame_callees, mentions_module, invoked_instance, logging_call, runtime_dispatches,
-    widened_returns, compiled_concretely
+    unstable_returns, compiled_concretely
 
 const FIXTURES = joinpath(@__DIR__, "fixtures")
 const SNIPPETS = TOML.parsefile(joinpath(FIXTURES, "snippets.toml"))
@@ -111,7 +111,7 @@ function reflect_all(mod::Module)::Nothing
     Corset.defined_methods(Corset.Package(mod))
     abstract_fields.(structs)
     repeated_prefix.(structs)
-    impure_anonymous_functions(Repository(pwd()), mod)
+    impure_anon_funs(Repository(pwd()), mod)
     return nothing
 end
 
@@ -284,10 +284,10 @@ end
         @test_throws Corset.UsageError Corset.entry_file(split)
     end
 
-    @testset "abstract-local: a local variable that infers no concrete type" begin
-        @test site_keys(abstract_locals(repository, inferred)) == ["fixture.jl abstract_local"]
-        @test isempty(abstract_locals(Repository(mktempdir()), inferred))
-        @test occursin(r"^local `holder`::Vector.*Any", only(abstract_locals(repository, inferred)).detail)
+    @testset "unstable-variable: a local variable that infers no concrete type" begin
+        @test site_keys(unstable_variables(repository, inferred)) == ["fixture.jl abstract_local"]
+        @test isempty(unstable_variables(Repository(mktempdir()), inferred))
+        @test occursin(r"^local `holder`::Vector.*Any", only(unstable_variables(repository, inferred)).detail)
         twins = [Site("k", "f", 3, "local `a`::Any"), Site("k", "f", 3, "local `b`::Any"), Site("k", "f", 3, "local `a`::Integer"), Site("k", "f", 4, "local `c`::Any")]
         @test [site.detail for site in Corset.one_per_line(twins)] == ["local `a`::Any; local `a`::Integer; local `b`::Any", "local `c`::Any"]
         @test [site.detail for site in Corset.one_per_line(reverse(twins))] == ["local `c`::Any", "local `a`::Any; local `a`::Integer; local `b`::Any"]
@@ -301,18 +301,18 @@ end
         for (maker, argument) in ((:adder, 1), (:labeler, "a"), (:reader, [1]), (:kinded, Int))
             Base.invokelatest(Base.invokelatest(getfield(fixture, maker), argument), 2)
         end
-        sites = Dict(site.key => site for site in impure_anonymous_functions(repository, fixture))
+        sites = Dict(site.key => site for site in impure_anon_funs(repository, fixture))
         @test Set(keys(sites)) == Set(["fixture.jl boxed", "fixture.jl lineless", "fixture.jl reader"])
         @test sites["fixture.jl boxed"].detail == "holds a Core.Box: a captured variable is rebound"
         @test occursin("unverified", sites["fixture.jl lineless"].detail)
         @test sites["fixture.jl reader"].detail == "captures Vector{Int64}, not plain immutable data"
-        overspecialized = only(Corset.overspecialized_anonymous_functions(repository, fixture))
+        overspecialized = only(Corset.overspecialized_anon_funs(repository, fixture))
         @test overspecialized.key == "fixture.jl kinded"
         @test occursin("{Int64}, so it compiles once per value", overspecialized.detail)
-        @test isempty(Corset.unstable_anonymous_functions(repository, fixture))
+        @test isempty(Corset.unstable_anon_funs(repository, fixture))
         @testset "strict_captures also reports a capture of plain immutable data" begin
             strict = Repository(root; strict_captures = true)
-            strict_sites = Dict(site.key => site for site in impure_anonymous_functions(strict, fixture))
+            strict_sites = Dict(site.key => site for site in impure_anon_funs(strict, fixture))
             @test Set(keys(strict_sites)) == Set(["fixture.jl boxed", "fixture.jl lineless", "fixture.jl reader", "fixture.jl adder", "fixture.jl labeler"])
             @test occursin("captures Int64, which `strict_captures` forbids", strict_sites["fixture.jl adder"].detail)
             @test !haskey(strict_sites, "fixture.jl field_reader")
@@ -695,10 +695,10 @@ end
         @test Corset.read_line(file, 6, :no_such_name) == 6
     end
 
-    @testset "abstract-local: a homogeneous variadic tuple is concrete in use, a bare Tuple is not" begin
-        @test !Corset.abstract_local_type(Tuple{Vararg{String}})
-        @test Corset.abstract_local_type(Tuple)
-        @test Corset.abstract_local_type(Tuple{Vararg{Real}})
+    @testset "unstable-variable: a homogeneous variadic tuple is concrete in use, a bare Tuple is not" begin
+        @test !Corset.unstable_variable_type(Tuple{Vararg{String}})
+        @test Corset.unstable_variable_type(Tuple)
+        @test Corset.unstable_variable_type(Tuple{Vararg{Real}})
     end
 end
 
@@ -998,17 +998,17 @@ end
         @test Corset.method_key(Repository(@__DIR__), anonymous) == "runtests.jl anonymous function"
         @test Corset.method_key(Repository(dirname(@__DIR__)), anonymous) == "test/runtests.jl anonymous function"
     end
-    @testset "abstract local types: unions, containers, tuples and Type" begin
+    @testset "unstable variable types: unions, containers, tuples and Type" begin
         concrete = (Union{}, Union{Int, String}, Type{Int}, Vector{Int}, Dict{String, Int}, Tuple{Int, Float64}, Tuple{Vararg{Int}})
-        @test !any(Corset.abstract_local_type, concrete)
-        @test Corset.abstract_local_type(Union{Int, Float64, String, Char, Symbol})
+        @test !any(Corset.unstable_variable_type, concrete)
+        @test Corset.unstable_variable_type(Union{Int, Float64, String, Char, Symbol})
         for element in (Any, Number)
-            @test Corset.abstract_local_type(element)
-            @test Corset.abstract_local_type(Union{Int, element})
-            @test Corset.abstract_local_type(Vector{element})
-            @test Corset.abstract_local_type(Dict{String, element})
-            @test Corset.abstract_local_type(Tuple{Int, element})
-            @test Corset.abstract_local_type(Tuple{Vararg{element}})
+            @test Corset.unstable_variable_type(element)
+            @test Corset.unstable_variable_type(Union{Int, element})
+            @test Corset.unstable_variable_type(Vector{element})
+            @test Corset.unstable_variable_type(Dict{String, element})
+            @test Corset.unstable_variable_type(Tuple{Int, element})
+            @test Corset.unstable_variable_type(Tuple{Vararg{element}})
             @test Corset.holds_abstract(Tuple{element})
         end
     end
@@ -1147,7 +1147,7 @@ module Probe
     end
 end
 
-@testset "abstract locals and bang names read the signatures given" begin
+@testset "unstable variables and bang names read the signatures given" begin
     signatures = Type[
         Tuple{typeof(Probe.generic), Vector{Float32}},
         Tuple{typeof(Probe.off), Nothing},
@@ -1163,7 +1163,7 @@ end
     repository = Repository(@__DIR__)
     inferred = entry_frames(signatures, Probe)
     @testset "a generic method or constructor is typed at the signatures given, and a catch variable is skipped" begin
-        @test isempty(abstract_locals(repository, inferred))
+        @test isempty(unstable_variables(repository, inferred))
     end
     @testset "a nothing method beside a valued one is not a procedure; a lone one is" begin
         keys = [site.key for site in unmarked_effects(repository, inferred)]
@@ -1321,7 +1321,7 @@ end
 """The sites of `sites` whose key names the function `name`."""
 sites_named(sites::AbstractVector{Site}, name::AbstractString)::Vector{Site} = [site for site in sites if last(split(site.key)) == name]
 
-@testset "runtime-dispatch and widened-return read the walked frames' optimized IR" begin
+@testset "runtime-dispatch and unstable-return read the walked frames' optimized IR" begin
     untyped = Array{Any, 1}
     seeds = Type[
         Tuple{typeof(Dispatch.invoking_control), untyped}, Tuple{typeof(Dispatch.line_exempt), untyped},
@@ -1332,7 +1332,7 @@ sites_named(sites::AbstractVector{Site}, name::AbstractString)::Vector{Site} = [
     repository = Repository(@__DIR__)
     inferred = entry_frames(seeds, Dispatch)
     dispatches = runtime_dispatches(repository, inferred)
-    widened = Dict(last(split(site.key)) => site.detail for site in widened_returns(repository, inferred))
+    widened = Dict(last(split(site.key)) => site.detail for site in unstable_returns(repository, inferred))
     @testset "a noinline dynamic callee reached only through an :invoke edge is reported" begin
         control = only(sites_named(dispatches, "dispatching_control"))
         @test control.line == 2 && occursin("dispatches", control.detail) && occursin("+", control.detail)
@@ -1348,8 +1348,8 @@ sites_named(sites::AbstractVector{Site}, name::AbstractString)::Vector{Site} = [
         @test occursin("_apply_iterate", only(sites_named(dispatches, "splatted")).detail)
         @test !haskey(widened, "small_union") && isempty(sites_named(dispatches, "small_union"))
     end
-    @testset "an abstract-local opt-out on a method's first line covers its locals" begin
-        keys_ = [last(split(site.key)) for site in abstract_locals(repository, inferred)]
+    @testset "an unstable-variable opt-out on a method's first line covers its locals" begin
+        keys_ = [last(split(site.key)) for site in unstable_variables(repository, inferred)]
         @test "line_exempt" in keys_ && !("opted_local" in keys_)
     end
     @testset "compiled_concretely judges a returned tuple member by member" begin

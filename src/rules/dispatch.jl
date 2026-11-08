@@ -33,7 +33,7 @@ Whether a caller compiles against `return_type`: concrete, `Union{}` (always thr
 constant, a union of at most `UNION_SPLIT_LIMIT` concrete members, which Julia splits, or a
 fixed-length tuple whose members each compile concretely.
 """
-function compiled_concretely(return_type::Any)::Bool # lint: abstract-local  reflects on types of unknown kind
+function compiled_concretely(return_type::Any)::Bool # lint: unstable-variable  reflects on types of unknown kind
     if return_type === Union{} || isconcretetype(return_type)
         return true
     elseif return_type <: Type && !(return_type isa Union || return_type isa UnionAll)
@@ -116,7 +116,7 @@ function recursion_limits(
 end
 
 """The `recursion_limits` sites of `item`, one per cut-off call to a method `package` defines."""
-function cut_off_sites(repository::Repository, item::Inferred, package::Package)::Vector{Site} # lint: runtime-dispatch # lint: abstract-local # lint: unmarked-mutation  optimized IR statements are untyped
+function cut_off_sites(repository::Repository, item::Inferred, package::Package)::Vector{Site} # lint: runtime-dispatch # lint: unstable-variable # lint: unmarked-mutation  optimized IR statements are untyped
     sites = Site[]
     for (index, statement) in enumerate(item.ir.stmts.stmt)
         if cut_off(statement) && defined_in(first(statement.args), package)
@@ -128,15 +128,15 @@ function cut_off_sites(repository::Repository, item::Inferred, package::Package)
 end
 
 """
-    widened_returns(repository, inferred; comments = Dict())
+    unstable_returns(repository, inferred; comments = Dict())
 
 Each method of `inferred` (as `audited_frames` keeps them under `comments`) whose inferred result does not compile
 concretely (`compiled_concretely`), one site at its first line however many specializations ran.
 """
-function widened_returns(
+function unstable_returns(
         repository::Repository, inferred::AbstractVector{Inferred};
         comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
     )::Vector{Site}
-    widened = [item for item in audited_frames(repository, inferred, "widened-return", comments) if !compiled_concretely(item.code.rettype)]
+    widened = [item for item in audited_frames(repository, inferred, "unstable-return", comments) if !compiled_concretely(item.code.rettype)]
     return one_per_line(Site[Site(method_key(repository, item.method), string(item.method.file), item.method.line, "returns $(item.code.rettype)") for item in widened])
 end

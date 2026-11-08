@@ -16,7 +16,7 @@ A `pedantic` rule enforces house style that Rust allows, or is a noisy heuristic
 
 | Group | Rules |
 | --- | --- |
-| `default` | `abstract-field`, `abstract-local`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anonymous-function`, `jet`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anonymous-function`, `quadratic-vcat`, `recursion-limit`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anonymous-function`, `where-return`, `widened-return` |
+| `default` | `abstract-field`, `annotation`, `bang`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anon-fun`, `jet`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anon-fun`, `quadratic-vcat`, `recursion-limit`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anon-fun`, `unstable-return`, `unstable-variable`, `where-return` |
 | `pedantic` | `c-type`, `concrete-return`, `constant-array`, `file-length`, `float64`, `jscpd`, `nan-initializer`, `nothing-return`, `one-letter`, `quadratic-scan`, `range-guard`, `ref`, `repeated-prefix`, `similar-array`, `struct-constant`, `wide-struct` |
 
 `corset rules` prints each rule's group and level. `[preferences.Corset.levels]` and the `--allow`,
@@ -46,7 +46,7 @@ ExplicitImports.jl finds them. A qualified access has a site per use, so an opt-
 
 Repair: use a public name, or opt the line out with the reason the internal is needed.
 
-### `abstract-local`: `abstract_locals(repo, entry_frames(signatures, mod))`
+### `unstable-variable`: `unstable_variables(repo, entry_frames(signatures, mod))`
 
 Local variables whose inferred type is abstract or a union, one site per variable however many
 specializations ran. The usual causes are an accumulator that starts as `0` and receives floats, and
@@ -117,7 +117,7 @@ generator over untyped data, say) is not reported.
 Repair: keep the argument types fixed across the recursion (a loop, or an accumulator of one type),
 or put a function barrier where the type is allowed to change.
 
-### `widened-return`: `widened_returns(repo, entry_frames(seeds, mod))`
+### `unstable-return`: `unstable_returns(repo, entry_frames(seeds, mod))`
 
 Methods whose inferred result a caller cannot compile against: anything but a concrete
 type, `Union{}`, a `Type{X}` constant, a union of at most four concrete types, or a fixed-length tuple
@@ -145,7 +145,7 @@ operations of one call.
 
 Repair: `oftype(x, 2.0)`, `T(0.5)` or `float(T)(n)`, with `T` the argument's float type.
 
-### Anonymous functions: `impure-anonymous-function`, `unstable-anonymous-function`, `overspecialized-anonymous-function`
+### Anonymous functions: `impure-anon-fun`, `unstable-anon-fun`, `overspecialized-anon-fun`
 
 Three rules on anonymous functions (lambdas, `do` blocks and the generators of comprehensions) that
 capture variables; Julia calls these closures. One passes all three when it captures nothing
@@ -156,10 +156,10 @@ non-function `isbits` values, `String`s, `Symbol`s, and immutable structs, tuple
 
 | Rule | Function | Finds | Repair |
 | --- | --- | --- | --- |
-| `impure-anonymous-function` | `impure_anonymous_functions(repo, mod)` | a mutable capture (an array, `Dict`, `Ref`, a module); a `Core.Box`, a captured variable rebound; no compiled instance, so the captures are unverified | pass the data as an argument, or use `Base.Fix1`/`Base.Fix2` (`filter(in(allowed), items)`); cover an unverified function in the precompile workload |
+| `impure-anon-fun` | `impure_anon_funs(repo, mod)` | a mutable capture (an array, `Dict`, `Ref`, a module); a `Core.Box`, a captured variable rebound; no compiled instance, so the captures are unverified | pass the data as an argument, or use `Base.Fix1`/`Base.Fix2` (`filter(in(allowed), items)`); cover an unverified function in the precompile workload |
 | | | with `Repository.strict_captures`: any capture, plain immutable data included | pass it as an argument |
-| `unstable-anonymous-function` | `unstable_anonymous_functions(repo, mod)` | a capture whose type inference left abstract, or an instance built where the capture types are unknown | make the captured variable's type concrete, or pass it as an argument |
-| `overspecialized-anonymous-function` | `overspecialized_anonymous_functions(repo, mod)` | a captured type or function: the anonymous function compiles anew for every value | pass it as an argument, or define a callable struct whose field is a `DataType` or `Function` |
+| `unstable-anon-fun` | `unstable_anon_funs(repo, mod)` | a capture whose type inference left abstract, or an instance built where the capture types are unknown | make the captured variable's type concrete, or pass it as an argument |
+| `overspecialized-anon-fun` | `overspecialized_anon_funs(repo, mod)` | a captured type or function: the anonymous function compiles anew for every value | pass it as an argument, or define a callable struct whose field is a `DataType` or `Function` |
 
 ### `abstract-field`: `abstract_fields(type)`, `repeated-prefix`: `repeated_prefix(type)`
 
@@ -315,6 +315,6 @@ method and the report's kind and placed at its line, so an opt-out goes on the r
 same report reached from several frames is one site.
 
 The rule leaves out `JET.report_opt`: `runtime-dispatch` reports its runtime dispatches,
-`impure-anonymous-function` its captured `Core.Box`es, and `recursion-limit` the calls where its
+`impure-anon-fun` its captured `Core.Box`es, and `recursion-limit` the calls where its
 optimization failures start. In tests, [`@call_sites`](@ref) and
 [`@opt_sites`](@ref) run either analysis on one call. See the [guide](guide.md#JET).

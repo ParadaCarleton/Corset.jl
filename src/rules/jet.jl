@@ -16,7 +16,7 @@ function loaded_jet(modules::AbstractDict{Base.PkgId, Module} = Base.loaded_modu
 end
 
 """The `Site` of JET report `report`: its innermost frame names the function and the line."""
-function jet_site(scope::String, report::Any)::Site # lint: abstract-local  JET reports are duck-typed
+function jet_site(scope::String, report::Any)::Site # lint: unstable-variable  JET reports are duck-typed
     frame = last(report.vst)
     method = frame.linfo.def
     name = method isa Method ? method.name : :top_level
@@ -58,7 +58,7 @@ placed at that frame's line. A call that fails on only some branches of a union 
 `Nothing` of a `findfirst` that nothing checks throws when it arrives. The same report reached from
 several frames is one site. JET loads from the load path on first use.
 """
-function call_report_sites( # lint: runtime-dispatch # lint: abstract-local # lint: unmarked-mutation  JET loads at run time, reads only the frames' signature types, and its results are duck-typed
+function call_report_sites( # lint: runtime-dispatch # lint: unstable-variable # lint: unmarked-mutation  JET loads at run time, reads only the frames' signature types, and its results are duck-typed
         repository::Repository, inferred::AbstractVector{Inferred}, mod::Module;
         comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
     )::Vector{Site}
@@ -75,7 +75,7 @@ function call_report_sites( # lint: runtime-dispatch # lint: abstract-local # li
 end
 
 """The site of JET report `report` when its innermost frame is a method of `package`; none otherwise."""
-function call_report_site(repository::Repository, jet::Module, report::Any, package::Package)::Vector{Site} # lint: runtime-dispatch # lint: abstract-local  JET reports are duck-typed
+function call_report_site(repository::Repository, jet::Module, report::Any, package::Package)::Vector{Site} # lint: runtime-dispatch # lint: unstable-variable  JET reports are duck-typed
     frame = last(report.vst)
     method = frame.linfo.def
     if !(method isa Method && belongs(method.module, package) && in_repository(repository, method))

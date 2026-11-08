@@ -64,7 +64,7 @@ overlay(under::Preferences, over::Preferences)::Preferences = Preferences(
 )
 
 """The preferences in the TOML `file` below the `path` of table names (`("preferences", "Corset")`); none set when there is no file or table."""
-function read_preferences(file::AbstractString, path::Tuple{Vararg{String}})::Preferences # lint: abstract-local  TOML tables are Dict{String, Any}
+function read_preferences(file::AbstractString, path::Tuple{Vararg{String}})::Preferences # lint: unstable-variable  TOML tables are Dict{String, Any}
     if !isfile(file)
         return Preferences()
     end

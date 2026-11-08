@@ -33,7 +33,7 @@ Whether `data` holds a struct defined in `owner`: as its own type, a type parame
 element, or a type it carries as data. The walk stops at `depth` levels, enough for nested settings,
 and at a `Task`, whose captured state belongs to the code it runs.
 """
-function holds_own_struct(@nospecialize(data::Any), owner::Module, depth::Integer)::Bool # lint: impure-anonymous-function # lint: unstable-anonymous-function  the generators only read `owner` and `data`
+function holds_own_struct(@nospecialize(data::Any), owner::Module, depth::Integer)::Bool # lint: impure-anon-fun # lint: unstable-anon-fun  the generators only read `owner` and `data`
     if data isa Type
         return names_own_struct(data, owner)
     elseif names_own_struct(typeof(data), owner)
@@ -70,8 +70,8 @@ The constants of `mod`'s package, as sites keyed `Module.name`, that hold a stru
 (`holds_own_struct`): an instance, or an alias of a type naming one (`const Alias = Union{Nothing, Setting}`).
 Definitions of types, modules and functions pass.
 """
-function struct_holding_constants(mod::Module)::Vector{Site} # lint: impure-anonymous-function  the generators only read the modules
-    bindings = [ # lint: abstract-local  reflects on values of unknown type
+function struct_holding_constants(mod::Module)::Vector{Site} # lint: impure-anon-fun  the generators only read the modules
+    bindings = [ # lint: unstable-variable  reflects on values of unknown type
         (module_, name, getglobal(module_, name)) for module_ in Membership.package_modules(Membership.Package(mod))
             for name in names(module_; all = true)
             if !startswith(string(name), "#") && isconst(module_, name) && isdefinedglobal(module_, name)
@@ -85,12 +85,12 @@ end
 
 """Each top-level statement of `source` beside the one before it, which is its line marker when it has one."""
 function top_level_pairs(source::Source)::Vector{Pair{Any, Any}}
-    statements = (Meta.parseall(source.text; filename = source.path)::Expr).args # lint: abstract-local  Expr nodes hold untyped arguments
+    statements = (Meta.parseall(source.text; filename = source.path)::Expr).args # lint: unstable-variable  Expr nodes hold untyped arguments
     return Pair{Any, Any}.(statements[begin:(end - 1)], statements[(begin + 1):end])
 end
 
 """`statement` without the docstring `@doc` attaches to it."""
-function undocumented(@nospecialize(statement::Any))::Any # lint: unmarked-mutation # lint: widened-return  Expr nodes hold untyped arguments
+function undocumented(@nospecialize(statement::Any))::Any # lint: unmarked-mutation # lint: unstable-return  Expr nodes hold untyped arguments
     if statement isa Expr && statement.head === :macrocall && first(statement.args) == GlobalRef(Core, Symbol("@doc")) # lint: runtime-dispatch  Expr nodes hold untyped arguments
         return last(statement.args)
     end
@@ -140,7 +140,7 @@ is_derived(marked::Pair{Any, Any}, owner::Module)::Bool = first(marked) isa Line
 
 """The `derived_constants` site of `marked`, a line marker and the constant after it, in `source`."""
 function derived_site(source::Source, marked::Pair{Any, Any}, owner::Module)::Site # lint: unmarked-mutation  Expr nodes hold untyped arguments
-    name = first(undocumented(last(marked)).args).args[1] # lint: abstract-local # lint: runtime-dispatch  Expr nodes hold untyped arguments
+    name = first(undocumented(last(marked)).args).args[1] # lint: unstable-variable # lint: runtime-dispatch  Expr nodes hold untyped arguments
     return Site("$(source.name) $name", source.path, first(marked).line, "computed by a function of $(nameof(owner)); define a function instead") # lint: runtime-dispatch  Expr nodes hold untyped arguments
 end
 

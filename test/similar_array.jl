@@ -91,3 +91,23 @@ end
     body = "    x = zeros(Float32, length(y))\n    x .= 1\n    return x\nend\n"
     @test nan_initialized("function f(y::AbstractVector)\n$body") == "function f(y::AbstractVector)\n    x = fill!(similar(y, Float32, length(y)), NaN)\n    x .= 1\n    return x\nend\n"
 end
+
+@testset "similar-array: similar of a type is reported as a concrete constructor and takes an annotated array parameter as template" begin
+    @test constructions("f(n) = similar(Vector{Float32}, n)\n") == [(:similar_type, "")]
+    @test constructions("f(a, b) = fill!(similar(Matrix{Float32}, a, b), 0)\n") == [(:similar_type, "")]
+    @test constructions("f(n) = similar(Array{Float32, 3}, n, n, n)\n") == [(:similar_type, "")]
+    @test constructions("f(n) = similar(AbstractVector{Float32}, n)\n") == []
+    @test constructions("f(::Type{A}, n) where {A <: AbstractVector} = similar(A, n)\n") == []
+    @test constructions("f(x, n) = similar(x, Float32, n)\n") == []
+    @test constructions("f(x, n) = similar(x, n)\n") == []
+    @test constructions("f(x) = similar(x)\n") == []
+    @test constructions("buffer = similar(Vector{Float32}, 3)\n") == [(:similar_type, "")]
+    @test similarized("f(x::AbstractVector, n) = similar(Vector{Float32}, n)\n") == "f(x::AbstractVector, n) = similar(x, Float32, n)\n"
+    @test similarized("f(x::AbstractMatrix, a, b) = fill!(similar(Matrix{Float32}, a, b), 0)\n") == "f(x::AbstractMatrix, a, b) = fill!(similar(x, Float32, a, b), 0)\n"
+    @test similarized("f(n, x::AbstractArray) = similar(Array{Float32, 3}, n, n, n)\n") == "f(n, x::AbstractArray) = similar(x, Float32, n, n, n)\n"
+    for text in ("f(n) = similar(Vector{Float32}, n)\n", "f(x, n) = similar(Vector{Float32}, n)\n", "f(x::AbstractVector, n) = similar(Vector, n)\n")
+        @test similarized(text) == text
+    end
+    source = parsed(joinpath(write_tree(mktempdir(), ["source.jl" => "f(n) = similar(Vector{Float32}, n)\n"]), "source.jl"))
+    @test occursin("thread an array type argument", only(Corset.similar_array_sites([source])).detail)
+end

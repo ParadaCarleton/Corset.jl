@@ -31,3 +31,14 @@ A baseline file allows today's offenders and fails on new ones; `corset baseline
 seeds it and lowers it as old ones are fixed. The
 [documentation](https://paradacarleton.github.io/Corset.jl/dev/) has the guide (baselines,
 exemptions, opt-out comments) and the reference for every rule.
+
+## Install the skill
+
+`skill/SKILL.md` teaches an agent to run Corset, read findings, use fixers and respect waivers. Copy or symlink the `skill` directory:
+
+```bash
+# for every project
+ln -s /path/to/Corset.jl/skill ~/.claude/skills/corset
+# for one project
+mkdir -p .claude/skills && cp -r /path/to/Corset.jl/skill .claude/skills/corset
+```

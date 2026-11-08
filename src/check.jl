@@ -49,7 +49,7 @@ function judge(
 end
 
 """Whether `rule` reads the frames inference gives the entry signatures (`entry_frames`)."""
-reads_signatures(rule::Rule)::Bool = rule isa Union{AbstractLocalRule, BangRule, UnmarkedMutationRule, RuntimeDispatchRule, WidenedReturnRule, FloatWideningRule, RecursionLimitRule, JetRule}
+reads_signatures(rule::Rule)::Bool = rule isa Union{UnstableVariableRule, BangRule, UnmarkedMutationRule, RuntimeDispatchRule, UnstableReturnRule, FloatWideningRule, RecursionLimitRule, JetRule}
 
 """
 Whether `rule` has what it reads: the loaded package `mod` for a module rule, `frames` for a rule that
@@ -129,7 +129,7 @@ need `frames`, the `entry_frames` of `mod`; without them they are skipped. `fix`
 for the rules that have a fixer. `update_baseline` seeds and lowers the baseline file; without it the
 baseline is only read. `own_methods` holds the `defined_methods` of `mod`.
 """
-function run_rules( # lint: abstract-local  loops over a tuple of different rule types
+function run_rules( # lint: unstable-variable  loops over a tuple of different rule types
         config::Config,
         root::AbstractString;
         mod::Union{Module, Nothing} = nothing,

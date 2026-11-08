@@ -8,7 +8,7 @@ Run the rules with [`corset check`](cli.md) in a CI job of their own. The CLI pa
 Don't run the rules inside `Pkg.test`:
 
 - **Coverage.** CI usually runs `Pkg.test` with `--code-coverage`, which blocks inlining and constant
-  folding. The typed rules (`abstract-local`, `runtime-dispatch`, `widened-return` and the others that
+  folding. The typed rules (`unstable-variable`, `runtime-dispatch`, `unstable-return` and the others that
   read `entry_frames`) would then read code users never run. `entry_frames` warns once when it runs
   under coverage.
 - **Shared state.** The rules would see whatever the earlier test files loaded, defined or compiled,
@@ -31,8 +31,8 @@ baseline file and the rule in opt-out comments.
 
 There are two kinds of rules.
 
-- **Module rules** read a loaded module: `hidden_inputs(repo, MyPackage)`, `impure_anonymous_functions(repo, MyPackage)`,
-  `abstract_locals(repo, entry_frames(SIGNATURES, MyPackage))`.
+- **Module rules** read a loaded module: `hidden_inputs(repo, MyPackage)`, `impure_anon_funs(repo, MyPackage)`,
+  `unstable_variables(repo, entry_frames(SIGNATURES, MyPackage))`.
 - **Source rules** read a file's syntax. Parse each file once with `Corset.Source`, then hand it to
   each rule: `nothing_returns(Corset.Source(REPO, file))`. `repository_sources(repo, ("src",))`
   lists a repository's files.
@@ -58,7 +58,7 @@ Run `corset baseline` to seed it with each rule's current offenders:
 [hidden-input]
 "COUNTER" = 1
 
-[abstract-local]
+[unstable-variable]
 "src/Demo.jl total" = 1
 ```
 

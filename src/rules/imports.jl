@@ -354,7 +354,7 @@ function move_target(other::UnitFile, supplied::Bool, entry::UnitFile, statement
 end
 
 """Every import move in `files` (the rule's own), module by module; a file in two modules is left alone."""
-function import_moves(files::AbstractVector{ImportFile})::Vector{ImportMove} # lint: abstract-local  files have different numbers of units
+function import_moves(files::AbstractVector{ImportFile})::Vector{ImportMove} # lint: unstable-variable  files have different numbers of units
     known::Dict{String, ImportFile} = Dict(file.path => file for file in files)
     included::Set{String} = Set(path for file in files for path in file.includes)
     roots = filter(!Base.Fix2(in, included), [file.path for file in files])

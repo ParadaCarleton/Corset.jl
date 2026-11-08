@@ -26,7 +26,7 @@ The methods the modules of `package` define on their own functions and types, cl
 each function's methods, and each type's constructors and call methods. Methods `package` adds to
 a function of a loaded module (`Base.show`, AD rules) count too.
 """
-function defined_methods(package::Package)::Vector{Method} # lint: abstract-local  reflects on values of unknown type
+function defined_methods(package::Package)::Vector{Method} # lint: unstable-variable  reflects on values of unknown type
     values = vcat(package_bindings(package), loaded_functions())
     world = Base.get_world_counter()
     found = collect(Method, Iterators.flatten([binding_methods.(values, Function); call_methods.(values, world); binding_methods.(values, Type)]))
@@ -130,7 +130,7 @@ function trace_scope(mod::Module)::Module
 end
 
 """The type of the trace line `line`, `precompile(Tuple{...})`, evaluated in `scope`; `nothing` for any other line or one that fails to evaluate."""
-function traced_type(scope::Module, line::AbstractString)::Any # lint: abstract-local  a trace line evaluates to a value of unknown type
+function traced_type(scope::Module, line::AbstractString)::Any # lint: unstable-variable  a trace line evaluates to a value of unknown type
     call = Meta.parse(line; raise = false)
     if !(Meta.isexpr(call, :call, 2) && call.args[1] === :precompile && Meta.isexpr(call.args[2], :curly))
         return nothing

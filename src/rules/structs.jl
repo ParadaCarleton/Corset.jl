@@ -32,7 +32,7 @@ Whether `declared` is abstract or has an abstract type among its parameters, at 
 Allowed: `Union`s (small, split by the compiler), `Type{T}`, a struct's own type parameters
 (`Vector{E}` with `E` free), and value parameters (`SVector{16, E}`'s `Tuple{16}`).
 """
-function holds_abstract(declared::Type)::Bool # lint: abstract-local  reflects on values of unknown type
+function holds_abstract(declared::Type)::Bool # lint: unstable-variable  reflects on values of unknown type
     plain = Base.unwrap_unionall(declared)
     abstract_itself = if Base.has_free_typevars(declared) || plain <: Tuple
         plain isa DataType && isabstracttype(plain)
@@ -64,7 +64,7 @@ first word shared by more than half of at least three fields (`continuation_step
 `continuation_theta`, ...: those fields belong in a `ContinuationControls`). `nothing`
 when no word repeats.
 """
-function repeated_prefix(type::DataType)::Union{String, Nothing} # lint: abstract-local  reflects on values of unknown type
+function repeated_prefix(type::DataType)::Union{String, Nothing} # lint: unstable-variable  reflects on values of unknown type
     words = String[first_word(name) for name in collect(Symbol, fieldnames(type)) if occursin('_', string(name))]
     own = first_word(nameof(type))
     if own in words

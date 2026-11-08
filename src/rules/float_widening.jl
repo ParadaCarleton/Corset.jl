@@ -5,7 +5,7 @@
 The concrete float types `type` holds: itself, or any type parameter at depth below 5
 (`Vector{Float32}`, `Complex{Float64}`, `Tuple{Int, Float16}`), each union member included.
 """
-function held_floats(type::Any, depth::Integer)::Vector{DataType} # lint: abstract-local  reflects on types of unknown kind
+function held_floats(type::Any, depth::Integer)::Vector{DataType} # lint: unstable-variable  reflects on types of unknown kind
     if depth > 4
         return DataType[]
     elseif type isa Union
@@ -56,13 +56,13 @@ struct Operand
 end
 
 """How a detail names IR value `operand`. Julia 1.14 keeps a global as a `Core.BindingPartition`, named by its binding."""
-ir_label(operand::Any)::String = string(operand) # lint: abstract-local  IR operands are any value
+ir_label(operand::Any)::String = string(operand) # lint: unstable-variable  IR operands are any value
 @static if isdefined(Base, :partition_owner)
     ir_label(operand::Core.BindingPartition)::String = string(Base.partition_owner(operand).globalref) # lint: non-public-access  1.14 only # COV_EXCL_LINE
 end
 
 """The `Operand` of IR value `operand` in `ir`. A type operand (`Float64` in `sitofp(Float64, n)`) brings in its own float."""
-function Operand(operand::Any, ir::COMPILER.IRCode)::Operand # lint: abstract-local  IR operands are any value
+function Operand(operand::Any, ir::COMPILER.IRCode)::Operand # lint: unstable-variable  IR operands are any value
     extended = COMPILER.argextype(operand, ir)
     floats = value_floats(COMPILER.widenconst(extended))
     # Read a type operand from its constant: Julia 1.14 widens `Const(Float64)` to `Core.TypeEgal{Float64}`.
@@ -93,7 +93,7 @@ function returned_operands(statement::Core.ReturnNode, ir::COMPILER.IRCode)::Vec
 end
 
 """The floats IR statement `statement` makes: those of its inferred `type`, or a `return`'s value's (its `operands`)."""
-result_floats(::Any, type::Any, ::AbstractVector{Operand})::Vector{DataType} = value_floats(COMPILER.widenconst(type)) # lint: abstract-local  IR statements and types are any value
+result_floats(::Any, type::Any, ::AbstractVector{Operand})::Vector{DataType} = value_floats(COMPILER.widenconst(type)) # lint: unstable-variable  IR statements and types are any value
 result_floats(::Core.ReturnNode, ::Any, operands::AbstractVector{Operand})::Vector{DataType} = collect(DataType, Iterators.flatten(getfield.(operands, :floats)))
 
 """
@@ -101,7 +101,7 @@ The detail of IR statement `statement`, of inferred type `type`, when it widens:
 float wider than `budget` and no computed operand already did. It names the first operand that brings
 the wide float in, else the callee; `nothing` when the statement does not widen.
 """
-function widening_detail(statement::Any, type::Any, ir::COMPILER.IRCode, budget::FloatBudget)::Union{Nothing, String} # lint: abstract-local  IR statements and types are any value
+function widening_detail(statement::Any, type::Any, ir::COMPILER.IRCode, budget::FloatBudget)::Union{Nothing, String} # lint: unstable-variable  IR statements and types are any value
     operands = statement_operands(statement, ir)
     result = result_floats(statement, type, operands)
     wide = operands[wider.(getfield.(operands, :floats), (budget,))]
@@ -112,7 +112,7 @@ function widening_detail(statement::Any, type::Any, ir::COMPILER.IRCode, budget:
 end
 
 """How a widening detail names its source: the first of the `wide` operands, else the callee of `statement`."""
-function widening_source(statement::Any, wide::AbstractVector{Operand})::String # lint: abstract-local  IR statements are any value
+function widening_source(statement::Any, wide::AbstractVector{Operand})::String # lint: unstable-variable  IR statements are any value
     if !isempty(wide)
         return "`$(first(wide).label)`"
     end
@@ -123,7 +123,7 @@ end
 The callee an IR call statement names: an `:invoke`'s method, else its first argument. Another
 statement is named by its type.
 """
-callee_label(statement::Any)::String = string(typeof(statement)) # lint: abstract-local  IR statements are any value
+callee_label(statement::Any)::String = string(typeof(statement)) # lint: unstable-variable  IR statements are any value
 
 function callee_label(statement::Expr)::String
     instance = invoked_instance(first(statement.args))
@@ -187,7 +187,7 @@ function frame_widenings(repository::Repository, item::Inferred, search::Candida
 end
 
 """The widening detail of IR statement `statement` of type `type`: a dispatch's (`dispatch_widening`) or another's (`widening_detail`)."""
-function statement_widening(statement::Any, type::Any, ir::COMPILER.IRCode, budget::FloatBudget, search::CandidateSearch)::Union{Nothing, String} # lint: abstract-local  IR statements and types are any value
+function statement_widening(statement::Any, type::Any, ir::COMPILER.IRCode, budget::FloatBudget, search::CandidateSearch)::Union{Nothing, String} # lint: unstable-variable  IR statements and types are any value
     if dispatches(statement, ir)
         return dispatch_widening(statement, ir, budget, search)
     end

@@ -77,7 +77,7 @@ One site per duplicate code block found by `jscpd` over `directories` of `reposi
 the duplicate file and the duplicated file, placed at the duplicate block's lines. `jscpd` must be
 installed and on PATH; an execution failure throws.
 """
-function jscpd_sites( # lint: abstract-local  JSON report tables are untyped
+function jscpd_sites( # lint: unstable-variable  JSON report tables are untyped
         repository::Repository,
         directories::Tuple{Vararg{String}},
     )::Vector{Site}

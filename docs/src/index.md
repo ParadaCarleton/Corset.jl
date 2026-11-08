@@ -19,7 +19,7 @@ pkg> add Corset
 Write a module with two problems.
 
 ```@setup first
-using Corset: Repository, offenders!, hidden_inputs, abstract_locals, entry_frames
+using Corset: Repository, offenders!, hidden_inputs, unstable_variables, entry_frames
 root = mktempdir()
 mkpath(joinpath(root, "src"))
 write(joinpath(root, "src", "Demo.jl"), """
@@ -63,7 +63,7 @@ offenders!(repo, "hidden-input", hidden_inputs(repo, Demo))
 ```
 
 ```@example first
-offenders!(repo, "abstract-local", abstract_locals(repo, entry_frames([Tuple{typeof(Demo.total), Vector{Int}}], Demo)))
+offenders!(repo, "unstable-variable", unstable_variables(repo, entry_frames([Tuple{typeof(Demo.total), Vector{Int}}], Demo)))
 ```
 
 Each returned string is a key: the name of one offender. [`offenders!`](@ref) returns the keys

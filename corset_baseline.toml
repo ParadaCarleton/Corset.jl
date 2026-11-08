@@ -1,6 +1,6 @@
 [abstract-field]
 
-[abstract-local]
+[unstable-variable]
 "src/candidates.jl call_candidates" = 1
 "src/cli.jl level_overrides" = 1
 "src/cli.jl option!" = 1
@@ -12,7 +12,7 @@
 "src/rules/mutation.jl view_sources" = 1
 "src/rules/non_public_access.jl non_public_accesses" = 2
 "src/rules/non_public_access.jl qualified_uses" = 2
-"src/rules/general.jl abstract_local_sites" = 2
+"src/rules/general.jl unstable_variable_sites" = 2
 "src/rules/general.jl instance_callees" = 1
 "src/rules/general.jl typed_frame" = 1
 
@@ -56,7 +56,7 @@
 [hidden-input]
 "stdout" = 2
 
-[impure-anonymous-function]
+[impure-anon-fun]
 "src/entries.jl compiled_signatures" = 1
 "src/entries.jl entry_signatures" = 1
 
@@ -169,7 +169,7 @@
 "src/float64_scan.jl float64_ops" = 1
 "src/precompile.jl bump" = 1
 
-[overspecialized-anonymous-function]
+[overspecialized-anon-fun]
 
 [range-guard]
 "src/rules/general.jl <top level>" = 2
@@ -233,7 +233,7 @@
 "src/ratchet.jl repository_sources" = 1
 "src/registry.jl check" = 2
 "src/rules/structs.jl abstract_fields" = 1
-"src/rules/general.jl abstract_local_sites" = 3
+"src/rules/general.jl unstable_variable_sites" = 3
 "src/rules/general.jl callee_name" = 2
 "src/rules/general.jl calls_argument" = 1
 "src/rules/general.jl caught_slots" = 2
@@ -286,7 +286,7 @@
 "src/rules/mutation.jl mutation_sites" = 1
 "src/rules/mutation.jl view_sources" = 1
 "src/registry.jl check" = 1
-"src/rules/general.jl abstract_local_sites" = 1
+"src/rules/general.jl unstable_variable_sites" = 1
 "src/rules/general.jl annotated_arguments" = 1
 "src/rules/general.jl callee_name" = 2
 "src/rules/general.jl calls_argument" = 1
@@ -308,11 +308,11 @@
 "src/rules/general.jl range_guards" = 1
 "src/rules/general.jl returns_argument_call" = 1
 
-[unstable-anonymous-function]
+[unstable-anon-fun]
 
 [where-return]
 
-[widened-return]
+[unstable-return]
 "src/candidates.jl call_signature" = 1
 "src/check.jl enabled_rules" = 1
 "src/entries.jl traced_type" = 1

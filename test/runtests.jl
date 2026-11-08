@@ -138,24 +138,31 @@ end
     end
 
     @testset "a `# lint:` comment opts its lines out" begin
-        text = "one() = 1 # lint: rule\ntwo() = 2\n# lint: rule-begin\nthree() = 3\n# lint: rule-end\nfour() = 4 # lint: other\n"
-        root = write_tree(mktempdir(), ["source.jl" => text, "whole.jl" => "# lint: rule-file\none() = 1\n"])
+        text = "one() = 1 # lint: annotation\ntwo() = 2\n# lint: annotation-begin\nthree() = 3\n# lint: annotation-end\nfour() = 4 # lint: bang\n"
+        root = write_tree(mktempdir(), ["source.jl" => text, "whole.jl" => "# lint: annotation-file\none() = 1\n"])
         sites = [Site("line $line", joinpath(root, "source.jl"), line, "") for line in 1:6]
-        @test offenders!(Repository(root), "rule", sites) == ["line 2", "line 6"]
-        @test isempty(offenders!(Repository(root), "rule", [Site("whole", joinpath(root, "whole.jl"), 2, "")]))
+        @test offenders!(Repository(root), "annotation", sites) == ["line 2", "line 6"]
+        @test isempty(offenders!(Repository(root), "annotation", [Site("whole", joinpath(root, "whole.jl"), 2, "")]))
     end
 
     @testset "only a comment opts out: `# lint:` inside a string or docstring is text" begin
-        text = "doc = \"put `# lint: rule-file` on a line\"\nx = 1\n\"\"\"\n# lint: rule\n\"\"\"\ny = 2\n#= a block comment\n   # lint: rule =#\nz = 3 # lint: rule\n"
+        text = "doc = \"put `# lint: annotation-file` on a line\"\nx = 1\n\"\"\"\n# lint: annotation\n\"\"\"\ny = 2\n#= a block comment\n   # lint: annotation =#\nz = 3 # lint: annotation\n"
         root = write_tree(mktempdir(), ["source.jl" => text])
         sites = [Site("line $line", joinpath(root, "source.jl"), line, "") for line in 1:9]
-        @test offenders!(Repository(root), "rule", sites) == ["line $line" for line in 1:7]
+        @test offenders!(Repository(root), "annotation", sites) == ["line $line" for line in 1:7]
+    end
+
+    @testset "a `# lint:` comment naming no rule throws, naming its file, line and rule" begin
+        for unknown in ("typo", "stale-rule-name")
+            root = write_tree(mktempdir(), ["stale.jl" => "x = 1\ny = 2 # lint: $unknown  reason\n"])
+            @test_throws Regex("stale\\.jl:2: `# lint: $unknown` names no rule") offenders!(Repository(root), "annotation", [Site("x", joinpath(root, "stale.jl"), 2, "")])
+        end
     end
 
     @testset "a `-begin` with no `-end` below it throws, naming its file and line" begin
-        root = write_tree(mktempdir(), ["open.jl" => "x = 1\n# lint: rule-begin\ny = 2\n# lint: other-end\n"])
-        @test_throws Corset.UsageError offenders!(Repository(root), "rule", [Site("x", joinpath(root, "open.jl"), 3, "")])
-        @test_throws r"open\.jl:2: `# lint: rule-begin` has no `# lint: rule-end`" offenders!(Repository(root), "rule", [Site("x", joinpath(root, "open.jl"), 3, "")])
+        root = write_tree(mktempdir(), ["open.jl" => "x = 1\n# lint: annotation-begin\ny = 2\n# lint: bang-end\n"])
+        @test_throws Corset.UsageError offenders!(Repository(root), "annotation", [Site("x", joinpath(root, "open.jl"), 3, "")])
+        @test_throws r"open\.jl:2: `# lint: annotation-begin` has no `# lint: annotation-end`" offenders!(Repository(root), "annotation", [Site("x", joinpath(root, "open.jl"), 3, "")])
     end
 
     @testset "with a baseline each key is held to its entry, and entries fall" begin
@@ -194,7 +201,7 @@ end
     end
 
     @testset "a Context parses each file once: its rules and opt-outs read no file after" begin
-        text = "struct Point # lint: rule\n    x::Float64\nend\nf(x) = x\nusing A: B\n"
+        text = "struct Point # lint: annotation\n    x::Float64\nend\nf(x) = x\nusing A: B\n"
         root = write_tree(mktempdir(), ["src/point.jl" => text])
         context = Corset.Context(Repository(root), ("src",), nothing)
         rm(joinpath(root, "src"); recursive = true)
@@ -205,7 +212,7 @@ end
         @test site_keys(Corset.check(misplaced, context)) == ["src/point.jl B"]
         @test Corset.declared(context) == [Corset.StructDeclaration(:Point, source.path, 1)]
         sites = [Site("Point", source.path, 1, ""), Site("f", source.path, 4, "")]
-        @test first(Corset.unopted(sites, "rule", context.comments)) == [last(sites)]
+        @test first(Corset.unopted(sites, "annotation", context.comments)) == [last(sites)]
     end
 
     @testset "a Context reads the opt-outs of its frames' files once, for every typed rule" begin
@@ -1568,6 +1575,7 @@ include("cli.jl")
 include("syntax_hazards.jl")
 include("constant_array.jl")
 include("nan_initializer.jl")
+include("similar_array.jl")
 include("fixer_properties.jl")
 
 @testset "undefined_names: a name nothing defines is reported, and so is an unlowered testset" begin

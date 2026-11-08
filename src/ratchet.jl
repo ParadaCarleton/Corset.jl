@@ -134,7 +134,7 @@ const COMMENT_KIND = SYNTAX.@K_str "Comment"
 
 The `# lint:` comments (`OPT_OUT`) of the Julia source `text` of file `path`: matches inside comment
 tokens only, so a string or docstring that quotes one opts nothing out. A `-begin` with no `-end` of
-its rule below it throws. A path that is no file (a method a macro defined has the file `none`) has none.
+its rule below it throws, and so does a comment naming no rule. A path that is no file (a method a macro defined has the file `none`) has none.
 """
 function opt_out_comments(path::AbstractString)::Vector{OptOutComment}
     if !isfile(path)
@@ -146,6 +146,10 @@ end
 function opt_out_comments(path::AbstractString, text::String)::Vector{OptOutComment}
     tokens = [token.range for token in SYNTAX.tokenize(text) if SYNTAX.kind(token) == COMMENT_KIND]
     comments = collect(OptOutComment, Iterators.flatten(token_comments.(text, (SYNTAX.SourceFile(text),), tokens)))
+    unknown = filter(comment -> comment.rule ∉ rule_name.(RULES), comments)
+    if !isempty(unknown)
+        throw(UsageError("$path:$(first(unknown).line): `# lint: $(first(unknown).rule)` names no rule; the rules are $(join(rule_name.(RULES), ", "))"))
+    end
     unclosed = filter(Base.Fix1(open_begin, comments), comments)
     if !isempty(unclosed)
         throw(UsageError("$path:$(first(unclosed).line): `# lint: $(first(unclosed).rule)-begin` has no `# lint: $(first(unclosed).rule)-end` below it"))

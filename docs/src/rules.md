@@ -140,6 +140,11 @@ Arrays built from a literal container type, which inherits no array type (a GPU 
 and `similar(Vector{T}, n)`. Allowed: `similar(x, T, dims…)` with an input array `x`, and
 `similar(A, dims…)` with an array type `A` passed in (`::Type{A}`).
 
+Fixer: `C{T}(undef, length(x))` and `similar(C{T}, size(x))` become `similar(x, T, length(x))` and
+`similar(x, T, size(x))` when `x` is an array parameter of the enclosing method that its body never
+rebinds and the call is no typed local's value. The result takes `x`'s array type, so a sparse `x`
+makes it sparse. `--fix` runs it while `literal-array` is on; `# lint: literal-array` pins a call.
+
 #### `float-widening`
 
 Statements whose float result is wider than every float the method receives in its

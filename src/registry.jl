@@ -338,6 +338,16 @@ grouped_sites!(rule::Rule, context::Context)::Dict{String, Vector{Site}} = Dict{
 
 grouped_sites!(::TypeDisruptionRule, context::Context)::Dict{String, Vector{Site}} = type_disruption_sites!(context)
 
+"""The check of `rule` named `name`."""
+named_check(rule::Rule, name::String)::Check = only(filter(check -> check.name == name, checks(rule)))
+
+fix_plan(::TypeDisruptionRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
+    literal_array_plan(repository, directories)
+
+# The fixer repairs `literal-array`, so a `# lint: literal-array` comment pins a repair.
+fix!(rule::TypeDisruptionRule, repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site} =
+    apply_plan!(fix_plan(rule, repository, directories), "literal-array")
+
 """Every rule, ordered by name."""
 const RULES = Tuple(sort!([type() for kind in (ModuleRule, TreeRule, FileRule) for type in subtypes(kind)]; by = rule_name))
 

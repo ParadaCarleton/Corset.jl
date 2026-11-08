@@ -269,9 +269,6 @@ constant_array_sites(context.sources)
 @rule TreeRule "nan-initializer" :pedantic "zeros, ones and fill of an array that is then written, which an untouched element should show as NaN" context ->
 nan_initializer_sites(context.sources)
 
-@rule TreeRule "similar-array" :pedantic "arrays built by Vector, Matrix or Array constructors (not the empty T[]), which similar of a template array replaces" context ->
-similar_array_sites(context.sources)
-
 @rule FileRule "broad-catch" :default "catch blocks that handle every exception alike, rethrowing none" (context, source) ->
 broad_catches(source)
 

@@ -30,127 +30,6 @@ struct NanInitializer
     proof::Symbol
     element::String
     dimensions::Vector{String}
-    template::String
-end
-
-# Calls that build a local array, which then serves as a template. `copy` and `rand` are absent: they also return dictionaries, strings and scalars.
-const ARRAY_BUILDERS = ("similar", "collect", "zeros", "ones", "fill", "Vector", "Matrix", "Array")
-
-"""Whether the call syntax `call` builds an array: a call of `ARRAY_BUILDERS` (`fill` needs a dimension, or it is zero-dimensional)."""
-function builds_array(call::SYNTAX.SyntaxNode)::Bool
-    if SYNTAX.kind(call) !== CALL_KIND || !is_prefix_call(call)
-        return false
-    end
-    head = first(node_children(call))
-    name = callee_name(SYNTAX.kind(head) === SYNTAX.@K_str("curly") ? first(node_children(head)) : head)
-    arguments = filter(!keyword_part, node_children(call)[2:end])
-    return name in ARRAY_BUILDERS && !any(names_static_array, arguments) && (name != "fill" || length(arguments) >= 2)
-end
-
-"""Whether `statement` is `variable = <array-building call>`."""
-function assigns_array(statement::SYNTAX.SyntaxNode, variable::String)::Bool
-    parts = node_children(statement)
-    return SYNTAX.kind(statement) === SYNTAX.@K_str("=") && length(parts) == 2 && is_identifier(first(parts), variable) && builds_array(last(parts))
-end
-
-"""The parameter syntax of the function definition syntax `definition`: those of its signature call, or of an anonymous `function (x, y)` tuple."""
-function definition_parameters(definition::SYNTAX.SyntaxNode)::Vector{SYNTAX.SyntaxNode}
-    signature = first(node_children(definition))
-    while SYNTAX.kind(signature) in (SYNTAX.@K_str("where"), SYNTAX.@K_str("::")) && !isempty(node_children(signature))
-        signature = first(node_children(signature))
-    end
-    return SYNTAX.kind(signature) === CALL_KIND ? node_children(signature)[2:end] : node_children(signature)
-end
-
-"""
-The number of places in syntax `node` and below that bind the name `variable`: assignments (destructuring included), `for` and
-comprehension variables, lambda and `do` arguments, `catch` variables, `let`, `local` and `global` names and function parameters.
-"""
-function binding_count(node::SYNTAX.SyntaxNode, variable::String)::Int
-    children = node_children(node)
-    kind = SYNTAX.kind(node)
-    own = 0
-    if isempty(children)
-        return own
-    elseif kind in (SYNTAX.@K_str("="), SYNTAX.@K_str("op="), SYNTAX.@K_str("in"), SYNTAX.@K_str("->"), SYNTAX.@K_str("do"), SYNTAX.@K_str("catch"), SYNTAX.@K_str("local"), SYNTAX.@K_str("global"))
-        own = binds_name(first(children), variable) ? 1 : 0
-    elseif kind === SYNTAX.@K_str("macrocall")
-        # A macro may bind a name it is given (`@variables x`), so a bare name argument counts.
-        own = count(Base.Fix2(is_identifier, variable), children)
-    elseif kind === SYNTAX.@K_str("let")
-        own = count(Base.Fix2(is_identifier, variable), node_children(first(children)))
-    elseif kind === SYNTAX.@K_str("function")
-        own = count(Base.Fix2(binds_name, variable), definition_parameters(node))
-    end
-    return own + sum(Base.Fix2(binding_count, variable), children; init = 0)
-end
-
-# Syntax that opens a scope a binding does not leave: the scopes of `enclosing_scope` and the `do` closure.
-const CLOSURE_KINDS = (SCOPE_KINDS..., SYNTAX.@K_str("do"))
-
-"""The syntax nodes of `CLOSURE_KINDS` around `node`, innermost first."""
-function closures_around(node::SYNTAX.SyntaxNode)::Vector{SYNTAX.SyntaxNode}
-    found = SYNTAX.SyntaxNode[]
-    current = node.parent
-    while !isnothing(current)
-        if SYNTAX.kind(current) in CLOSURE_KINDS
-            push!(found, current)
-        end
-        current = current.parent
-    end
-    return found
-end
-
-"""The outermost function, lambda or `let` syntax around `node`: the whole region in which a name can be rebound under it."""
-function outermost_scope(node::SYNTAX.SyntaxNode)::SYNTAX.SyntaxNode
-    outermost = node
-    current = node.parent
-    while !isnothing(current)
-        outermost = SYNTAX.kind(current) in CLOSURE_KINDS ? current : outermost
-        current = current.parent
-    end
-    return outermost
-end
-
-"""Whether syntax `node` or anything below it is `variable = <array-building call>` that ends before `call` and sits in a closure that also holds `call` or one around it."""
-function assigns_array_before(node::SYNTAX.SyntaxNode, variable::String, call::SYNTAX.SyntaxNode)::Bool
-    if assigns_array(node, variable) && last(SYNTAX.byte_range(node)) < first(SYNTAX.byte_range(call)) && visible_from(node, call)
-        return true
-    end
-    for child in node_children(node)
-        if assigns_array_before(child, variable, call)
-            return true
-        end
-    end
-    return false
-end
-
-"""Whether the binding `node` is in a closure that is `call`'s own closure or one around it."""
-function visible_from(node::SYNTAX.SyntaxNode, call::SYNTAX.SyntaxNode)::Bool
-    own = closures_around(node)
-    return isempty(own) || any(Base.Fix1(===, first(own)), closures_around(call))
-end
-
-"""Whether `variable` is a local array at `call`: the whole outermost function binds the name exactly once, in an array-building assignment before `call`."""
-function local_array(call::SYNTAX.SyntaxNode, variable::String)::Bool
-    scope = outermost_scope(call)
-    return binding_count(scope, variable) == 1 && assigns_array_before(scope, variable, call)
-end
-
-"""Whether `variable` is an array parameter annotated as one that the whole outermost function binds exactly once, as that parameter."""
-array_parameter(call::SYNTAX.SyntaxNode, variable::String)::Bool = annotated_array(call, variable) && binding_count(outermost_scope(call), variable) == 1
-
-"""The array variable `x` that a dimension text of `dimensions` names as `length(x)` or `size(x)` when `x` is an array argument or local at `call`, else `""`."""
-function dimension_template(call::SYNTAX.SyntaxNode, dimensions::AbstractVector{<:AbstractString})::String
-    for dimension in dimensions
-        for found in eachmatch(r"^(?:length|size)\((\w+)\)$", dimension)
-            candidate = string(only(found.captures))
-            if array_parameter(call, candidate) || local_array(call, candidate)
-                return candidate
-            end
-        end
-    end
-    return ""
 end
 
 """Whether the `read` of an array is the target of an accumulation `x[i] += …`, `x .+= …` or `x += …`: it reads its start value."""
@@ -284,7 +163,7 @@ function binding_initializers(binding::SYNTAX.SyntaxNode)::Vector{NanInitializer
     later = from_first_reader(siblings[(only(findall(Base.Fix1(===, binding), siblings)) + 1):end], variable)
     proven = element != UNKNOWN_ELEMENT && !isempty(later) && initializes_array(first(later), variable, constructor_rank(dimensions))
     proof = element in NANLESS_TYPES ? :nanless : proven ? :initializer : :unproven
-    return [NanInitializer(call, name, proof, element, dimensions, dimension_template(call, dimensions))]
+    return [NanInitializer(call, name, proof, element, dimensions)]
 end
 
 """Every written constant-array initializer below syntax `node`, in source order."""
@@ -299,15 +178,8 @@ function nan_initializers(node::SYNTAX.SyntaxNode)::Vector{NanInitializer}
     return found
 end
 
-"""The text of the NaN initializer that replaces `initializer`: `fill!(similar(template, T, dimensions…), NaN)` when an array in scope gives the dimensions, else `fill(T(NaN), dimensions…)` (`fill(NaN, dimensions…)` for Float64)."""
-function nan_text(initializer::NanInitializer)::String
-    element = isempty(initializer.element) ? "Float64" : initializer.element
-    dimensions = join(initializer.dimensions, ", ")
-    if !isempty(initializer.template)
-        return "fill!(similar($(initializer.template), $element, $dimensions), NaN)"
-    end
-    return "fill($(isempty(initializer.element) ? "NaN" : element * "(NaN)"), $dimensions)"
-end
+"""The text of the NaN initializer that replaces `initializer`: `fill(T(NaN), dimensions…)`, or `fill(NaN, dimensions…)` for Float64."""
+nan_text(initializer::NanInitializer)::String = "fill($(isempty(initializer.element) ? "NaN" : initializer.element * "(NaN)"), $(join(initializer.dimensions, ", ")))"
 
 """The site of `initializer` in `source`, at its lines."""
 function nan_initializer_site(source::Source, initializer::NanInitializer)::Site
@@ -349,8 +221,7 @@ end
 """
     nan_initializer_plan(repository, directories)
 
-The `FixPlan` that rewrites each proven initializer `zeros(T, dims…)`, `ones(T, dims…)` or `fill(v, dims…)` as `fill(T(NaN), dims…)`, or `fill!(similar(x, T, dims…), NaN)` when `length(x)` or `size(x)` of an array in scope gives the dimensions. Two limits no check can exclude: a template built by `Array(y)` or `Vector(y)` from a sparse or device `y` keeps that type, and
-so does a sparse `x`, so review the diff.
+The `FixPlan` that rewrites each proven initializer `zeros(T, dims…)`, `ones(T, dims…)` or `fill(v, dims…)` as `fill(T(NaN), dims…)`.
 """
 function nan_initializer_plan(repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)}
     repairs = Repair{ByteRewrite}[]

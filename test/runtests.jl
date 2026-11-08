@@ -1575,7 +1575,6 @@ include("cli.jl")
 include("syntax_hazards.jl")
 include("constant_array.jl")
 include("nan_initializer.jl")
-include("similar_array.jl")
 include("fixer_properties.jl")
 
 @testset "undefined_names: a name nothing defines is reported, and so is an unlowered testset" begin

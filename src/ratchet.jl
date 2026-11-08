@@ -153,9 +153,9 @@ end
 function opt_out_comments(path::AbstractString, text::String)::Vector{OptOutComment}
     tokens = [token.range for token in SYNTAX.tokenize(text) if SYNTAX.kind(token) == COMMENT_KIND]
     comments = collect(OptOutComment, Iterators.flatten(token_comments.(text, (SYNTAX.SourceFile(text),), tokens)))
-    unknown = filter(comment -> comment.rule ∉ rule_name.(RULES), comments)
+    unknown = filter(comment -> comment.rule ∉ check_names(), comments)
     if !isempty(unknown)
-        throw(UsageError("$path:$(first(unknown).line): `# lint: $(first(unknown).rule)` names no rule; the rules are $(join(rule_name.(RULES), ", "))"))
+        throw(UsageError("$path:$(first(unknown).line): `# lint: $(first(unknown).rule)` names no rule; the rules are $(join(check_names(), ", "))"))
     end
     unclosed = filter(Base.Fix1(open_begin, comments), comments)
     if !isempty(unclosed)

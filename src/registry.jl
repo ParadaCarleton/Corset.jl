@@ -182,9 +182,6 @@ runtime_dispatches(context.repository, context.inferred; context.comments)
 @rule ModuleRule "recursion-limit" :default "calls inference cuts off at its recursion limit, their argument types nesting deeper with every call" context ->
 recursion_limits(context.repository, context.inferred, loaded_module(context); context.comments)
 
-@rule ModuleRule "float-widening" :default "statements whose float result is wider than every float argument of their method" context ->
-float_widenings(context.repository, context.inferred; search = context.candidates, context.comments)
-
 @rule ModuleRule "unstable-return" :default "methods whose inferred result a caller cannot compile against concretely" context ->
 unstable_returns(context.repository, context.inferred; context.comments)
 
@@ -242,9 +239,6 @@ invariant_parameters(source, scope(context), context.own_methods)
 @rule FileRule "annotation" :default "methods with an unannotated argument or result" (context, source) ->
 missing_annotations(source)
 
-@rule FileRule "float64" :pedantic "Float64 tokens and untyped float literals" (context, source) ->
-float64_sites(source)
-
 @rule FileRule "c-type" :pedantic "C-interop types (Cint, Cdouble, ...) outside a ccall" (context, source) ->
 c_type_sites(source)
 
@@ -271,6 +265,9 @@ abstract_floats(source)
 
 @rule FileRule "where-return" :default "short-form definitions whose where binds the return annotation" (context, source) ->
 where_return_sites(source)
+
+@rule TreeRule "type-disruption" :default "code that drops the types its inputs carry: float-widening, float64, literal-array" context ->
+collect(Site, Iterators.flatten(values(type_disruption_sites!(context))))
 
 @rule TreeRule "constant-array" :pedantic "zeros, ones, fill, trues and falses of an array no code writes, which FillArrays stores as one value" context ->
 constant_array_sites(context.sources)
@@ -320,5 +317,32 @@ fix_plan(::AbstractFloatRule, repository::Repository, directories::Tuple{Vararg{
 fix_plan(::ConcreteArgRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
     concrete_arg_plan(repository, directories)
 
+"""A check with its own name, group and summary: what levels, baselines and `# lint:` comments address."""
+struct Check
+    name::String
+    group::Symbol
+    summary::String
+end
+
+"""The `Check`s of `rule`: itself, unless the rule has sub-checks that keep their own names."""
+checks(rule::Rule)::Vector{Check} = [Check(rule_name(rule), rule_group(rule), rule_summary(rule))]
+
+checks(::TypeDisruptionRule)::Vector{Check} = [
+    Check("float-widening", :default, "statements whose float result is wider than every float argument of their method"),
+    Check("float64", :pedantic, "Float64 tokens and untyped float literals"),
+    Check("literal-array", :default, "arrays built from a literal Vector, Matrix or Array type, which inherits no array type"),
+]
+
+"""The sites `rule` finds in `context`, by the name of the check that finds each."""
+grouped_sites!(rule::Rule, context::Context)::Dict{String, Vector{Site}} = Dict{String, Vector{Site}}(rule_name(rule) => check(rule, context))
+
+grouped_sites!(::TypeDisruptionRule, context::Context)::Dict{String, Vector{Site}} = type_disruption_sites!(context)
+
 """Every rule, ordered by name."""
 const RULES = Tuple(sort!([type() for kind in (ModuleRule, TreeRule, FileRule) for type in subtypes(kind)]; by = rule_name))
+
+"""The names levels, baselines and `# lint:` comments accept, ordered."""
+check_names()::Vector{String} = sort!(String[check.name for rule in RULES for check in checks(rule)])
+
+"""Every `Check`, ordered by name."""
+sorted_checks()::Vector{Check} = sort!(collect(Check, Iterators.flatten(checks.(RULES))); by = check -> check.name)

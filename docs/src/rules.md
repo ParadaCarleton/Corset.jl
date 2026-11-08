@@ -16,7 +16,7 @@ A `pedantic` rule enforces house style that Rust allows, or is a noisy heuristic
 
 | Group | Rules |
 | --- | --- |
-| `default` | `abstract-field`, `annotation`, `bang`, `banned-name`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anon-fun`, `invariant-parameter`, `jet`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anon-fun`, `quadratic-vcat`, `recursion-limit`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anon-fun`, `unstable-return`, `unstable-variable`, `where-return` |
+| `default` | `abstract-field`, `annotation`, `bang`, `banned-name`, `broad-catch`, `concrete-arg`, `derived-constant`, `fatou`, `float-widening`, `forbidden-pattern`, `hidden-input`, `impure-anon-fun`, `invariant-parameter`, `jet`, `literal-array`, `misplaced-import`, `mutable-struct`, `non-atomic-write`, `non-public-access`, `overspecialized-anon-fun`, `quadratic-vcat`, `recursion-limit`, `repeated-statement`, `return-type`, `runtime-dispatch`, `unmarked-mutation`, `unstable-anon-fun`, `unstable-return`, `unstable-variable`, `where-return` |
 | `pedantic` | `abstract-float`, `c-type`, `concrete-return`, `constant-array`, `file-length`, `float64`, `jscpd`, `nothing-return`, `one-letter`, `quadratic-scan`, `range-guard`, `ref`, `repeated-prefix`, `struct-constant`, `unwritten-undef`, `wide-struct` |
 
 `corset rules` prints each rule's group and level. `[preferences.Corset.levels]` and the `--allow`,
@@ -125,7 +125,22 @@ of such members.
 
 Repair: make the result type depend only on the argument types.
 
-### `float-widening`: `float_widenings(repo, entry_frames(seeds, mod))`
+### `type-disruption`: `type_disruption_sites!(context)`
+
+One rule for code that drops the types its inputs carry. Its sub-checks keep their own names, so
+`[preferences.Corset.levels]`, `--allow`/`--warn`/`--deny`, baseline tables and `# lint:` comments
+address `float-widening`, `float64` and `literal-array` each; `type-disruption` itself is no name.
+`corset rules` lists the sub-checks. `float-widening` reads the entry frames and finds nothing
+without them (`corset check` lists it as skipped); the others read source text.
+
+#### `literal-array`: `literal_array_sites(source)`
+
+Arrays built from a literal container type, which inherits no array type (a GPU array, a
+`FixedSizeVector`, a static array): `Vector{T}(undef, n)`, `Matrix{T}(undef, …)`, `Array{T}(undef, …)`
+and `similar(Vector{T}, n)`. Allowed: `similar(x, T, dims…)` with an input array `x`, and
+`similar(A, dims…)` with an array type `A` passed in (`::Type{A}`).
+
+#### `float-widening`
 
 Statements whose float result is wider than every float the method receives in its
 arguments: `x::Float32 * 2.0`, `n / m` on `Int`s in a `Float32` method, `float(n)`, a `Float64`
@@ -139,7 +154,7 @@ At a runtime dispatch the rule lists the candidate methods (`candidate_limit`, a
 more candidates than the budget, or one inference cannot type, may widen: "may widen
 (`runtime-dispatch`)". A dispatch whose argument types cannot hold the method's floats is skipped.
 
-`float64` finds the same literals and tokens in the source text of every method; this rule reads what
+`float64` finds the same literals and tokens in the source text of every method; `float-widening` reads what
 the compiler made of them, for the argument types given. [`float64_ops`](@ref) counts the Float64
 operations of one call.
 
@@ -205,7 +220,7 @@ Each takes `Corset.Source(repo, file)`, the file read and parsed once.
 | `concrete-return` | `concrete_returns(source, mod)` | result types that name a concrete type, `Vector{E}` included; `AbstractMatrix{T}` passes; a constructor returning its own type is exempt | annotate by what the arguments bind; `Corset.CONCRETE_RETURN_FIX` is the log text |
 | `invariant-parameter` | `invariant_parameters(source, mod, own_methods)` | an abstract type parameter written without `<:` in an argument annotation or `where` bound: `f(xs::AbstractVector{Real})` throws a `MethodError` for `f([1.0, 2.0])`. Names resolve in each definition's own module, a submodule's included files too. `Any` and the parameters of `Tuple`, `NTuple`, `Type` and `Val` pass | `AbstractVector{<:Real}`, which the detail spells, or a type parameter |
 | `annotation` | `missing_annotations` | methods with an unannotated argument or result | annotate |
-| `float64` | `float64_sites(source)` | `Float64` tokens and untyped float literals; `float-widening` reads where they widen a narrower argument | `zero(T)`, `T(0.5)` or `oftype(x, 0.5)` |
+| `float64` (sub-check of `type-disruption`) | `float64_sites(source)` | `Float64` tokens and untyped float literals; `float-widening` reads where they widen a narrower argument | `zero(T)`, `T(0.5)` or `oftype(x, 0.5)` |
 | `ref` | `ref_sites(source)` | `Ref` and `RefValue` outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | Return the changed data from the function that computes it. A broadcast shield (`f.(Ref(x), xs)`) opts out with `# lint: ref` |
 | `c-type` | `c_type_sites(source)` | `Cint`, `Cdouble` and the other C-interop types outside `ccall`, `@ccall`, `cfunction`, `@cfunction` and `@ccallable` | `Int`, `Float64` or `String`; convert at the `ccall` |
 | `one-letter` | `one_letter_sites(repo, source)` | one-letter variable names (exempt: `_` and `Repository.one_letter_exempt`) | name the variable |

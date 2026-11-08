@@ -306,7 +306,7 @@ file_texts(root::String, files::AbstractVector{GeneratedFile})::Vector{String} =
 
 """The Project.toml of a generated package: it turns on exactly the fixable rules, at `deny`."""
 function fixer_project()::String
-    levels = Dict(Corset.rule_name(rule) => ifelse(Corset.fixable(rule), "deny", "allow") for rule in Corset.RULES)
+    levels = Dict(check.name => ifelse(Corset.fixable(rule), "deny", "allow") for rule in Corset.RULES for check in Corset.checks(rule))
     return sprint(TOML.print, Dict("preferences" => Dict("Corset" => Dict("levels" => levels))))
 end
 

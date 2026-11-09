@@ -32,6 +32,7 @@ julia = "1.13"
 
 [preferences.Corset]
 baseline = "corset_baseline.toml"
+struct_field_limit = 14
 
     [preferences.Corset.levels]
     concrete-return = "allow"

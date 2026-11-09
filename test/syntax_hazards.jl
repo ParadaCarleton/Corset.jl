@@ -55,7 +55,8 @@ end
     text = "owner_of(x) = x\nf(cell_key, Key) = haskey(cell_key, 1)\nstruct S\n    key::Int\n    ok::Int\nend\ng(x) = for cell in x\n    q = cell\nend\nh(x) = x\n"
     @test [site.line for site in sites(text)] == [1, 2, 2, 3, 7]
     @test isempty(sites(text; words = (), suffixes = ()))
-    @test Corset.is_banned(:Cell_Count, ("cell",), ())
-    @test !Corset.is_banned(:cellular, ("cell",), ())
+    cells = Repository(mktempdir(); banned_words = ("cell",))
+    @test Corset.is_banned(:Cell_Count, cells)
+    @test !Corset.is_banned(:cellular, cells)
     @test Corset.load_config(mktempdir()).banned_words == ()
 end

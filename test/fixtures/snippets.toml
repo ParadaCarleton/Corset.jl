@@ -318,3 +318,13 @@ end
 lambda_broadcast(names::Vector{String})::Vector{Int} = (name -> write(name, name)).(names)
 opted(paths::Vector{String}, texts::Vector{String})::Nothing = (write.(paths, texts); nothing) # lint: non-atomic-write  scratch files
 '''
+
+[abstract-float]
+source = '''
+scaled(x::AbstractFloat)::Float32 = Float32(x)
+bounded(x::T) where {T <: AbstractFloat} = x
+struct Box{T <: AbstractFloat}
+    contents::T
+end
+ulp(x::AbstractFloat)::AbstractFloat = eps(x)
+'''

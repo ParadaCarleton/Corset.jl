@@ -260,6 +260,9 @@ derived_constant_sites(context.mod, source)
 @rule FileRule "forbidden-pattern" :default "lines that match a pattern the project forbids (forbidden_patterns)" (context, source) ->
 forbidden_pattern_sites(context.repository, source)
 
+@rule FileRule "abstract-float" :pedantic "type annotations and bounds that name AbstractFloat where Real would do" (context, source) ->
+abstract_floats(source)
+
 @rule FileRule "where-return" :default "short-form definitions whose where binds the return annotation" (context, source) ->
 where_return_sites(source)
 

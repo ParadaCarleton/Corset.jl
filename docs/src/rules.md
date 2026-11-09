@@ -256,6 +256,13 @@ An index counts as a scalar only when it is an integer literal, `end` or a sum o
 vector slice, which is a `Fill` that a later write cannot change. `first(x, n)`, `last(x, n)` and any
 reader called with a keyword (`sum(x; dims = 1)`) return arrays, and `zero(x)` of an array is an array.
 
+### `abstract-float`: `abstract_floats(source)`
+
+`AbstractFloat` shuts out every real that is not a float; `Real` accepts them. The fixer writes each reported
+`AbstractFloat` as `Real`. It leaves a method alone when the file defines another method of the same name
+(`f(::AbstractFloat)` beside `f(::Integer)`), since the rewrite could give two methods one signature and the
+second would replace the first.
+
 ### `unwritten-undef`: `unwritten_undef_sites(sources)`
 
 It replaces `nan-initializer` since 0.4.0. An element no write reached must show. `similar(…)` and `T(undef, …)` arrays pass only when the rule proves every

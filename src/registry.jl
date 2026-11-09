@@ -308,6 +308,9 @@ fix_plan(::UnwrittenUndefRule, repository::Repository, directories::Tuple{Vararg
 fix_plan(::QuadraticVcatRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
     flatten_plan(repository, directories)
 
+fix_plan(::AbstractFloatRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
+    abstract_float_plan(repository, directories)
+
 fix_plan(::ConcreteArgRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)} =
     concrete_arg_plan(repository, directories)
 

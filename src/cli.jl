@@ -13,7 +13,7 @@ rethrow_arg_error(::ArgParseSettings, err::ArgParseError)::Nothing = throw(err) 
 
 """Add the argument or option `name` to `settings` with the ArgParse `options` (`help`, `action`, `default`, ...)."""
 option!(settings::ArgParseSettings, name::AbstractString; options...)::Nothing = (
-    add_arg_table!(settings, name, Dict{Symbol, Any}(options));
+    add_arg_table!(settings, name, Dict{Symbol, Any}(options)); # lint: abstract-element  ArgParse options mix strings, symbols and callables
     nothing
 )
 

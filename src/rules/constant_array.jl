@@ -493,7 +493,7 @@ const FILL_ARRAYS_UUID = "1a297f60-69ca-5386-bcde-b61e274b549b"
 
 """The `[deps]` table of the Project.toml `text`, empty without one."""
 function project_deps(text::AbstractString)::Dict{String, Any}
-    return haskey(TOML.parse(text), "deps") ? TOML.parse(text)["deps"]::Dict{String, Any} : Dict{String, Any}()
+    return haskey(TOML.parse(text), "deps") ? TOML.parse(text)["deps"]::Dict{String, Any} : Dict{String, Any}() # lint: abstract-element  TOML tables hold values of every type
 end
 
 """The Project.toml above the file `path`, as path => text, with FillArrays added to its `[deps]`; empty when it lists FillArrays already or no project exists."""

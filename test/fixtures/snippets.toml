@@ -49,6 +49,13 @@ filled(count_::Int)::Vector{Float32} = (buffer = zeros(Float32, count_); buffer 
 scratch(count_::Int)::Vector{Float32} = Vector{Float32}(undef, count_)
 '''
 
+[abstract-element]
+source = '''
+boxed(count_::Int)::Vector{Real} = Vector{Real}(undef, count_)
+table()::Dict{String, Any} = Dict{String, Any}()
+typed(count_::Int)::Vector{Float32} = Vector{Float32}(undef, count_)
+'''
+
 [concrete-arg]
 source = '''
 first_of(values::Vector{Int})::Int = first(values)

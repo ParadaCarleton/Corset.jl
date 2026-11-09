@@ -33,15 +33,27 @@ end
 """Whether `value` is a definition, string, symbol or regex: constant in use even where it is `ismutable`."""
 is_immutable_in_use(value::Any)::Bool = is_definition(value) || value isa Union{AbstractString, Symbol, Regex}
 
-"""Whether `value` is mutable or holds a mutable field at any depth: an immutable wrapper of a `Memory` (`FixedSizeVector`) is mutable state."""
-function holds_mutable(value::Any)::Bool # lint: unstable-variable  reflects on values of unknown type
-    if is_immutable_in_use(value)
-        return false
+"""
+Whether `root` is mutable or holds a mutable field at any depth: an immutable wrapper of a `Memory` (`FixedSizeVector`) is mutable state.
+Inlined, with a worklist in place of recursion, so the call on a value of unknown type resolves statically.
+"""
+@inline function holds_mutable(root::Any)::Bool # lint: unstable-variable  walks values of unknown type
+    pending = Any[root]
+    while !isempty(pending)
+        value = pop!(pending)
+        if is_immutable_in_use(value) || isbits(value)
+            continue
+        end
+        if ismutable(value)
+            return true
+        end
+        for index in 1:fieldcount(typeof(value))
+            if isdefined(value, index)
+                push!(pending, getfield(value, index))
+            end
+        end
     end
-    if ismutable(value)
-        return true
-    end
-    return !isbits(value) && any(name -> isdefined(value, name) && holds_mutable(getfield(value, name)), fieldnames(typeof(value)))
+    return false
 end
 
 """Every global `node`, a lowered statement, reads."""

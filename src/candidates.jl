@@ -40,7 +40,8 @@ struct Candidates
     complete::Bool
 end
 
-const NO_CANDIDATES = Candidates(Inferred[], false)
+"""The `Candidates` of a call with no resolvable method: no frames, and incomplete."""
+no_candidates()::Candidates = Candidates(Inferred[], false)
 
 """The abstract signature of `:call` statement `statement` from its inferred operand types; `nothing` for a builtin's call."""
 function call_signature(statement::Expr, ir::COMPILER.IRCode)::Union{Nothing, Type}
@@ -58,11 +59,11 @@ The `Candidates` of the runtime-dispatch `statement` of `ir`: none and incomplet
 function call_candidates(statement::Expr, ir::COMPILER.IRCode, search::CandidateSearch)::Candidates # lint: unmarked-mutation  memoizes frames in the search
     signature = call_signature(statement, ir)
     if search.limit == 0 || isnothing(signature)
-        return NO_CANDIDATES
+        return no_candidates()
     end
     matches = Base._methods_by_ftype(signature, search.limit, Base.get_world_counter())
     if !(matches isa AbstractVector)
-        return NO_CANDIDATES
+        return no_candidates()
     end
     frames = candidate_frame.((search,), matches)
     return Candidates(Inferred[frame for frame in frames if !isnothing(frame)], !any(isnothing, frames))

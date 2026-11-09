@@ -1286,7 +1286,8 @@ end
         @test Corset.argument_writes(countdown, walk, (countdown.code.parent,), search).cut
         @test !haskey(walk.summaries, (countdown.code.parent, search.limit))
         estate = Corset.escape_state(far.ir, far.method.nargs)
-        @test Corset.invoked_writes(Expr(:invoke, "no instance", identity), estate, walk, (), search) === Corset.NO_WRITES
+        no_writes = Corset.invoked_writes(Expr(:invoke, "no instance", identity), estate, walk, (), search)
+        @test all(isempty, (no_writes.written, no_writes.dispatched, no_writes.foreign, no_writes.writers)) && !no_writes.cut
     end
     @testset "Base.:! is no `!` name; a varargs callee writes every operand it gathers" begin
         @test !haskey(details, "negated")
@@ -1412,7 +1413,8 @@ end
             @test !cut.complete && isempty(cut.frames)
         end
         splat, splat_statement = dispatch_statement(inferred, Candidates.splatted)
-        @test Corset.call_candidates(splat_statement, splat.ir, search) === Corset.NO_CANDIDATES
+        no_candidates = Corset.call_candidates(splat_statement, splat.ir, search)
+        @test isempty(no_candidates.frames) && !no_candidates.complete
     end
     @testset "a candidate inference cannot type leaves the others and marks the list incomplete" begin
         broken, broken_statement = dispatch_statement(inferred, Candidates.breaks)

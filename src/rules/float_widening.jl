@@ -74,9 +74,11 @@ end
 
 """
 The `Operand`s of IR statement `statement`: an `Expr`'s arguments past an `:invoke`'s instance, a φ's
-values, a π's or a `return`'s value, a global read itself.
+values, a π's or a `return`'s value, a global read itself. A nested `Expr` is no IR value (a
+`:foreigncall` names its library as `Expr(:tuple, ...)`), so it yields none.
 """
-statement_operands(statement::Expr, ir::COMPILER.IRCode)::Vector{Operand} = Operand.(statement.args[(1 + (statement.head === :invoke)):end], (ir,))
+statement_operands(statement::Expr, ir::COMPILER.IRCode)::Vector{Operand} =
+    Operand.(filter(!Base.Fix2(isa, Expr), statement.args[(1 + (statement.head === :invoke)):end]), (ir,))
 statement_operands(statement::Core.PhiNode, ir::COMPILER.IRCode)::Vector{Operand} =
     Operand.(statement.values[isassigned.((statement.values,), eachindex(statement.values))], (ir,))
 statement_operands(statement::Core.PiNode, ir::COMPILER.IRCode)::Vector{Operand} = [Operand(statement.val, ir)]

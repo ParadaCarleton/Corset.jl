@@ -1375,8 +1375,8 @@ function bound_names(target::Expr)::Vector{Symbol}
 end
 bound_names(::Any)::Vector{Symbol} = Symbol[]
 
-"""The one-letter variable names parsed expression `node` itself binds, besides those `exempt` allows: method parameters, an assignment or loop target, a lambda parameter, a `catch` variable."""
-function one_letter_names(node::Expr, exempt::Tuple{Vararg{Symbol}})::Vector{Symbol}
+"""The variable names parsed expression `node` itself binds: method parameters, an assignment or loop target, a lambda parameter, a `catch` variable."""
+function binding_names(node::Expr)::Vector{Symbol}
     call = signature_call(node)
     names = Symbol[]
     if !isnothing(call)
@@ -1389,8 +1389,11 @@ function one_letter_names(node::Expr, exempt::Tuple{Vararg{Symbol}})::Vector{Sym
     elseif node.head === :try && length(node.args) >= 3
         names = bound_names(node.args[2])
     end
-    return filter(Base.Fix2(is_one_letter, exempt), names)
+    return names
 end
+
+"""The one-letter variable names parsed expression `node` itself binds, besides those `exempt` allows."""
+one_letter_names(node::Expr, exempt::Tuple{Vararg{Symbol}})::Vector{Symbol} = filter(Base.Fix2(is_one_letter, exempt), binding_names(node))
 
 """One site per one-letter variable name in the Julia file `source`, keyed by file and enclosing function (or testset); `repository.one_letter_exempt` names the allowed ones."""
 one_letter_sites(repository::Repository, source::Source)::Vector{Site} =

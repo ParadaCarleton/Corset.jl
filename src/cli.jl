@@ -146,6 +146,8 @@ function with_overrides(
         config.struct_field_limit,
         config.strict_captures,
         config.forbidden_patterns,
+        config.banned_words,
+        config.banned_suffixes,
     )
 end
 

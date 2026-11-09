@@ -251,6 +251,9 @@ ref_sites(source)
 @rule FileRule "one-letter" :pedantic "one-letter variable names" (context, source) ->
 one_letter_sites(context.repository, source)
 
+@rule FileRule "banned-name" :default "names a project bans by word or suffix (banned_words, banned_suffixes)" (context, source) ->
+banned_name_sites(context.repository, source)
+
 @rule FileRule "file-length" :pedantic "source files longer than the repository's file_line_limit" (context, source) ->
 long_file_sites(context.repository, source)
 

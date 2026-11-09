@@ -22,12 +22,26 @@ function is_hidden_input(binding::GlobalRef)::Bool # lint: unstable-variable  re
         return false
     end
     value = getfield(binding.mod, binding.name)
-    if is_definition(value) || value isa Union{AbstractString, Symbol, Regex}
+    if is_immutable_in_use(value)
         return false
     end
     return !isconst(binding.mod, binding.name) ||
-        ismutable(value) ||
+        holds_mutable(value) ||
         value isa Base.ScopedValues.ScopedValue
+end
+
+"""Whether `value` is a definition, string, symbol or regex: constant in use even where it is `ismutable`."""
+is_immutable_in_use(value::Any)::Bool = is_definition(value) || value isa Union{AbstractString, Symbol, Regex}
+
+"""Whether `value` is mutable or holds a mutable field at any depth: an immutable wrapper of a `Memory` (`FixedSizeVector`) is mutable state."""
+function holds_mutable(value::Any)::Bool # lint: unstable-variable  reflects on values of unknown type
+    if is_immutable_in_use(value)
+        return false
+    end
+    if ismutable(value)
+        return true
+    end
+    return !isbits(value) && any(name -> isdefined(value, name) && holds_mutable(getfield(value, name)), fieldnames(typeof(value)))
 end
 
 """Every global `node`, a lowered statement, reads."""
@@ -1098,13 +1112,13 @@ function names_concrete_type(annotation::Expr, scope::Module, variables::Any = (
 end
 names_concrete_type(::Any, ::Module, ::Any = ())::Bool = false
 
-"""Whether type name `head` resolves in `scope` to a type that neither Base nor Core defines."""
+"""Whether type name `head` resolves in `scope` to a type that neither Base nor Core defines, and is no array or dictionary (those have an abstract form to name, as `FixedSizeVector{E}` has `AbstractVector{E}`)."""
 function package_type(head::Symbol, scope::Module)::Bool # lint: unstable-variable  Expr nodes hold untyped arguments
     if !isdefined(scope, head)
         return false
     end
     named = getglobal(scope, head)
-    return named isa Type && !(parentmodule(named) in (Base, Core))::Bool
+    return named isa Type && !(parentmodule(named) in (Base, Core))::Bool && !(named <: Union{AbstractArray, AbstractDict})
 end
 package_type(::Any, ::Module)::Bool = false
 

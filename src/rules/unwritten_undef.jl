@@ -1,6 +1,6 @@
-# The rule `nan-initializer` and its fixer: an array built by `zeros`, `ones` or `fill` and then written is
-# initialized with NaN, so an element no write reached shows. The fixer proves that every element is written before
-# any read (`x .= …`, or a loop over all indices whose first use of `x` is `x[i, …] = …`); other written arrays are only flagged.
+# The rule `unwritten-undef` and its fixer: an element no write reached must show. An uninitialized array (`similar(…)`,
+# `T(undef, …)`) passes only when `initializes_array` proves every element written before any read; a written `zeros`,
+# `ones` or `fill` array should start as NaN, and the fixer rewrites the proven ones as `fill(T(NaN), dims…)`.
 
 # Element types that have no NaN, so an array of them gets no NaN initializer.
 const NANLESS_TYPES = (
@@ -20,6 +20,9 @@ const UNTYPED_FILL = "!"
 # Kinds of syntax that end an iteration early or skip its writes.
 const BROADCAST_ASSIGN_KIND = SYNTAX.@K_str(".=")
 const EXIT_KINDS = (SYNTAX.@K_str("break"), SYNTAX.@K_str("continue"), SYNTAX.@K_str("return"))
+
+# Calls that write every element of one argument, by its position, whatever the others hold.
+const WHOLE_WRITERS = (; var"fill!" = 1, var"copy!" = 1, var"broadcast!" = 2, var"rand!" = 1, var"randn!" = 1, var"randexp!" = 1)
 
 # How an initializer array is judged: `:initializer` (every element written before any read, fixable), `:unproven`
 # (written, but not provably an initializer) or `:nanless` (an integer or Bool array, which has no NaN).
@@ -116,11 +119,18 @@ has_exit(node::SYNTAX.SyntaxNode)::Bool = SYNTAX.kind(node) in EXIT_KINDS || any
 """The `statements` from the first one that reads the variable `name` on, empty when none does."""
 from_first_reader(statements::AbstractVector{SYNTAX.SyntaxNode}, name::String)::Vector{SYNTAX.SyntaxNode} = collect(Iterators.dropwhile(statement -> isempty(variable_reads(statement, name)), statements))
 
-"""Whether the statement `later` writes the array `name` in full before any read: `name .= …`, or a loop over every index whose first statement to use `name` is `name[i, …] = …`."""
+"""
+Whether the statement `later` writes the array `name` of `rank` dimensions (`0` when unknown) in full before any read:
+`name .= …`, a `WHOLE_WRITERS` call that passes `name` once, at its written position, or a loop over every index whose
+first statement to use `name` is `name[i, …] = …` (`for i in eachindex(name)` whatever the rank).
+"""
 function initializes_array(later::SYNTAX.SyntaxNode, name::String, rank::Int)::Bool
     parts = node_children(later)
     if SYNTAX.kind(later) === BROADCAST_ASSIGN_KIND
         return is_identifier(first(parts), name) && isempty(variable_reads(last(parts), name))
+    elseif is_prefix_call(later) && haskey(WHOLE_WRITERS, Symbol(call_name(later)))
+        position = findfirst(Base.Fix2(is_identifier, name), filter(!keyword_part, parts[2:end]))
+        return count(!isempty ∘ Base.Fix2(variable_reads, name), parts) == 1 && position == WHOLE_WRITERS[Symbol(call_name(later))]
     elseif SYNTAX.kind(later) !== SYNTAX.@K_str("for") || has_exit(later)
         return false
     end
@@ -128,10 +138,18 @@ function initializes_array(later::SYNTAX.SyntaxNode, name::String, rank::Int)::B
     body = last(parts)
     statements = node_children(body)
     used = from_first_reader(statements, name)
-    if isempty(used) || length(ranges) != rank || length(ranges) != length(node_children(first(parts)))
+    linear = length(ranges) == 1 && is_prefix_call(last(only(ranges))) && call_name(last(only(ranges))) == "eachindex"
+    if isempty(used) || !(length(ranges) == rank || (rank == 0 && linear)) || length(ranges) != length(node_children(first(parts)))
         return false
     end
     return writes_every_index(first(used), name, ranges) && isempty(from_first_reader(used[2:end], name))
+end
+
+"""Whether the first statement after the statement `binding` in its block to read the array `name` of `rank` dimensions is an `initializes_array` proof."""
+function written_after(binding::SYNTAX.SyntaxNode, name::String, rank::Int)::Bool
+    siblings = node_children(something(binding.parent))
+    later = from_first_reader(siblings[(something(findfirst(Base.Fix1(===, binding), siblings)) + 1):end], name)
+    return !isempty(later) && initializes_array(first(later), name, rank)
 end
 
 """The number of dimensions the constructor `dimensions` texts give, or `0` when a tuple, a `size(…)` or a splat hides it."""
@@ -159,33 +177,26 @@ function binding_initializers(binding::SYNTAX.SyntaxNode)::Vector{NanInitializer
     if isempty(reads) || element == UNTYPED_FILL || !any(Base.Fix1(===, :mutated) ∘ use_of, reads) || any(is_accumulation, reads)
         return NanInitializer[]
     end
-    siblings = node_children(parent)
-    later = from_first_reader(siblings[(only(findall(Base.Fix1(===, binding), siblings)) + 1):end], variable)
-    proven = element != UNKNOWN_ELEMENT && !isempty(later) && initializes_array(first(later), variable, constructor_rank(dimensions))
+    proven = element != UNKNOWN_ELEMENT && written_after(binding, variable, constructor_rank(dimensions))
     proof = element in NANLESS_TYPES ? :nanless : proven ? :initializer : :unproven
     return [NanInitializer(call, name, proof, element, dimensions)]
 end
 
 """Every written constant-array initializer below syntax `node`, in source order."""
 function nan_initializers(node::SYNTAX.SyntaxNode)::Vector{NanInitializer}
-    found = NanInitializer[]
-    if SYNTAX.kind(node) === SYNTAX.@K_str("=") && length(node_children(node)) == 2
-        append!(found, binding_initializers(node))
-    end
-    for child in node_children(node)
-        append!(found, nan_initializers(child))
-    end
-    return found
+    bound = SYNTAX.kind(node) === SYNTAX.@K_str("=") && length(node_children(node)) == 2 ? binding_initializers(node) : NanInitializer[]
+    return append!(bound, Iterators.flatten(nan_initializers.(node_children(node))))
 end
 
 """The text of the NaN initializer that replaces `initializer`: `fill(T(NaN), dimensions…)`, or `fill(NaN, dimensions…)` for Float64."""
 nan_text(initializer::NanInitializer)::String = "fill($(isempty(initializer.element) ? "NaN" : initializer.element * "(NaN)"), $(join(initializer.dimensions, ", ")))"
 
+"""The site of call syntax `call` in `source`, at its lines, with `detail`."""
+call_site(source::Source, call::SYNTAX.SyntaxNode, detail::String)::Site =
+    Site(source.name, source.path, first(SYNTAX.source_location(call)), first(SYNTAX.source_location(call.source, last(SYNTAX.byte_range(call)))), detail)
+
 """The site of `initializer` in `source`, at its lines."""
 function nan_initializer_site(source::Source, initializer::NanInitializer)::Site
-    node = initializer.call
-    first_line = first(SYNTAX.source_location(node))
-    last_line = first(SYNTAX.source_location(node.source, last(SYNTAX.byte_range(node))))
     advice = if initializer.proof === :initializer
         "every element is written before it is read, so initialize with NaN: `$(nan_text(initializer))`"
     elseif initializer.proof === :nanless
@@ -193,40 +204,71 @@ function nan_initializer_site(source::Source, initializer::NanInitializer)::Site
     else
         "the array is written but not provably in full before any read; initialize with NaN if no element is read as its start value"
     end
-    return Site(source.name, source.path, first_line, last_line, "`$(initializer.name)` initializes an array that is then written; $advice")
+    return call_site(source, initializer.call, "`$(initializer.name)` initializes an array that is then written; $advice")
 end
 
-"""One site per written array initialized with a constant (`nan_initializers`)."""
-function nan_initializer_sites(sources::AbstractVector{Source})::Vector{Site}
+"""Whether call syntax `call` builds an uninitialized array: `similar(…)` or `T(undef, …)`, outside a method signature."""
+function is_undef_call(call::SYNTAX.SyntaxNode)::Bool
+    parts = node_children(call)
+    return is_prefix_call(call) && !in_signature(call) && length(parts) > 1 &&
+        (constructor_name(first(parts)) == "similar" || (names_type(first(parts)) && is_identifier(parts[2], "undef")))
+end
+
+"""
+The number of dimensions the uninitialized array `call` gets, `0` when unknown: the dimensions it lists after `undef`
+or after the element type of `similar(template, T, dims…)` (`constructor_rank`).
+"""
+function undef_rank(call::SYNTAX.SyntaxNode)::Int
+    arguments = filter(!keyword_part, node_children(call)[2:end])
+    listed = is_identifier(first(arguments), "undef") || names_type(first(arguments)) ? arguments[2:end] :
+        length(arguments) > 1 && names_type(arguments[2]) ? arguments[3:end] : SYNTAX.SyntaxNode[]
+    return isempty(listed) ? 0 : constructor_rank(String[SYNTAX.sourcetext(argument) for argument in listed])
+end
+
+"""
+Whether the uninitialized array `call` is written in full before any read: passed straight to a whole-array writer
+(`fill!(similar(x), NaN)`), or bound to a local whose first later statement to read it is an `initializes_array` proof.
+"""
+function undef_call_written(call::SYNTAX.SyntaxNode)::Bool
+    parent = something(call.parent)
+    if is_prefix_call(parent) && haskey(WHOLE_WRITERS, Symbol(call_name(parent)))
+        return findfirst(Base.Fix1(===, call), filter(!keyword_part, node_children(parent)[2:end])) == WHOLE_WRITERS[Symbol(call_name(parent))]
+    end
+    target = first(node_children(parent))
+    return SYNTAX.kind(parent) === SYNTAX.@K_str("=") && last(node_children(parent)) === call && SYNTAX.kind(target) === IDENTIFIER_KIND &&
+        !isnothing(parent.parent) && SYNTAX.kind(parent.parent) === SYNTAX.@K_str("block") && written_after(parent, String(SYNTAX.sourcetext(target)), undef_rank(call))
+end
+
+"""Every uninitialized array call below syntax `node`, skipping quoted code and the methods of `similar`, which return one by contract."""
+function undef_calls(node::SYNTAX.SyntaxNode)::Vector{SYNTAX.SyntaxNode}
+    if SYNTAX.kind(node) === SYNTAX.@K_str("quote") || (SYNTAX.kind(node) === SYNTAX.@K_str("function") && defined_name(Expr(node)) === :similar)
+        return SYNTAX.SyntaxNode[]
+    end
+    return append!(is_undef_call(node) ? [node] : SYNTAX.SyntaxNode[], Iterators.flatten(undef_calls.(node_children(node))))
+end
+
+"""The site of the uninitialized array `call` of `source`, which `undef_call_written` cannot prove written in full."""
+undef_site(source::Source, call::SYNTAX.SyntaxNode)::Site = call_site(
+    source, call, "`$(SYNTAX.sourcetext(first(node_children(call))))` builds an array not provably written in full before it is read; " *
+        "fill it (`fill!(similar(x, T), NaN)`) or write it whole first (`x .= …`, `fill!`, or a loop over `eachindex(x)` writing `x[i]`)"
+)
+
+"""One site per written constant-array initializer (`nan_initializers`) and per uninitialized array not provably written in full."""
+function unwritten_undef_sites(sources::AbstractVector{Source})::Vector{Site}
     sites = Site[]
     for source in sources
-        for initializer in nan_initializers(source.tree)
-            push!(sites, nan_initializer_site(source, initializer))
-        end
+        append!(sites, nan_initializer_site.((source,), nan_initializers(source.tree)), undef_site.((source,), filter(!undef_call_written, undef_calls(source.tree))))
     end
     return sites
 end
 
-"""The repairs of `source`: one per proven initializer."""
-function nan_initializer_repairs(source::Source)::Vector{Repair{ByteRewrite}}
+"""The `FixPlan` that rewrites each proven initializer `zeros(T, dims…)`, `ones(T, dims…)` or `fill(v, dims…)` as `fill(T(NaN), dims…)`."""
+function unwritten_undef_plan(repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)}
     repairs = Repair{ByteRewrite}[]
-    for initializer in nan_initializers(source.tree)
+    for source in directory_sources(repository, directories), initializer in nan_initializers(source.tree)
         if initializer.proof === :initializer
             push!(repairs, Repair(nan_initializer_site(source, initializer), ByteRewrite(source.path, SYNTAX.byte_range(initializer.call), nan_text(initializer))))
         end
-    end
-    return repairs
-end
-
-"""
-    nan_initializer_plan(repository, directories)
-
-The `FixPlan` that rewrites each proven initializer `zeros(T, dims…)`, `ones(T, dims…)` or `fill(v, dims…)` as `fill(T(NaN), dims…)`.
-"""
-function nan_initializer_plan(repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(rewritten_texts)}
-    repairs = Repair{ByteRewrite}[]
-    for source in directory_sources(repository, directories)
-        append!(repairs, nan_initializer_repairs(source))
     end
     return FixPlan(repairs, rewritten_texts)
 end

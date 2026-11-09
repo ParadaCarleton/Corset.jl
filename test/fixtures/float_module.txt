@@ -35,3 +35,6 @@ count_up(x::Int16) = x
 count_up(x::Int32) = x
 count_up(x::Int64) = x
 signed_only(x::Float32, items::Vector{Signed}) = count_up(first(items))
+
+# A `ccall` names its library lazily with a nested `Expr(:tuple, ...)` argument.
+library_call(x::Float32) = ccall((:sin, "libm"), Float64, (Float64,), Float64(x))

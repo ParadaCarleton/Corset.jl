@@ -1459,7 +1459,7 @@ end
         Tuple{typeof(Floats.refined), narrow, Union{Nothing, narrow}}, Tuple{typeof(Floats.thrower), narrow},
         Tuple{typeof(Floats.wide), Float64}, Tuple{typeof(Floats.no_floats), Int},
         Tuple{typeof(Floats.grown), narrow, untyped}, Tuple{typeof(Floats.kept), narrow, untyped},
-        Tuple{typeof(Floats.signed_only), narrow, Vector{Signed}},
+        Tuple{typeof(Floats.signed_only), narrow, Vector{Signed}}, Tuple{typeof(Floats.library_call), narrow},
     ]
     inferred = entry_frames(seeds, Floats)
     repository = Repository(@__DIR__)
@@ -1477,6 +1477,9 @@ end
         @test found["calls_widened"].detail == "`widened` makes a Float64; the widest float argument is Float32"
         @test found["branchy"].detail == "`0.0` makes a Float64; the widest float argument is Float32"
         @test all(haskey.((found,), ["ratio", "elementwise", "widened"]))
+    end
+    @testset "a ccall's library name is a nested expression, not an operand" begin
+        @test occursin("makes a Float64", found["library_call"].detail)
     end
     @testset "a value computed from a widened one is not reported again" begin
         @test found["chained"].line == 9

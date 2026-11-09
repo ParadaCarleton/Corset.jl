@@ -81,9 +81,9 @@ end
 """A definition around `annotation` with `body`, in one of the shapes `FLOAT_FORMS` holds."""
 definition(shape::Int, annotation::String, body::String)::String =
     (
-        "f(x::$annotation) = $body\n", "function f(x::T) where {T <: $annotation}\n    return $body\nend\n",
-        "f(x)::$annotation = $body\n", "f(x::AbstractVector{<:$annotation}) = $body\n",
-    )[shape]
+    "f(x::$annotation) = $body\n", "function f(x::T) where {T <: $annotation}\n    return $body\nend\n",
+    "f(x)::$annotation = $body\n", "f(x::AbstractVector{<:$annotation}) = $body\n",
+)[shape]
 
 @testset "abstract-float: generated definitions keep the properties of the rule" begin
     mentions = Data.SampledFrom(1:4)

@@ -5,7 +5,7 @@ type-inference walk can start from. Each source is one function of a `Module` an
 """
 module Entries
 
-using ..Membership: Package, belongs, module_bindings, package_bindings
+using ..Membership: Package, belongs
 
 export entry_signatures
 
@@ -22,38 +22,13 @@ const SOURCES = (:compiled, :declared, :tests)
 """
     defined_methods(package)
 
-The methods the modules of `package` define on their own functions and types, closures included:
-each function's methods, and each type's constructors and call methods. Methods `package` adds to
-a function of a loaded module (`Base.show`, AD rules) count too.
+The methods the modules of `package` define, closures, constructors and methods added to other modules' functions
+(`Base.show`, AD rules) included: every method of the global method table whose module `belongs` to `package`.
 """
-function defined_methods(package::Package)::Vector{Method} # lint: unstable-variable  reflects on values of unknown type
-    values = vcat(package_bindings(package), loaded_functions())
-    world = Base.get_world_counter()
-    found = collect(Method, Iterators.flatten([binding_methods.(values, Function); call_methods.(values, world); binding_methods.(values, Type)]))
-    return unique(found[belongs.(getfield.(found, :module), (package,))])
-end
-
-"""Every function bound in `Base`, `Core` or a loaded module: where a package may add methods."""
-loaded_functions()::AbstractVector = collect(
-    Any, Iterators.flatten(filter(Base.Fix2(isa, Function), module_bindings(loaded)) for loaded in unique([Base; Core; collect(values(Base.loaded_modules))])),
-)
-
-# The helpers below take each binding as a call argument: a closure capturing a type or function
-# specializes on it, and one compile per binding of the checked package dominated a run.
-"""The methods of binding `value` when it is a `kind`: a function's methods, or a type's constructors."""
-function binding_methods(@nospecialize(value::Any), kind::Type)::Vector{Method}
-    if !(value isa kind)
-        return Method[]
-    end
-    return collect(Method, methods(value))
-end
-
-"""The methods that call an instance of binding `value` when it is a struct type; none otherwise."""
-function call_methods(@nospecialize(value::Any), world::Integer)::Vector{Method}
-    if !(value isa Type && Base.unwrap_unionall(value) isa DataType)
-        return Method[]
-    end
-    return Method[match.method for match in Base._methods_by_ftype(Tuple{Base.unwrap_unionall(value), Vararg}, -1, world)]
+function defined_methods(package::Package)::Vector{Method}
+    found = Method[]
+    Base.visit(Base.Fix1(push!, found), Core.methodtable)
+    return found[belongs.(getfield.(found, :module), (package,))]
 end
 
 """

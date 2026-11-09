@@ -85,19 +85,20 @@
 "Base.ProcessChain" = 1
 "Base.Sys.maxrss" = 1
 "Base.UV_EPIPE" = 1
-"Base._methods_by_ftype" = 5
+"Base._methods_by_ftype" = 4
 "Base.current_project" = 1
-"Base.get_world_counter" = 4
+"Base.get_world_counter" = 3
 "Base.include" = 1
 "Base.isvarargtype" = 1
 "Base.isvatuple" = 1
-"Base.loaded_modules" = 4
+"Base.loaded_modules" = 3
 "Base.require" = 3
 "Base.shell_parse" = 1
 "Base.specializations" = 2
 "Base.uncompressed_ir" = 1
 "Base.uniontypes" = 4
 "Base.unwrap_unionall" = 19
+"Base.visit" = 1
 "Compiler.EscapeAnalysis" = 1
 "Compiler.IRCode" = 34
 "Compiler.MethodLookupResult" = 1
@@ -146,6 +147,7 @@
 "Core.memoryrefset!" = 1
 "Core.memoryrefsetonce!" = 1
 "Core.memoryrefswap!" = 1
+"Core.methodtable" = 1
 
 [nothing-return]
 "src/candidates.jl call_signature" = 1

@@ -35,12 +35,13 @@ end
             "    for i in eachindex(x)\n        i > 2 && break\n        x[i] = 1\n    end", "    for i in 1:n\n        x[i] = 1\n    end", "    g!(x)",
             "    fill!(x, x)", "    x .= x .+ 1", "    for i in eachindex(x)\n        x[1] = 1\n    end", GRID_LOOP, "    Custom.fill!(x, 1)",
             "    for i in Custom.eachindex(x)\n        x[i] = 1\n    end", "    for i in Custom.axes(x, 1)\n        x[i] = 1\n    end",
-            "    for i in eachindex(x)\n        i = 1\n        x[i] = 1\n    end", "    peek = () -> x[1]\n    fill!(x, peek())", "    map(1:2) do k\n        x[k]\n    end\n    x .= 1",
+            "    for i in eachindex(x)\n        i = 1\n        x[i] = 1\n    end", "    peek = () -> x[1]\n    fill!(x, peek())", "    for i in eachindex(x)\n        i == 1 && @goto done\n        x[i] = 1\n    end\n    @label done",
+            "    for i in eachindex(x)\n        (i,) = (1,)\n        x[i] = 1\n    end", "    for i in eachindex(x)\n        i::Int = 1\n        x[i] = 1\n    end", "    map(1:2) do k\n        x[k]\n    end\n    x .= 1",
         )
         @test unwritten_lines(wrapped(body, "similar(y)")) == [2]
         @test proofs(wrapped(body, "zeros(n)")) == [:unproven]
     end
-    @test unwritten_lines("f(y) = similar(y)\ng(y) = copy!(y, similar(y))\nh(y) = Custom.fill!(similar(y), 1)\nbuffer = Vector{Int}(undef, 3)\nbuffer .= 1\n") == [1, 2, 3, 4]
+    @test unwritten_lines("f(y) = similar(y)\ng(y) = copy!(y, similar(y))\nh(y) = Custom.fill!(similar(y), 1)\nk(n) = similar(; dims = n)\nbuffer = Vector{Int}(undef, 3)\nbuffer .= 1\n") == [1, 2, 3, 5]
 end
 
 @testset "unwritten-undef: accumulators, unknown and NaN-less element types" begin

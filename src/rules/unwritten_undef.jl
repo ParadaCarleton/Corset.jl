@@ -108,7 +108,8 @@ function writes_every_index(write::SYNTAX.SyntaxNode, name::String, ranges::Abst
 end
 
 """Whether the syntax `node` holds an early exit of its loop: `break`, `continue`, `return`."""
-has_exit(node::SYNTAX.SyntaxNode)::Bool = SYNTAX.kind(node) in EXIT_KINDS || any(has_exit, node_children(node))
+has_exit(node::SYNTAX.SyntaxNode)::Bool = SYNTAX.kind(node) in EXIT_KINDS || any(has_exit, node_children(node)) ||
+    (SYNTAX.kind(node) === SYNTAX.@K_str("macrocall") && SYNTAX.sourcetext(first(node_children(node))) == "@goto")
 
 """The `statements` from the first one that reads the variable `name` on, empty when none does."""
 from_first_reader(statements::AbstractVector{SYNTAX.SyntaxNode}, name::String)::Vector{SYNTAX.SyntaxNode} = collect(Iterators.dropwhile(statement -> isempty(variable_reads(statement, name)), statements))
@@ -149,7 +150,7 @@ end
 
 """Whether syntax `node` assigns a variable of `names` (`i = …`, `i += …`), so a loop variable may stop covering its range."""
 assigns_any(node::SYNTAX.SyntaxNode, names::AbstractVector{String})::Bool =
-    (SYNTAX.kind(node) in (SYNTAX.@K_str("="), SYNTAX.@K_str("op=")) && any(Base.Fix1(is_identifier, first(node_children(node))), names)) || any(Base.Fix2(assigns_any, names), node_children(node))
+    (SYNTAX.kind(node) in (SYNTAX.@K_str("="), SYNTAX.@K_str("op=")) && !(SYNTAX.kind(first(node_children(node))) in (SYNTAX.@K_str("ref"), SYNTAX.@K_str("."))) && any(!isempty ∘ Base.Fix1(variable_reads, first(node_children(node))), names)) || any(Base.Fix2(assigns_any, names), node_children(node))
 
 """Whether a closure (`->`, `do` or an inner `function`) below syntax `node` reads `name`: a call may read the array before its write."""
 closure_reads(node::SYNTAX.SyntaxNode, name::String)::Bool = any(Base.Fix2(reading_closure, name), node_children(node))
@@ -203,20 +204,18 @@ call_site(source::Source, call::SYNTAX.SyntaxNode, detail::String)::Site =
 
 """The site of `initializer` in `source`, at its lines."""
 function nan_initializer_site(source::Source, initializer::NanInitializer)::Site
-    advice = if initializer.proof === :initializer
-        "every element is written before it is read, so initialize with NaN: `$(nan_text(initializer))`"
-    elseif initializer.proof === :nanless
-        "an $(initializer.element) array has no NaN to show an untouched element; pick a sentinel by hand"
-    else
-        "the array is written but not provably in full before any read; initialize with NaN if no element is read as its start value"
-    end
+    advice = (;
+        initializer = "every element is written before it is read, so initialize with NaN: `$(nan_text(initializer))`",
+        nanless = "an $(initializer.element) array has no NaN to show an untouched element; pick a sentinel by hand",
+        unproven = "the array is written but not provably in full before any read; initialize with NaN if no element is read as its start value",
+    )[initializer.proof]
     return call_site(source, initializer.call, "`$(initializer.name)` initializes an array that is then written; $advice")
 end
 
 """Whether call syntax `call` builds an uninitialized array: `similar(…)` or `T(undef, …)`, outside a method signature."""
 function is_undef_call(call::SYNTAX.SyntaxNode)::Bool
     parts = node_children(call)
-    return is_prefix_call(call) && !in_signature(call) && length(parts) > 1 &&
+    return is_prefix_call(call) && !in_signature(call) && any(!keyword_part, parts[2:end]) &&
         (constructor_name(first(parts)) == "similar" || (names_type(first(parts)) && is_identifier(parts[2], "undef")))
 end
 

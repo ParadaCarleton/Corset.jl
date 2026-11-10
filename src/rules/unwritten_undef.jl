@@ -73,15 +73,10 @@ end
 known_element(text::AbstractString)::String = text in FLOAT_TYPES || text in NANLESS_TYPES ? String(text) : UNKNOWN_ELEMENT
 
 """The loop variables of the `for` syntax `loop` with the range syntax each runs over, as `(name, range)` pairs."""
-function loop_ranges(loop::SYNTAX.SyntaxNode)::Vector{Tuple{String, SYNTAX.SyntaxNode}}
-    ranges = Tuple{String, SYNTAX.SyntaxNode}[]
-    for spec in node_children(first(node_children(loop)))
-        if SYNTAX.kind(spec) === SYNTAX.@K_str("in") && SYNTAX.kind(first(node_children(spec))) === IDENTIFIER_KIND
-            push!(ranges, (String(SYNTAX.sourcetext(first(node_children(spec)))), last(node_children(spec))))
-        end
-    end
-    return ranges
-end
+loop_ranges(loop::SYNTAX.SyntaxNode)::Vector{Tuple{String, SYNTAX.SyntaxNode}} = Tuple{String, SYNTAX.SyntaxNode}[
+    (String(SYNTAX.sourcetext(first(node_children(spec)))), last(node_children(spec)))
+        for spec in node_children(first(node_children(loop))) if SYNTAX.kind(spec) === SYNTAX.@K_str("in") && SYNTAX.kind(first(node_children(spec))) === IDENTIFIER_KIND
+]
 
 """The `call_name` of call syntax `call` when it names its function bare or through `Base` or `Random`; `""` for a lookalike (`Custom.fill!`)."""
 trusted_name(call::SYNTAX.SyntaxNode)::String = SYNTAX.kind(first(node_children(call))) === IDENTIFIER_KIND || occursin(r"^(Base|Random)\.\w+!?$", SYNTAX.sourcetext(first(node_children(call)))) ? call_name(call) : ""

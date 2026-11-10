@@ -36,7 +36,7 @@ end
             "    fill!(x, x)", "    x .= x .+ 1", "    for i in eachindex(x)\n        x[1] = 1\n    end", GRID_LOOP, "    Custom.fill!(x, 1)",
             "    for i in Custom.eachindex(x)\n        x[i] = 1\n    end", "    for i in Custom.axes(x, 1)\n        x[i] = 1\n    end",
             "    for i in eachindex(x)\n        i = 1\n        x[i] = 1\n    end", "    peek = () -> x[1]\n    fill!(x, peek())", "    for i in eachindex(x)\n        i == 1 && @goto done\n        x[i] = 1\n    end\n    @label done",
-            "    for i in eachindex(x)\n        (i,) = (1,)\n        x[i] = 1\n    end", "    x .= @read_x", "    for i in eachindex(x)\n        i::Int = 1\n        x[i] = 1\n    end", "    map(1:2) do k\n        x[k]\n    end\n    x .= 1",
+            "    for i in eachindex(x)\n        (i,) = (1,)\n        x[i] = 1\n    end", "    x .= @read_x", "    n > 0 || @goto skip\n    x .= 1\n    @label skip", "    for i in eachindex(x)\n        i::Int = 1\n        x[i] = 1\n    end", "    map(1:2) do k\n        x[k]\n    end\n    x .= 1",
         )
         @test unwritten_lines(wrapped(body, "similar(y)")) == [2]
         @test proofs(wrapped(body, "zeros(n)")) == [:unproven]

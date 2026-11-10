@@ -139,12 +139,12 @@ function initializes_array(later::SYNTAX.SyntaxNode, name::String, rank::Int)::B
     return writes_every_index(first(used), name, ranges) && isempty(from_first_reader(used[2:end], name))
 end
 
-"""Whether the first statement after the statement `binding` in its block to read the array `name` of `rank` dimensions is an `initializes_array` proof."""
+"""Whether the first statement after `binding` in its block to read the array `name` of `rank` dimensions is an `initializes_array` proof, with no exit or macro (`has_exit`) up to it."""
 function written_after(binding::SYNTAX.SyntaxNode, name::String, rank::Int)::Bool
     siblings = node_children(something(binding.parent))
-    later = from_first_reader(siblings[(something(findfirst(Base.Fix1(===, binding), siblings)) + 1):end], name)
-    scopes = enclosing_scope(binding)
-    return !isempty(later) && !has_exit(first(later)) && initializes_array(first(later), name, rank) && (isempty(scopes) || !closure_reads(only(scopes), name))
+    rest = siblings[(something(findfirst(Base.Fix1(===, binding), siblings)) + 1):end]
+    later, scopes = from_first_reader(rest, name), enclosing_scope(binding)
+    return !isempty(later) && !any(has_exit, rest[1:(end - length(later) + 1)]) && initializes_array(first(later), name, rank) && (isempty(scopes) || !closure_reads(only(scopes), name))
 end
 
 """Whether syntax `node` assigns a variable of `names` (`i = …`, `i += …`), so a loop variable may stop covering its range."""

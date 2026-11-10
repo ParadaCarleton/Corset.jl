@@ -28,8 +28,17 @@ The methods the modules of `package` define, closures, constructors and methods 
 function defined_methods(package::Package)::Vector{Method}
     found = Method[]
     Base.visit(Base.Fix1(push!, found), Core.methodtable)
-    return found[belongs.(getfield.(found, :module), (package,))]
+    own = found[belongs.(getfield.(found, :module), (package,))]
+    return own[current_method.(own, Base.get_world_counter())]
 end
+
+"""Whether `method` dispatches in `world`: a redefinition leaves the method it replaced in the method table."""
+current_method(method::Method, world::Integer)::Bool = method in callable_methods(method.sig, world)
+
+"""The methods in `world` of the callable method signature `signature` names, queried with no argument types: a query on a concrete signature adds a specialization."""
+callable_methods(signature::Type, world::Integer)::Vector{Method} = Method[
+    match.method for match in convert(Vector{Core.MethodMatch}, Base._methods_by_ftype(Base.rewrap_unionall(Tuple{(Base.unwrap_unionall(signature)::DataType).parameters[1], Vararg{Any}}, signature), -1, world)::Vector{Any})
+]
 
 """
     defined_methods(mod)

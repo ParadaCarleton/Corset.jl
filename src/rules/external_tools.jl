@@ -48,11 +48,13 @@ end
 function jscpd_site(repository::Repository, duplicate::AbstractDict)::Site
     first_file = string(duplicate["firstFile"]["name"])
     second_file = string(duplicate["secondFile"]["name"])
-    rel_first = relpath(first_file, repository.root)
-    rel_second = relpath(second_file, repository.root)
+    # jscpd resolves symlinks; resolve the root too, so a symlinked checkout keys files as the baseline does.
+    root = realpath(repository.root)
+    rel_first = relpath(realpath(first_file), root)
+    rel_second = relpath(realpath(second_file), root)
     start_line = Int(duplicate["secondFile"]["start"])
     end_line = Int(duplicate["secondFile"]["end"])
-    return Site("$rel_second $rel_first", second_file, start_line, end_line, "")
+    return Site("$rel_second $rel_first", joinpath(repository.root, rel_second), start_line, end_line, "")
 end
 
 """The `Cmd` running `jscpd` against `dirs` with report written to `report_dir`."""

@@ -17,9 +17,9 @@ const UNKNOWN_ELEMENT = "?"
 # The element text of a `fill` whose value has no recognizable type; such a call is not reported.
 const UNTYPED_FILL = "!"
 
-# Kinds of syntax that end an iteration early or skip its writes.
+# Kinds of syntax that end an iteration early or skip its writes; a macro may expand to either, or to a read.
 const BROADCAST_ASSIGN_KIND = SYNTAX.@K_str(".=")
-const EXIT_KINDS = (SYNTAX.@K_str("break"), SYNTAX.@K_str("continue"), SYNTAX.@K_str("return"))
+const EXIT_KINDS = (SYNTAX.@K_str("break"), SYNTAX.@K_str("continue"), SYNTAX.@K_str("return"), SYNTAX.@K_str("macrocall"))
 
 # Calls that write every element of one argument, by its position, whatever the others hold.
 const WHOLE_WRITERS = (; var"fill!" = 1, var"copy!" = 1, var"broadcast!" = 2, var"rand!" = 1, var"randn!" = 1, var"randexp!" = 1)
@@ -107,9 +107,8 @@ function writes_every_index(write::SYNTAX.SyntaxNode, name::String, ranges::Abst
     return length(indices) == length(ranges) && allunique(SYNTAX.sourcetext.(indices)) && isempty(variable_reads(last(node_children(write)), name))
 end
 
-"""Whether the syntax `node` holds an early exit of its loop: `break`, `continue`, `return`."""
-has_exit(node::SYNTAX.SyntaxNode)::Bool = SYNTAX.kind(node) in EXIT_KINDS || any(has_exit, node_children(node)) ||
-    (SYNTAX.kind(node) === SYNTAX.@K_str("macrocall") && SYNTAX.sourcetext(first(node_children(node))) == "@goto")
+"""Whether the syntax `node` holds an early exit (`break`, `continue`, `return`) or a macro, which may hide a jump or a read."""
+has_exit(node::SYNTAX.SyntaxNode)::Bool = SYNTAX.kind(node) in EXIT_KINDS || any(has_exit, node_children(node))
 
 """The `statements` from the first one that reads the variable `name` on, empty when none does."""
 from_first_reader(statements::AbstractVector{SYNTAX.SyntaxNode}, name::String)::Vector{SYNTAX.SyntaxNode} = collect(Iterators.dropwhile(statement -> isempty(variable_reads(statement, name)), statements))
@@ -126,7 +125,7 @@ function initializes_array(later::SYNTAX.SyntaxNode, name::String, rank::Int)::B
     elseif is_prefix_call(later) && haskey(WHOLE_WRITERS, Symbol(trusted_name(later)))
         position = findfirst(Base.Fix2(is_identifier, name), filter(!keyword_part, parts[2:end]))
         return count(!isempty ∘ Base.Fix2(variable_reads, name), parts) == 1 && position == WHOLE_WRITERS[Symbol(trusted_name(later))]
-    elseif SYNTAX.kind(later) !== SYNTAX.@K_str("for") || has_exit(later)
+    elseif SYNTAX.kind(later) !== SYNTAX.@K_str("for")
         return false
     end
     ranges = loop_ranges(later)
@@ -145,7 +144,7 @@ function written_after(binding::SYNTAX.SyntaxNode, name::String, rank::Int)::Boo
     siblings = node_children(something(binding.parent))
     later = from_first_reader(siblings[(something(findfirst(Base.Fix1(===, binding), siblings)) + 1):end], name)
     scopes = enclosing_scope(binding)
-    return !isempty(later) && initializes_array(first(later), name, rank) && (isempty(scopes) || !closure_reads(only(scopes), name))
+    return !isempty(later) && !has_exit(first(later)) && initializes_array(first(later), name, rank) && (isempty(scopes) || !closure_reads(only(scopes), name))
 end
 
 """Whether syntax `node` assigns a variable of `names` (`i = …`, `i += …`), so a loop variable may stop covering its range."""

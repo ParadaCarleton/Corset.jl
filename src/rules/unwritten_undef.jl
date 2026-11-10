@@ -37,13 +37,9 @@ end
 
 """Whether the `read` of an array is the target of an accumulation `x[i] += …`, `x .+= …` or `x += …`: it reads its start value."""
 function is_accumulation(read::SYNTAX.SyntaxNode)::Bool
-    node = read
-    parent = node.parent
-    if !isnothing(parent) && SYNTAX.kind(parent) === SYNTAX.@K_str("ref") && first(node_children(parent)) === node
-        node = parent
-        parent = node.parent
-    end
-    return !isnothing(parent) && SYNTAX.kind(parent) in (SYNTAX.@K_str("op="), SYNTAX.@K_str(".op=")) && first(node_children(parent)) === node
+    indexed = !isnothing(read.parent) && SYNTAX.kind(something(read.parent)) === SYNTAX.@K_str("ref") && first(node_children(something(read.parent))) === read
+    node = indexed ? something(read.parent) : read
+    return !isnothing(node.parent) && SYNTAX.kind(something(node.parent)) in (SYNTAX.@K_str("op="), SYNTAX.@K_str(".op=")) && first(node_children(something(node.parent))) === node
 end
 
 """The element type text and dimension texts of the call syntax `call` of `zeros`, `ones` or `fill`, as `(type, dimensions)` with `type == ""` for Float64, or `UNTYPED_FILL` as the type when a `fill` value has an unknown type."""

@@ -133,7 +133,7 @@ function initializes_array(later::SYNTAX.SyntaxNode, name::String, rank::Int)::B
     statements = node_children(body)
     used = from_first_reader(statements, name)
     linear = length(ranges) == 1 && is_prefix_call(last(only(ranges))) && trusted_name(last(only(ranges))) == "eachindex"
-    if isempty(used) || !(length(ranges) == rank || (rank == 0 && linear)) || length(ranges) != length(node_children(first(parts))) || assigns_any(body, first.(ranges))
+    if isempty(used) || !(length(ranges) == rank || linear) || length(ranges) != length(node_children(first(parts))) || assigns_any(body, first.(ranges))
         return false
     end
     return writes_every_index(first(used), name, ranges) && isempty(from_first_reader(used[2:end], name))

@@ -24,7 +24,8 @@ const GRID_LOOP = "    for j in axes(x, 2), i in axes(x, 1)\n        x[i, j] = i
         @test all(isempty ∘ unwritten_lines ∘ Base.Fix1(wrapped, body), ("similar(y)", "Vector{Float32}(undef, n)", "similar(y, Float32, n)"))
         @test proofs(wrapped(body, "zeros(Float32, n)")) == [:initializer]
     end
-    @test isempty(unwritten_lines(wrapped(GRID_LOOP, "Matrix{Float32}(undef, 2, n)")))
+    @test all(isempty ∘ unwritten_lines ∘ Base.Fix1(wrapped, GRID_LOOP), ("Matrix{Float32}(undef, 2, n)", "similar(y, Float32, 2, n)"))
+    @test isempty(unwritten_lines(wrapped(WHOLE_LOOP, "Matrix{Float32}(undef, 2, n)"))) && proofs(wrapped(WHOLE_LOOP, "zeros(Float32, 2, n)")) == [:initializer]
     @test proofs(wrapped(GRID_LOOP, "zeros(Float32, 2, n)")) == [:initializer]
     @test isempty(unwritten_lines("f(y) = Base.fill!(similar(y), NaN)\nsimilar(a::Box) = Box(similar(a.data))\ng(y) = quote\n    similar(\$y)\nend\n"))
 end

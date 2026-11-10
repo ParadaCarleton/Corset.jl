@@ -10,6 +10,9 @@ jobs:
   downgrade:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # The jet rule analyzes frames on every thread; its test compares that with a serial run.
+    env:
+      JULIA_NUM_THREADS: "4"
     steps:
       - uses: actions/checkout@v4
       # The fatou and jscpd tests run the real tools mise.toml pins, from temp directories mise's shims cannot resolve.

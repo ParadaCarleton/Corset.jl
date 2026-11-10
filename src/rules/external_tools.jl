@@ -50,11 +50,21 @@ function jscpd_site(repository::Repository, duplicate::AbstractDict)::Site
     second_file = string(duplicate["secondFile"]["name"])
     # jscpd resolves symlinks; resolve the root too, so a symlinked checkout keys files as the baseline does.
     root = realpath(repository.root)
-    rel_first = relpath(realpath(first_file), root)
-    rel_second = relpath(realpath(second_file), root)
+    rel_first = jscpd_relative(root, first_file)
+    rel_second = jscpd_relative(root, second_file)
     start_line = Int(duplicate["secondFile"]["start"])
     end_line = Int(duplicate["secondFile"]["end"])
-    return Site("$rel_second $rel_first", joinpath(repository.root, rel_second), start_line, end_line, "")
+    key = "$(join(splitpath(rel_second), "/")) $(join(splitpath(rel_first), "/"))"
+    return Site(key, joinpath(repository.root, rel_second), start_line, end_line, "")
+end
+
+"""`file`, a path jscpd reported, relative to the resolved repository `root`; a file outside `root` throws."""
+function jscpd_relative(root::AbstractString, file::AbstractString)::String
+    relative = relpath(realpath(file), root)
+    if first(splitpath(relative)) == ".."
+        throw(UsageError("jscpd reported $file, outside the repository root $root; list only directories inside it"))
+    end
+    return relative
 end
 
 """The `Cmd` running `jscpd` against `dirs` with report written to `report_dir`."""

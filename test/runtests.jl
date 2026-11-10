@@ -622,6 +622,8 @@ end
         link = joinpath(mktempdir(), "link")
         symlink(tree, link)
         @test jscpd_sites(Repository(link; skipped_directories = ("vendor",)), (".",)) == [Site("copies.jl copies.jl", joinpath(link, "copies.jl"), 8, 14, "")]
+        # A directory outside the root would key files by `../`; it throws instead.
+        @test_throws Corset.UsageError jscpd_sites(Repository(joinpath(tree, "vendor")), ("..",))
         @testset "a jscpd that writes no report, or none on PATH, is an error" begin
             path = ENV["PATH"]
             broken = write_tree(mktempdir(), ["jscpd" => "#!/bin/sh\nexit 1\n"])

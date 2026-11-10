@@ -142,7 +142,7 @@ function initializes_array(later::SYNTAX.SyntaxNode, name::String, rank::Int)::B
     statements = node_children(body)
     used = from_first_reader(statements, name)
     linear = length(ranges) == 1 && is_prefix_call(last(only(ranges))) && trusted_name(last(only(ranges))) == "eachindex"
-    if isempty(used) || !(length(ranges) == rank || (rank == 0 && linear)) || length(ranges) != length(node_children(first(parts)))
+    if isempty(used) || !(length(ranges) == rank || (rank == 0 && linear)) || length(ranges) != length(node_children(first(parts))) || assigns_any(body, first.(ranges))
         return false
     end
     return writes_every_index(first(used), name, ranges) && isempty(from_first_reader(used[2:end], name))
@@ -152,8 +152,20 @@ end
 function written_after(binding::SYNTAX.SyntaxNode, name::String, rank::Int)::Bool
     siblings = node_children(something(binding.parent))
     later = from_first_reader(siblings[(something(findfirst(Base.Fix1(===, binding), siblings)) + 1):end], name)
-    return !isempty(later) && initializes_array(first(later), name, rank)
+    scopes = enclosing_scope(binding)
+    return !isempty(later) && initializes_array(first(later), name, rank) && (isempty(scopes) || !closure_reads(only(scopes), name))
 end
+
+"""Whether syntax `node` assigns a variable of `names` (`i = …`, `i += …`), so a loop variable may stop covering its range."""
+assigns_any(node::SYNTAX.SyntaxNode, names::AbstractVector{String})::Bool =
+    (SYNTAX.kind(node) in (SYNTAX.@K_str("="), SYNTAX.@K_str("op=")) && any(Base.Fix1(is_identifier, first(node_children(node))), names)) || any(Base.Fix2(assigns_any, names), node_children(node))
+
+"""Whether a closure (`->`, `do` or an inner `function`) below syntax `node` reads `name`: a call may read the array before its write."""
+closure_reads(node::SYNTAX.SyntaxNode, name::String)::Bool = any(Base.Fix2(reading_closure, name), node_children(node))
+
+"""Whether syntax `node` is or holds a closure that reads `name` (`closure_reads`)."""
+reading_closure(node::SYNTAX.SyntaxNode, name::String)::Bool =
+    (SYNTAX.kind(node) in (SYNTAX.@K_str("->"), SYNTAX.@K_str("do"), SYNTAX.@K_str("function")) && !isempty(variable_reads(node, name))) || closure_reads(node, name)
 
 """The number of dimensions the constructor `dimensions` texts give, or `0` when a tuple, a `size(…)` or a splat hides it."""
 function constructor_rank(dimensions::AbstractVector{<:AbstractString})::Int

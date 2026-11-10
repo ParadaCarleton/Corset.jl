@@ -83,11 +83,14 @@ function loop_ranges(loop::SYNTAX.SyntaxNode)::Vector{Tuple{String, SYNTAX.Synta
     return ranges
 end
 
+"""The `call_name` of call syntax `call` when it names its function bare or through `Base` or `Random`; `""` for a lookalike (`Custom.fill!`)."""
+trusted_name(call::SYNTAX.SyntaxNode)::String = SYNTAX.kind(first(node_children(call))) === IDENTIFIER_KIND || occursin(r"^(Base|Random)\.\w+!?$", SYNTAX.sourcetext(first(node_children(call)))) ? call_name(call) : ""
+
 """Whether range syntax `range` runs over the whole of dimension `dimension` of the array `name` of `dimensions` dimensions."""
 function covers_dimension(range::SYNTAX.SyntaxNode, name::String, dimension::Int, dimensions::Int)::Bool
     if SYNTAX.kind(range) === CALL_KIND && is_prefix_call(range)
         arguments = node_children(range)[2:end]
-        called = call_name(range)
+        called = trusted_name(range)
         if called == "eachindex"
             return dimensions == 1 && length(arguments) == 1 && is_identifier(only(arguments), name)
         elseif called == "axes"
@@ -128,9 +131,9 @@ function initializes_array(later::SYNTAX.SyntaxNode, name::String, rank::Int)::B
     parts = node_children(later)
     if SYNTAX.kind(later) === BROADCAST_ASSIGN_KIND
         return is_identifier(first(parts), name) && isempty(variable_reads(last(parts), name))
-    elseif is_prefix_call(later) && haskey(WHOLE_WRITERS, Symbol(call_name(later)))
+    elseif is_prefix_call(later) && haskey(WHOLE_WRITERS, Symbol(trusted_name(later)))
         position = findfirst(Base.Fix2(is_identifier, name), filter(!keyword_part, parts[2:end]))
-        return count(!isempty ∘ Base.Fix2(variable_reads, name), parts) == 1 && position == WHOLE_WRITERS[Symbol(call_name(later))]
+        return count(!isempty ∘ Base.Fix2(variable_reads, name), parts) == 1 && position == WHOLE_WRITERS[Symbol(trusted_name(later))]
     elseif SYNTAX.kind(later) !== SYNTAX.@K_str("for") || has_exit(later)
         return false
     end
@@ -138,7 +141,7 @@ function initializes_array(later::SYNTAX.SyntaxNode, name::String, rank::Int)::B
     body = last(parts)
     statements = node_children(body)
     used = from_first_reader(statements, name)
-    linear = length(ranges) == 1 && is_prefix_call(last(only(ranges))) && call_name(last(only(ranges))) == "eachindex"
+    linear = length(ranges) == 1 && is_prefix_call(last(only(ranges))) && trusted_name(last(only(ranges))) == "eachindex"
     if isempty(used) || !(length(ranges) == rank || (rank == 0 && linear)) || length(ranges) != length(node_children(first(parts)))
         return false
     end
@@ -231,8 +234,8 @@ Whether the uninitialized array `call` is written in full before any read: passe
 """
 function undef_call_written(call::SYNTAX.SyntaxNode)::Bool
     parent = something(call.parent)
-    if is_prefix_call(parent) && haskey(WHOLE_WRITERS, Symbol(call_name(parent)))
-        return findfirst(Base.Fix1(===, call), filter(!keyword_part, node_children(parent)[2:end])) == WHOLE_WRITERS[Symbol(call_name(parent))]
+    if is_prefix_call(parent) && haskey(WHOLE_WRITERS, Symbol(trusted_name(parent)))
+        return findfirst(Base.Fix1(===, call), filter(!keyword_part, node_children(parent)[2:end])) == WHOLE_WRITERS[Symbol(trusted_name(parent))]
     end
     target = first(node_children(parent))
     return SYNTAX.kind(parent) === SYNTAX.@K_str("=") && last(node_children(parent)) === call && SYNTAX.kind(target) === IDENTIFIER_KIND &&

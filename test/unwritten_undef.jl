@@ -26,19 +26,20 @@ const GRID_LOOP = "    for j in axes(x, 2), i in axes(x, 1)\n        x[i, j] = i
     end
     @test isempty(unwritten_lines(wrapped(GRID_LOOP, "Matrix{Float32}(undef, 2, n)")))
     @test proofs(wrapped(GRID_LOOP, "zeros(Float32, 2, n)")) == [:initializer]
-    @test isempty(unwritten_lines("f(y) = fill!(similar(y), NaN)\nsimilar(a::Box) = Box(similar(a.data))\ng(y) = quote\n    similar(\$y)\nend\n"))
+    @test isempty(unwritten_lines("f(y) = Base.fill!(similar(y), NaN)\nsimilar(a::Box) = Box(similar(a.data))\ng(y) = quote\n    similar(\$y)\nend\n"))
 end
 
 @testset "unwritten-undef: a partial, conditional or reading write is reported" begin
     for body in (
             "    x[1] = 1", "    for i in eachindex(x)\n        if i > 1\n            x[i] = 1\n        end\n    end", "    for i in eachindex(x)\n        x[i] = x[i] + 1\n    end",
             "    for i in eachindex(x)\n        i > 2 && break\n        x[i] = 1\n    end", "    for i in 1:n\n        x[i] = 1\n    end", "    g!(x)",
-            "    fill!(x, x)", "    x .= x .+ 1", "    for i in eachindex(x)\n        x[1] = 1\n    end", GRID_LOOP,
+            "    fill!(x, x)", "    x .= x .+ 1", "    for i in eachindex(x)\n        x[1] = 1\n    end", GRID_LOOP, "    Custom.fill!(x, 1)",
+            "    for i in Custom.eachindex(x)\n        x[i] = 1\n    end", "    for i in Custom.axes(x, 1)\n        x[i] = 1\n    end",
         )
         @test unwritten_lines(wrapped(body, "similar(y)")) == [2]
         @test proofs(wrapped(body, "zeros(n)")) == [:unproven]
     end
-    @test unwritten_lines("f(y) = similar(y)\ng(y) = copy!(y, similar(y))\nbuffer = Vector{Int}(undef, 3)\nbuffer .= 1\n") == [1, 2, 3]
+    @test unwritten_lines("f(y) = similar(y)\ng(y) = copy!(y, similar(y))\nh(y) = Custom.fill!(similar(y), 1)\nbuffer = Vector{Int}(undef, 3)\nbuffer .= 1\n") == [1, 2, 3, 4]
 end
 
 @testset "unwritten-undef: accumulators, unknown and NaN-less element types" begin

@@ -618,6 +618,10 @@ end
         @test Set(jscpd_sites(Repository(tree), (".",))) == Set([inner, vendored])
         @test jscpd_sites(Repository(tree; skipped_directories = ("vendor",)), (".",)) == [inner]
         @test isempty(jscpd_sites(Repository(tree), ("nonexistent",)))
+        # A checkout reached through a symlink keys and places sites under the symlinked root.
+        link = joinpath(mktempdir(), "link")
+        symlink(tree, link)
+        @test jscpd_sites(Repository(link; skipped_directories = ("vendor",)), (".",)) == [Site("copies.jl copies.jl", joinpath(link, "copies.jl"), 8, 14, "")]
         @testset "a jscpd that writes no report, or none on PATH, is an error" begin
             path = ENV["PATH"]
             broken = write_tree(mktempdir(), ["jscpd" => "#!/bin/sh\nexit 1\n"])

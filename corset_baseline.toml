@@ -91,13 +91,15 @@
 "Base.include" = 1
 "Base.isvarargtype" = 1
 "Base.isvatuple" = 1
-"Base.loaded_modules" = 4
+"Base.loaded_modules" = 3
 "Base.require" = 3
+"Base.rewrap_unionall" = 1
 "Base.shell_parse" = 1
 "Base.specializations" = 2
 "Base.uncompressed_ir" = 1
 "Base.uniontypes" = 4
-"Base.unwrap_unionall" = 19
+"Base.unwrap_unionall" = 20
+"Base.visit" = 1
 "Compiler.EscapeAnalysis" = 1
 "Compiler.IRCode" = 34
 "Compiler.MethodLookupResult" = 1
@@ -127,7 +129,7 @@
 "Core.IntrinsicFunction" = 2
 "Core.Intrinsics" = 5
 "Core.MethodInstance" = 29
-"Core.MethodMatch" = 2
+"Core.MethodMatch" = 3
 "Core.PhiNode" = 2
 "Core.PiNode" = 2
 "Core.ReturnNode" = 4
@@ -146,6 +148,7 @@
 "Core.memoryrefset!" = 1
 "Core.memoryrefsetonce!" = 1
 "Core.memoryrefswap!" = 1
+"Core.methodtable" = 1
 
 [nothing-return]
 "src/candidates.jl call_signature" = 1

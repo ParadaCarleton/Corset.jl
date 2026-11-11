@@ -43,9 +43,10 @@ summed(count_::Int)::Float32 = sum(zeros(Float32, count_))
 written(count_::Int)::Vector{Float32} = (buffer = zeros(Float32, count_); buffer[1] = 1; buffer)
 '''
 
-[nan-initializer]
+[unwritten-undef]
 source = '''
 filled(count_::Int)::Vector{Float32} = (buffer = zeros(Float32, count_); buffer .= 1; buffer)
+scratch(count_::Int)::Vector{Float32} = Vector{Float32}(undef, count_)
 '''
 
 [concrete-arg]

@@ -4,6 +4,8 @@
 # Corset does not depend on JET: the macros use the JET the caller has loaded, so `corset` itself
 # never pays for loading it.
 
+using OhMyThreads: DynamicScheduler, tmap
+
 const JET_ID = Base.PkgId(Base.UUID("c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"), "JET")
 
 """The `JET` module among `modules` (the caller's loaded modules); throws when none is, naming the fix."""
@@ -57,21 +59,33 @@ One site per `JET.report_call` report on the frames `inferred` (as `audited_fram
 placed at that frame's line. A call that fails on only some branches of a union split counts: the
 `Nothing` of a `findfirst` that nothing checks throws when it arrives. The same report reached from
 several frames is one site. JET loads from the load path on first use.
+
+Each frame is its own `report_call`, one task per frame on any thread (`FrameReports`): frames that
+share a large callee each analyze much of it again, since JET's cache keeps only part of it. JET's
+shared state is locked (`JET_ANALYZER_CACHE_LOCK`, each `AbstractBindings` lock) or Julia's
+thread-safe code cache. The sites keep the order of the frames, whatever order the tasks finish in.
 """
-function call_report_sites( # lint: runtime-dispatch # lint: unstable-variable # lint: unmarked-mutation  JET loads at run time, reads only the frames' signature types, and its results are duck-typed
+function call_report_sites( # lint: runtime-dispatch # lint: unstable-variable  JET loads at run time and its results are duck-typed
         repository::Repository, inferred::AbstractVector{Inferred}, mod::Module;
         comments::AbstractDict{String, Vector{OptOutComment}} = Dict{String, Vector{OptOutComment}}(),
     )::Vector{Site}
     jet = Base.require(JET_ID) # lint: non-public-access  JET is not a dependency, so it loads by its id
-    package = Package(mod)
-    sites = Site[]
-    for item in audited_frames(repository, inferred, "jet", comments)
-        result = Base.invokelatest(jet.report_call, item.code.parent.specTypes)
-        for report in Base.invokelatest(jet.get_reports, result)
-            append!(sites, call_report_site(repository, jet, report, package))
-        end
-    end
-    return unique!(sites)
+    reports = FrameReports(repository, jet, Package(mod))
+    found = tmap(reports, Vector{Site}, audited_frames(repository, inferred, "jet", comments); scheduler = DynamicScheduler(; chunking = false))
+    return unique!(collect(Site, Iterators.flatten(found)))
+end
+
+"""What `frame_report_sites` reads besides the frame: the repository, the loaded JET and the package."""
+struct FrameReports
+    repository::Repository
+    jet::Module
+    package::Package
+end
+
+"""The sites of `JET.report_call` on frame `item`'s signature whose innermost frame is a method of the package."""
+function (reports::FrameReports)(item::Inferred)::Vector{Site} # lint: runtime-dispatch # lint: unstable-variable # lint: unmarked-mutation  JET loads at run time, reads only the frame's signature type, and its results are duck-typed
+    result = Base.invokelatest(reports.jet.report_call, item.code.parent.specTypes)
+    return collect(Site, Iterators.flatten(call_report_site.((reports.repository,), (reports.jet,), Base.invokelatest(reports.jet.get_reports, result), (reports.package,))))
 end
 
 """The site of JET report `report` when its innermost frame is a method of `package`; none otherwise."""

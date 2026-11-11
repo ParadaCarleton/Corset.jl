@@ -39,6 +39,17 @@ end
 """The keys of `sites`."""
 site_keys(sites::AbstractVector{Site})::Vector{String} = [site.key for site in sites]
 
+"""
+The body of `link<index>` in the jet thread test: the last returns its value; another calls the next,
+and an even one adds a string to its `Int` on a negative value, a branch that leaves the call reachable.
+"""
+chain_body(index::Integer)::String =
+    index == 20 ? "value" : (iseven(index) ? "value < 0 ? value + \"one\" : " : "") * "link$(index + 1)(value) + 1"
+
+"""The frames `entry_frames` keeps from the twenty `link<index>(::Int)` of module `chain`."""
+chain_frames(chain::Module)::Vector{Corset.Inferred} =
+    entry_frames(Type[Tuple{typeof(getglobal(chain, Symbol(:link, index))), Int} for index in 1:20], chain)
+
 """The lines of `sites`."""
 site_lines(sites::AbstractVector{Site})::Vector{Int} = [site.line for site in sites]
 
@@ -468,6 +479,27 @@ end
         @test_throws ArgumentError Corset.loaded_module(Corset.Context(Repository(mktempdir()), (), nothing))
         @test Corset.installed(Corset.JET_ID)
         @test !Corset.installed(Base.PkgId(Base.UUID("00000000-0000-0000-0000-000000000001"), "NotInstalled"))
+    end
+
+    @testset "jet rule: frames analyzed on several threads give the serial sites, in the serial order" begin
+        # CI sets JULIA_NUM_THREADS; on one thread the comparison would prove nothing.
+        @test Threads.nthreads() > 1
+        # Twenty frames, each calling the next; every even one below 20 fails at its own line, so tasks
+        # analyze shared callees at once and each failure is reached from several frames.
+        chain_source = join(["link$index(value::Int)::Int = " * chain_body(index) for index in 1:20], '\n') * '\n'
+        chain_tree = write_tree(mktempdir(), ["chain.jl" => chain_source])
+        # Each round loads the source into two fresh modules, so no analysis is cached: one goes to the
+        # threaded rule, the other to a serial loop over its frames.
+        for _ in 1:8
+            threaded_module, serial_module = Module(:Chain), Module(:Chain)
+            Base.include(threaded_module, joinpath(chain_tree, "chain.jl"))
+            Base.include(serial_module, joinpath(chain_tree, "chain.jl"))
+            threaded = Corset.call_report_sites(Repository(chain_tree), chain_frames(threaded_module), threaded_module)
+            reports = Corset.FrameReports(Repository(chain_tree), JET, Corset.Package(serial_module))
+            serial = unique!(collect(Site, Iterators.flatten(reports.(chain_frames(serial_module)))))
+            @test length(serial) == 9
+            @test threaded == serial
+        end
     end
 
     @testset "under --code-coverage entry_frames warns once and ratchet! throws, since the frames differ from users' code" begin

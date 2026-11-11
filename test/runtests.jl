@@ -264,6 +264,13 @@ end
         @test isempty(hidden_inputs(Repository(mkpath(root[1:(end - 1)])), fixture))
     end
 
+    @testset "hidden-input: an immutable wrapper of mutable memory is state" begin
+        tree = write_tree(mktempdir(), ["wrapped.jl" => "struct Wrapper\n    held::Vector{Int}\nend\nconst SHARED = Wrapper([1])\nconst PLAIN = (1, \"a\")\nreads(value::Int)::Int = value + first(SHARED.held)\nplain(value::Int)::Int = value + first(PLAIN)\n"])
+        wrapped = Module(:Wrapped)
+        Base.include(wrapped, joinpath(tree, "wrapped.jl"))
+        @test unique(site_keys(hidden_inputs(Repository(tree), wrapped))) == ["SHARED"]
+    end
+
     @testset "non-public-access: a qualified access or explicit import of a non-public name" begin
         path = joinpath(write_tree(mktempdir(), ["access.jl" => read(joinpath(FIXTURES, "access_module.txt"), String)]), "access.jl")
         access = Module(:Access)
@@ -869,6 +876,13 @@ end
     )
     Core.eval(
         scope, :(
+            struct Window{E} <: AbstractVector{E}
+                inner::E
+            end
+        )
+    )
+    Core.eval(
+        scope, :(
             struct Set{E}
                 inner::E
             end
@@ -885,6 +899,7 @@ end
     @test check("function wrap(element::E)::Wrapped{E} where {E}\n    return Wrapped(element)\nend\n") == 0
     @test check("(wrap(elements::AbstractVector{E})::Wrapped{Vector{E}}) where {E} = Wrapped(collect(elements))\n") == 0
     @test check("(wrap(element::E)::Union{Nothing, Wrapped{E}}) where {E} = Wrapped(element)\n") == 0
+    @test check("(windowed(element::E)::Window{E}) where {E} = Window(element)\n") == 1
     @test check("wrap(element::Float32)::Wrapped{Float32} = Wrapped(element)\n") == 1
     @test check("wrap(element::Float32)::Wrapped = Wrapped(element)\n") == 1
     @test check("(wrap(element::Float32)::Wrapped{E}) where {T} = Wrapped(element)\n") == 1
@@ -1309,7 +1324,8 @@ end
         @test Corset.argument_writes(countdown, walk, (countdown.code.parent,), search).cut
         @test !haskey(walk.summaries, (countdown.code.parent, search.limit))
         estate = Corset.escape_state(far.ir, far.method.nargs)
-        @test Corset.invoked_writes(Expr(:invoke, "no instance", identity), estate, walk, (), search) === Corset.NO_WRITES
+        no_writes = Corset.invoked_writes(Expr(:invoke, "no instance", identity), estate, walk, (), search)
+        @test all(isempty, (no_writes.written, no_writes.dispatched, no_writes.foreign, no_writes.writers)) && !no_writes.cut
     end
     @testset "Base.:! is no `!` name; a varargs callee writes every operand it gathers" begin
         @test !haskey(details, "negated")
@@ -1435,7 +1451,8 @@ end
             @test !cut.complete && isempty(cut.frames)
         end
         splat, splat_statement = dispatch_statement(inferred, Candidates.splatted)
-        @test Corset.call_candidates(splat_statement, splat.ir, search) === Corset.NO_CANDIDATES
+        no_candidates = Corset.call_candidates(splat_statement, splat.ir, search)
+        @test isempty(no_candidates.frames) && !no_candidates.complete
     end
     @testset "a candidate inference cannot type leaves the others and marks the list incomplete" begin
         broken, broken_statement = dispatch_statement(inferred, Candidates.breaks)

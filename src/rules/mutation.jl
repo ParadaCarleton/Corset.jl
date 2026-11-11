@@ -117,7 +117,8 @@ end
 ArgumentWrites(written::AbstractVector{Int}, dispatched::AbstractVector{Int}, foreign::AbstractVector{Int})::ArgumentWrites =
     ArgumentWrites(written, dispatched, foreign, Pair{Int, Method}[], false)
 
-const NO_WRITES = ArgumentWrites(Int[], Int[], Int[])
+"""The `ArgumentWrites` of a statement that writes no argument."""
+no_writes()::ArgumentWrites = ArgumentWrites(Int[], Int[], Int[])
 
 """
 The frames a write summary follows, keyed by method instance, and the summaries already made, keyed
@@ -181,7 +182,7 @@ writer_arguments(writer::Pair{Int, Method}, ir::COMPILER.IRCode, estate::ESCAPE.
     reached_arguments([first(writer)], ir, estate) .=> (last(writer),)
 
 """The `ArgumentWrites` of one IR statement, as the indices of its operands."""
-statement_writes(::Any, ::COMPILER.IRCode, ::ESCAPE.EscapeState, ::WriteWalk, ::Tuple, ::CandidateSearch)::ArgumentWrites = NO_WRITES
+statement_writes(::Any, ::COMPILER.IRCode, ::ESCAPE.EscapeState, ::WriteWalk, ::Tuple, ::CandidateSearch)::ArgumentWrites = no_writes()
 
 function statement_writes(
         statement::Expr,
@@ -197,7 +198,7 @@ function statement_writes(
         operands = foreign_operands(statement)
         return ArgumentWrites(Int[], Int[], writable_operands(operands[foreign_positions(first(statement.args), length(operands))], ir, estate))
     elseif statement.head !== :call
-        return NO_WRITES
+        return no_writes()
     end
     builtin = called_builtin(statement, ir)
     if builtin in WRITING_BUILTINS
@@ -207,7 +208,7 @@ function statement_writes(
     elseif isnothing(builtin) || builtin in CALLING_BUILTINS
         return dispatch_writes(statement, ir, estate, walk, stack, search)
     end
-    return NO_WRITES
+    return no_writes()
 end
 
 """
@@ -359,13 +360,13 @@ function invoked_writes(
     instance = invoked_instance(first(statement.args))
     operands = statement.args[2:end]
     if isnothing(instance) || !(instance.def isa Method)
-        return NO_WRITES
+        return no_writes()
     elseif instance in stack
         return ArgumentWrites(Int[], Int[], Int[], Pair{Int, Method}[], true)
     elseif bang_name(instance.def.name)
         return ArgumentWrites(operand_indices(operands[2:min(2, end)], estate), Int[], Int[])
     elseif !haskey(walk.frames, instance)
-        return NO_WRITES
+        return no_writes()
     end
     callee = argument_writes(walk.frames[instance], walk, (stack..., instance), search)
     positions = collect(eachindex(operands))

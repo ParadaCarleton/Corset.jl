@@ -143,17 +143,17 @@ holds_all(types::AbstractVector{<:Type}, text::String, scope::Module)::Bool = al
 The annotation text naming every one of `types`, or `""`. The text is evaluated in `scope` and kept
 only when it holds every type.
 """
-function annotation_text(types::AbstractVector{<:Type}, scope::Module, generous::Bool)::String
+function annotation_text(types::AbstractVector{<:Type}, scope::Module, generous::Bool, unions::Bool)::String
     pieces = String[]
     for type in types
         piece = wide_text(type, scope, generous)
-        if isempty(piece) || (!generous && type isa Union)
+        if isempty(piece) || (!unions && type isa Union)
             return ""
         end
         push!(pieces, piece)
     end
     pieces = unique(pieces)
-    if isempty(pieces) || (!generous && length(pieces) > 1) || length(pieces) > 3
+    if isempty(pieces) || (!unions && length(pieces) > 1) || length(pieces) > 3
         return ""
     end
     text = length(pieces) == 1 ? only(pieces) : "Union{" * join(pieces, ", ") * "}"
@@ -318,7 +318,7 @@ function argument_edits(source::Source, definition::TypedDefinition, scope::Modu
         elseif !unsafe || SYNTAX.kind(target) !== IDENTIFIER_KIND || any(Base.Fix2(shorter_than, index), observed)
             return Edits(ByteRewrite[], false)
         end
-        text = annotation_text(Type[types[index] for types in observed], scope, true)
+        text = annotation_text(Type[types[index] for types in observed], scope, true, true)
         if isempty(text)
             return Edits(ByteRewrite[], false)
         end
@@ -357,7 +357,7 @@ function result_text(definition::TypedDefinition, scope::Module, unsafe::Bool)::
             return "typeof($(SYNTAX.sourcetext(argument)))"
         end
     end
-    return Union{} in results ? "" : annotation_text(results, scope, unsafe)
+    return Union{} in results ? "" : annotation_text(results, scope, false, unsafe)
 end
 
 """The result annotation of a constructor: the bare name of the type its call names, when every frame returns that type; else `""`."""

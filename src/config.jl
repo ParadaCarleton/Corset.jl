@@ -74,7 +74,7 @@ function read_preferences(file::AbstractString, path::Tuple{Vararg{String}})::Pr
     end
     table = TOML.parsefile(file)
     for name in path
-        table = get(table, name, Dict{String, Any}()) # lint: abstract-element  TOML tables hold values of every type
+        table = get(table, name, Dict{String, Any}())
     end
     try
         return from_dict(Preferences, table)

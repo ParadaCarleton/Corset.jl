@@ -17,12 +17,10 @@ end
             "f(n) = Vector{Real}(undef, n)" => ["Vector{Real}"],
             "f(m, n) = Matrix{Number}(undef, m, n)" => ["Matrix{Number}"],
             "f(n) = Array{AbstractFloat, 2}(undef, n, n)" => ["Array{AbstractFloat, 2}"],
-            "f() = Dict{String, Any}()" => ["Dict{String, Any}"],
             "f() = Dict{Real, Int}()" => ["Dict{Real, Int}"],
             "f() = Set{Real}()" => ["Set{Real}"],
             "f() = Base.Vector{Integer}()" => ["Base.Vector{Integer}"],
             "f() = Real[]" => ["Real"],
-            "f() = Any[1, \"a\"]" => ["Any"],
             "f(xs) = Real[x for x in xs]" => ["Real"],
             "f() = Number[1 2; 3 4]" => ["Number"],
             "f(x) = similar(x, Real)" => ["Real"],
@@ -33,7 +31,7 @@ end
         )
         @test abstract_texts(text) == reported
     end
-    @test abstract_texts("f() = (Vector{Real}(), Set{Any}())") == ["Vector{Real}", "Set{Any}"]
+    @test abstract_texts("f() = (Vector{Real}(), Set{Number}())") == ["Vector{Real}", "Set{Number}"]
 end
 
 @testset "abstract-element: a concrete element, an unresolved name and a use that is no construction pass" begin
@@ -42,6 +40,7 @@ end
             "f() = Vector{Complex{Float64}}()", "f() = Vector{Vector{Real}}()", "f() = Vector{Tuple{Int, Int}}()", "f(::Type{T}) where {T} = Vector{T}()",
             "f(x) = similar(x, Float32)", "f(x, n) = similar(x, n)", "f(x) = similar(x)", "f(x) = similar(x, 2, 3)", "f(xs) = xs[1]", "f(xs, i) = xs[i]",
             "f(x::Vector{Real}) = x", "g(xs) = convert(Vector{Real}, xs)", "f() = Vector{Missing}()", "f() = Type[Int, Float32]", "f() = Vector{Type}()", "f() = Dict(:a => 1)",
+            "f() = Any[1, \"a\"]", "f() = Dict{String, Any}()", "f() = Vector{Any}()", "f(x) = similar(x, Any)",
         )
         @test isempty(abstract_texts(text))
     end
@@ -57,9 +56,9 @@ end
 
 @testset "abstract-element: a site takes a # lint: opt-out and the rule is pedantic" begin
     sites = found_in(source -> Corset.abstract_elements(source, Base), "abstract-element")
-    @test length(sites) == 2
+    @test length(sites) == 1
     @test Corset.level(Corset.load_config(mktempdir()), Corset.AbstractElementRule()) === :allow
-    waived = "f() = Dict{String, Any}() # lint: abstract-element  JSON keeps any value\ng() = Vector{Real}()\n"
+    waived = "f() = Set{Real}() # lint: abstract-element  mixed reals by design\ng() = Vector{Real}()\n"
     tree = write_tree(mktempdir(), ["source.jl" => waived])
     source = parsed(joinpath(tree, "source.jl"))
     kept, _ = Corset.unopted(Corset.abstract_elements(source, Base), "abstract-element")

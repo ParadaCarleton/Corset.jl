@@ -275,7 +275,7 @@ constant_array_sites(context.sources)
 @rule TreeRule "unwritten-undef" :pedantic "uninitialized arrays not provably written in full before any read, and written zeros, ones and fill arrays, which should start as NaN" context ->
 unwritten_undef_sites(context.sources)
 
-@rule FileRule "abstract-element" :pedantic "containers built with an abstract element, key or value type: Vector{Real}(), Dict{String, Any}(), Real[], similar(x, Real)" (context, source) ->
+@rule FileRule "abstract-element" :pedantic "containers built with an abstract element, key or value type: Vector{Real}(), Dict{String, Number}(), Real[], similar(x, Real)" (context, source) ->
 abstract_elements(source, scope(context))
 
 @rule FileRule "broad-catch" :default "catch blocks that handle every exception alike, rethrowing none" (context, source) ->

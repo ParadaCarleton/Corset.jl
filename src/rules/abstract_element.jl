@@ -27,7 +27,8 @@ non_concrete(found::Type)::Bool = found isa Union ? non_concrete(found.a) || non
 """
 Whether the type syntax `node` names a type that is not concrete in `scope`: an abstract type or a bare parametric
 one (`Real`, `Vector`), or a `Union` with such a member. `Union{Nothing, Int}` and `Vector{Int}` are concrete, and
-so is `Type`, whose elements are type objects that carry no element type to infer. Only a name is looked up; no code runs.
+so is `Type`, whose elements are type objects that carry no element type to infer. An explicit `Any` is a deliberate
+opt-out and passes. Only a name is looked up; no code runs.
 """
 function names_abstract_type(node::SYNTAX.SyntaxNode, scope::Module)::Bool
     parts = node_children(node)
@@ -37,7 +38,7 @@ function names_abstract_type(node::SYNTAX.SyntaxNode, scope::Module)::Bool
     if curly && name === :Union
         return any(Base.Fix2(names_abstract_type, scope), parts[2:end])
     end
-    return isdefined(scope, name) && abstract_binding(getglobal(scope, name), curly)
+    return name !== :Any && isdefined(scope, name) && abstract_binding(getglobal(scope, name), curly)
 end
 
 """Whether the type syntax `node` is a container such as `Vector{Real}` whose element, key or value parameter is abstract."""

@@ -164,7 +164,7 @@ function without_imports( # lint: unstable-variable  walks Julia ASTs, whose nod
     if !(node isa Expr)
         return node
     end
-    kept = Any[] # lint: abstract-element  Julia ASTs hold nodes of every type
+    kept = Any[]
     for child in node.args
         if child isa Expr && (child.head === :using || child.head === :import)
             continue

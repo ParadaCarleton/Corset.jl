@@ -120,7 +120,7 @@ unfixed(text::AbstractString)::Bool = abstract_field_fixed(text) == text
 
     @testset "without --unsafe-fixes the fixer writes nothing" begin
         tree = write_tree(mktempdir(), ["source.jl" => "struct S\n    x::Real\nend\n"])
-        Corset.apply_fix!(Corset.AbstractFieldRule(), Repository(tree), (".",), false)
+        Corset.apply_fix!(Corset.AbstractFieldRule(), Repository(tree), (".",), nothing, nothing, false)
         @test read(joinpath(tree, "source.jl"), String) == "struct S\n    x::Real\nend\n"
     end
 

@@ -1882,4 +1882,3 @@ end
     unsafe_fixed, _ = typed_fixed(Corset.AnnotationRule(), source, signatures; unsafe = true)
     @test occursin("::Union{Nothing, Int", unsafe_fixed)
 end
-

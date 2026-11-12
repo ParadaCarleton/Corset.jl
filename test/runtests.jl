@@ -1634,6 +1634,7 @@ include("syntax_hazards.jl")
 include("constant_array.jl")
 include("unwritten_undef.jl")
 include("abstract_float.jl")
+include("abstract_float_fix.jl")
 include("fixer_properties.jl")
 
 @testset "undefined_names: a name nothing defines is reported, and so is an unlowered testset" begin

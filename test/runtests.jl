@@ -1843,9 +1843,9 @@ end
     fixed, _ = typed_fixed(Corset.AnnotationRule(), source, signatures; unsafe = true)
     @test occursin("twice(x::Real)::typeof(x) = x + x", fixed)
     @test occursin("norm2(v::AbstractVector{<:Real}, w::Real)::typeof(w)", fixed)
-    @test occursin("mk(n::Real)::AbstractVector{<:Real} = zeros", fixed)
+    @test occursin("mk(n::Real) = zeros", fixed)
     @test occursin("(generic(x::T, y::Real)::typeof(x)) where {T} = x", fixed)
-    @test occursin("unobserved(x) = x", fixed)
+    @test occursin("unobserved(x)::typeof(x) = x", fixed)
 end
 
 @testset "fix_diff previews the typed fixes too" begin

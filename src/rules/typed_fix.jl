@@ -108,7 +108,8 @@ end
 """The `AbstractArray{T, N}` that array `type` is a subtype of."""
 function array_supertype(type::DataType)::DataType
     parent = type
-    while !(parent.name.name === :AbstractArray && parent.name.module === Base)
+    while parent.name !== Base.typename(AbstractArray)
+        parent === Any && throw(ArgumentError("$type is no AbstractArray"))
         parent = supertype(parent)
     end
     return parent

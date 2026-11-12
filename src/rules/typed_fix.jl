@@ -40,15 +40,6 @@ function resolved_name(type::DataType, scope::Module)::String
     return ""
 end
 
-"""The first abstract supertype of `type` besides `Any`, or `Any`."""
-function abstract_supertype(type::DataType)::DataType
-    parent = supertype(type)
-    while parent !== Any && !isabstracttype(parent)
-        parent = supertype(parent)
-    end
-    return parent
-end
-
 """The types `type` is a `Union` of, or `type` alone."""
 union_members(type::Type)::Vector{Type} = type isa Union ? vcat(union_members(type.a::Type), union_members(type.b::Type)) : Type[type]
 
@@ -132,7 +123,7 @@ function struct_text(type::DataType, scope::Module, generous::Bool)::String
     if generous && !base_type(type)
         return resolved_name(type, scope)
     end
-    parent = abstract_supertype(type)
+    parent = supertype(type) # a concrete type's supertype is abstract
     return parent === Any ? "" : resolved_name(parent, scope)
 end
 

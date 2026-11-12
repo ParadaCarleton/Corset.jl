@@ -261,7 +261,7 @@ end
     @testset "--diff shows the --fix rewrite and writes nothing" begin
         previewed = package_tree("name = \"Demo\"\n", SOURCE_TREE)
         before = read(joinpath(previewed, "src", "Demo.jl"), String)
-        output, code = captured_main(["check", previewed, "--diff"])
+        output, code = captured_main(["check", previewed, "--no-load", "--diff"])
         @test code == 1
         @test occursin("--- a/src/Demo.jl", output)
         @test occursin("+(f(x::T)::T) where {T}", output)
@@ -271,7 +271,7 @@ end
             "name = \"Demo\"\n",
             ["src/Demo.jl" => "module Demo\ng(x) = x\nend\n"],
         )
-        @test captured_main(["check", clean, "--diff"]) == ("", 0)
+        @test captured_main(["check", clean, "--no-load", "--diff"]) == ("", 0)
         @test captured_main(["check", previewed, "--diff", "--fix"])[2] == 2
     end
 
@@ -280,14 +280,14 @@ end
             "name = \"Demo\"\n[preferences.Corset]\ndirectories = [\"ext/Foo\"]\n",
             ["ext/Foo/Foo.jl" => "module Foo\nf(x::T)::T where {T} = x\nend\n"],
         )
-        output, code = captured_main(["check", extension, "--diff"])
+        output, code = captured_main(["check", extension, "--no-load", "--diff"])
         @test code == 1 && occursin("--- a/ext/Foo/Foo.jl", output)
         overlapping = package_tree(
             "name = \"Demo\"\n[preferences.Corset]\ndirectories = [\"src\", \"src/sub/\", \"./src\"]\n",
             ["src/sub/inner.jl" => "f(x::T)::T where {T} = x\n"],
         )
         @test load_config(overlapping).directories == ("src",)
-        output, code = captured_main(["check", overlapping, "--diff"])
+        output, code = captured_main(["check", overlapping, "--no-load", "--diff"])
         @test code == 1 && count("--- a/src/sub/inner.jl", output) == 1
         @test length(first(run_rules(load_config(overlapping), overlapping))) == 1
     end
@@ -363,7 +363,7 @@ end
     redirect_stderr(devnull) do
         @test captured_main(["check", root, "--no-load", "--entries", "bogus"])[2] == 2
         @test captured_main(["check", root, "--no-load", "--entries", "tests"])[2] == 2
-        for flags in (["--format", "json"], ["--format", "human"], ["--deny-warnings"], ["--entries", "workload"], ["--candidate-limit", "3"])
+        for flags in (["--format", "json"], ["--format", "human"], ["--deny-warnings"], ["--candidate-limit", "3"])
             @test captured_main(["check", root, "--diff", flags...]) == ("", 2)
         end
     end

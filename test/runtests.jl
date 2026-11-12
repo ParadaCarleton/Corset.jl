@@ -1782,3 +1782,162 @@ end
     tree = write_tree(mktempdir(), ["source.jl" => fixed])
     @test isempty(Corset.concrete_arguments(Corset.Source(Repository(tree), joinpath(tree, "source.jl"))))
 end
+
+"""The text the typed fixers of `rule` leave of `text`, a module `T`, after loading it and inferring the calls `signatures` name."""
+function typed_fixed(rule::Corset.Rule, text::AbstractString, signatures::Function; unsafe::Bool = false)::Tuple{String, Module}
+    tree = write_tree(mktempdir(), ["src/T.jl" => text])
+    path = joinpath(tree, "src", "T.jl")
+    loaded = Module(:Loaded)
+    Base.include(loaded, path)
+    mod = loaded.T
+    frames = reduce(vcat, Corset.typed_frames.(signatures(mod)))
+    Corset.fix!(rule, Repository(tree), ("src",), mod, frames, unsafe)
+    return read(path, String), mod
+end
+
+@testset "annotation: safe mode annotates results of annotated methods, never arguments" begin
+    source = """
+    module T
+    twice(x) = x + x
+    keep(x::Int) = x
+    half(x::Number) = x / 2
+    same(x::Int) = x; constant(x::Int) = 2.0
+    ok(x::Int)::Int = x
+    macro keep(expression)
+        return esc(expression)
+    end
+    @keep wrapped(x::Int) = x + x
+    end
+    """
+    signatures(mod) = Type[
+        Tuple{typeof(mod.wrapped), Int}, Tuple{typeof(mod.twice), Float32}, Tuple{typeof(mod.keep), Int}, Tuple{typeof(mod.half), Int},
+        Tuple{typeof(mod.same), Int}, Tuple{typeof(mod.constant), Int}, Tuple{typeof(mod.ok), Int},
+    ]
+    fixed, _ = typed_fixed(Corset.AnnotationRule(), source, signatures)
+    @test occursin("twice(x) = x + x", fixed)
+    @test occursin("keep(x::Int)::typeof(x) = x", fixed)
+    @test occursin("half(x::Number) = x / 2", fixed)
+    @test occursin("same(x::Int)::typeof(x) = x; constant(x::Int)::", fixed)
+    @test !occursin("constant(x::Int)::typeof(x)", fixed)
+    @test occursin("ok(x::Int)::Int = x", fixed)
+    @test occursin("@keep wrapped(x::Int) = x + x", fixed)
+    again = Module(:Again)
+    Base.include(again, joinpath(mktempdir(), "T.jl") |> path -> (write(path, fixed); path))
+    @test again.T.half(1 + 2im) == 0.5 + 1.0im
+    @test again.T.twice(1 + 2im) == 2 + 4im
+end
+
+@testset "annotation: unsafe mode annotates arguments from the observed calls" begin
+    source = """
+    module T
+    twice(x) = x + x
+    norm2(v, w) = sum(abs2, v) + w
+    mk(n) = zeros(Float32, n)
+    generic(x::T, y) where {T} = x
+    unobserved(x) = x
+    end
+    """
+    signatures(mod) = Type[
+        Tuple{typeof(mod.twice), Float32}, Tuple{typeof(mod.norm2), Vector{Float32}, Float32}, Tuple{typeof(mod.mk), Int}, Tuple{typeof(mod.generic), Int, Int},
+    ]
+    fixed, _ = typed_fixed(Corset.AnnotationRule(), source, signatures; unsafe = true)
+    @test occursin("twice(x::Real)::typeof(x) = x + x", fixed)
+    @test occursin("norm2(v::AbstractVector{<:Real}, w::Real)::typeof(w)", fixed)
+    @test occursin("mk(n::Real) = zeros", fixed)
+    @test occursin("(generic(x::T, y::Real)::typeof(x)) where {T} = x", fixed)
+    @test occursin("unobserved(x)::typeof(x) = x", fixed)
+end
+
+@testset "fix_diff previews the typed fixes too" begin
+    tree = write_tree(mktempdir(), ["src/T.jl" => "module T\nkeep(x::Int) = x\nend\n", "Project.toml" => "name = \"T\"\n"])
+    loaded = Module(:Loaded)
+    Base.include(loaded, joinpath(tree, "src", "T.jl"))
+    frames = Corset.typed_frames(Tuple{typeof(loaded.T.keep), Int})
+    diff = Corset.fix_diff(Corset.load_config(tree), tree, loaded.T, frames, false)
+    @test occursin("+keep(x::Int)::typeof(x) = x", diff)
+end
+
+@testset "concrete-return: the fixer widens only a declaration that converts nothing" begin
+    source = """
+    module T
+    keep(x::Vector{Float32})::Vector{Float32} = x
+    view_of(x::Vector{Float32})::Vector{Float32} = view(x, 1:2)
+    zeros_of(n::Int)::Vector{Float32} = zeros(Float32, n)
+    end
+    """
+    signatures(mod) = Type[Tuple{typeof(mod.keep), Vector{Float32}}, Tuple{typeof(mod.view_of), Vector{Float32}}, Tuple{typeof(mod.zeros_of), Int}]
+    fixed, _ = typed_fixed(Corset.ConcreteReturnRule(), source, signatures)
+    @test occursin("keep(x::Vector{Float32})::typeof(x) = x", fixed)
+    @test occursin("view_of(x::Vector{Float32})::Vector{Float32} = view", fixed)
+    @test occursin("zeros_of(n::Int)::AbstractVector{<:Real} = zeros", fixed)
+    unsafe_fixed, _ = typed_fixed(Corset.ConcreteReturnRule(), source, signatures; unsafe = true)
+    @test !occursin("view_of(x::Vector{Float32})::Vector{Float32}", unsafe_fixed)
+end
+
+@testset "annotation: struct, Bool and string families, Any elements and constructors" begin
+    source = """
+    module T
+    module Shapes
+    abstract type Shape end
+    struct Box <: Shape
+        side::Int
+    end
+    Box(x::Float64) = Box(round(Int, x))
+    end
+    using .Shapes: Box
+    struct Plain end
+    flag(b) = b
+    label(s) = s
+    boxed(n) = Shapes.Box(n)
+    measure(b) = b.side
+    anything(x::Int) = Any[x]
+    maybe(on::Bool) = on ? Plain() : nothing
+    keyed(x::Int; y = 1) = x
+    spread(xs::Int...) = length(xs)
+    end
+    """
+    signatures(mod) = Type[
+        Tuple{typeof(mod.keyed), Int}, Tuple{typeof(mod.spread), Int, Int}, Tuple{typeof(mod.flag), Bool}, Tuple{typeof(mod.label), String}, Tuple{typeof(mod.boxed), Int}, Tuple{typeof(mod.measure), mod.Shapes.Box},
+        Tuple{typeof(mod.anything), Int}, Tuple{typeof(mod.maybe), Bool}, Tuple{Type{mod.Shapes.Box}, Float64},
+    ]
+    safe, _ = typed_fixed(Corset.AnnotationRule(), source, signatures)
+    @test occursin("Box(x::Float64)::Box = ", safe) && occursin("anything(x::Int)::AbstractVector = ", safe) && occursin("flag(b) = b", safe) && occursin("keyed(x::Int; y = 1) = x", safe) && occursin("spread(xs::Int...) = length(xs)", safe)
+    loaded = Module(:Names)
+    Base.include_string(loaded, source)
+    @test Corset.resolved_name(loaded.T.Shapes.Box, loaded.T) == "Box"
+    unsafe_fixed, _ = typed_fixed(Corset.AnnotationRule(), source, signatures; unsafe = true)
+    for written in ("flag(b::Bool)::typeof(b) = b", "label(s::AbstractString)::typeof(s) = s", "boxed(n::Real) = ", "measure(b) = b.side", "maybe(on::Bool) = on")
+        @test occursin(written, unsafe_fixed)
+    end
+end
+
+@testset "annotation: safe mode writes no result without a declared-signature frame" begin
+    tree = write_tree(mktempdir(), ["src/T.jl" => "module T\nkeep(x::Int) = x\nend\n"])
+    loaded = Module(:Loaded)
+    Base.include(loaded, joinpath(tree, "src", "T.jl"))
+    frames = Corset.typed_frames(Tuple{typeof(loaded.T.keep), Int})
+    places = Corset.frames_by_place(frames)
+    source = only(Corset.directory_sources(Repository(tree), ("src",)))
+    definition = only(Corset.typed_definitions(source, places, places, places))
+    undeclared = Corset.TypedDefinition(definition.node, definition.call, definition.spine, definition.frames, definition.observed, Corset.Inferred[])
+    @test Corset.result_text(undeclared, loaded.T, false) == ""
+    @test Corset.result_text(definition, loaded.T, false) == "typeof(x)"
+end
+
+@testset "run_rules with fix runs the typed fixers when the package and its frames are given" begin
+    tree = write_tree(mktempdir(), ["src/T.jl" => "module T\nkeep(x::Int) = x\nend\n", "Project.toml" => "name = \"T\"\n"])
+    loaded = Module(:Loaded)
+    Base.include(loaded, joinpath(tree, "src", "T.jl"))
+    frames = Corset.typed_frames(Tuple{typeof(loaded.T.keep), Int})
+    Corset.run_rules(Corset.load_config(tree), tree; mod = loaded.T, frames, fix = true)
+    @test occursin("keep(x::Int)::typeof(x) = x", read(joinpath(tree, "src", "T.jl"), String))
+end
+
+@testset "annotation: unsafe mode writes Union results" begin
+    source = "module T\npick(flag::Bool, a::Int) = flag ? a : nothing\nend\n"
+    signatures(mod) = Type[Tuple{typeof(mod.pick), Bool, Int}]
+    safe, _ = typed_fixed(Corset.AnnotationRule(), source, signatures)
+    @test occursin("pick(flag::Bool, a::Int) = flag", safe)
+    unsafe_fixed, _ = typed_fixed(Corset.AnnotationRule(), source, signatures; unsafe = true)
+    @test occursin("::Union{Nothing, Int", unsafe_fixed)
+end

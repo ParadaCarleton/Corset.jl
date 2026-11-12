@@ -66,7 +66,7 @@ module_rule_names(rules::Tuple)::Vector{String} = [
 
 """Whether `float-widening` is on, `rules` hold its rule, and there are no `frames` for it to read."""
 function widening_skipped(config::Config, rules::Tuple, frames::Union{AbstractVector{Inferred}, Nothing})::Bool
-    widening = only(filter(check -> check.name == "float-widening", checks(TypeDisruptionRule())))
+    widening = named_check(TypeDisruptionRule(), "float-widening")
     return isnothing(frames) && any(rule -> rule isa TypeDisruptionRule, rules) && level(config, widening) !== :allow
 end
 
@@ -75,6 +75,14 @@ is_on(config::Config, rule::Rule)::Bool = any(!=(:allow) ∘ Base.Fix1(level, co
 
 """The rules `config` leaves on."""
 enabled_rules(config::Config)::Tuple = filter(Base.Fix1(is_on, config), RULES)
+
+"""The rules of `rules` whose fixer `config` leaves on: a rule with sub-checks fixes only a sub-check left on."""
+fixing(config::Config, rules::Tuple)::Tuple = filter(Base.Fix1(fixes, config), rules)
+
+"""Whether `config` lets the fixer of `rule` run."""
+fixes(::Config, ::Rule)::Bool = true
+
+fixes(config::Config, rule::TypeDisruptionRule)::Bool = level(config, named_check(rule, "literal-array")) !== :allow
 
 """Run the fixer of every fixable rule in `rules` over the files under `directories` of `repository`."""
 apply_fixes!(::Tuple{}, ::Repository, ::Tuple{Vararg{String}})::Nothing = nothing
@@ -120,7 +128,7 @@ function fix_diff(config::Config, root::AbstractString)::String
         mkpath(dirname(joinpath(copies, directory)))
         cp(joinpath(original.root, directory), joinpath(copies, directory))
     end
-    apply_fixes!(enabled_rules(config), repository(config, copies), directories)
+    apply_fixes!(fixing(config, enabled_rules(config)), repository(config, copies), directories)
     labels = relpath.(repository_sources(original, directories), original.root)
     return join(file_diff.(labels, joinpath.(original.root, labels), joinpath.(copies, labels)))
 end
@@ -152,7 +160,7 @@ function run_rules( # lint: unstable-variable  loops over a tuple of different r
         push!(skipped, "float-widening")
     end
     if fix
-        apply_fixes!(runnable, repository_, directories)
+        apply_fixes!(fixing(config, runnable), repository_, directories)
     end
     inferred = something(frames, Inferred[])
     context = Context(repository_, directories, mod; inferred, candidates = CandidateSearch(inferred; config.candidate_limit), own_methods)

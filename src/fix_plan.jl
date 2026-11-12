@@ -22,10 +22,15 @@ Write the files `plan` rewrites with the repairs no `# lint:` comment naming `ru
 `judge` applies to findings. Every file is staged first (`write_all!`). Returns the sites repaired.
 """
 function apply_plan!(plan::FixPlan{E}, rule::AbstractString)::Vector{Site} where {E}
-    kept = plan.repairs[unopted_mask(Site[repair.site for repair in plan.repairs], rule)]
+    kept = kept_repairs(plan, rule)
     rewrites::Vector{Pair{String, String}} = plan.rewrite(E[repair.edit for repair in kept])
     write_all!(first.(rewrites), last.(rewrites))
     return Site[repair.site for repair in kept]
+end
+
+"""The repairs of `plan` that no `# lint:` comment naming `rule` opts out."""
+function kept_repairs(plan::FixPlan{E}, rule::AbstractString)::Vector{Repair{E}} where {E}
+    return plan.repairs[unopted_mask(Site[repair.site for repair in plan.repairs], rule)]
 end
 
 """

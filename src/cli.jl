@@ -69,7 +69,7 @@ function argument_settings()::ArgParseSettings
     option!(
         check,
         "--unsafe-fixes";
-        help = "also run the fixes that can change behavior or break code outside the checked directories; implies --fix, and --diff shows them",
+        help = "also run the fixes that can change behavior, inference or code outside the checked directories; implies --fix, and --diff shows them",
         action = :store_true,
     )
     option!(
@@ -300,7 +300,6 @@ function diff_ignored(options::CheckOptions)::Vector{String}
     flags = [
         "--format" => !isnothing(options.format),
         "--deny-warnings" => options.deny_warnings,
-        "--entries" => !isnothing(options.entries),
         "--candidate-limit" => !isnothing(options.candidate_limit),
     ]
     return first.(filter(last, flags))
@@ -445,11 +444,8 @@ function print_rules(io::IO, config::Config)::Nothing
 end
 
 """`corset check --diff`: print the changes `--fix` (with `unsafe`, `--unsafe-fixes`) would make to `io`; the exit code is 1 when there are any."""
-function print_fix_diff(io::IO, config::Config, root::AbstractString, fix::Bool, unsafe::Bool)::Int # COV_EXCL_LINE
-    if fix
-        throw(UsageError("--diff writes nothing and --fix writes the changes; pass one"))
-    end
-    changes = fix_diff(config, root, unsafe)
+function print_fix_diff(io::IO, config::Config, root::AbstractString, mod::Union{Module, Nothing}, frames::Union{AbstractVector{Inferred}, Nothing}, unsafe::Bool)::Int # COV_EXCL_LINE
+    changes = fix_diff(config, root, mod, frames, unsafe)
     print(io, changes)
     return Int(!isempty(changes))
 end
@@ -459,8 +455,8 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
     root = project_root(options.path)
     config = with_overrides(load_config(root), options.pedantic, options.overrides, options.candidate_limit)
     options = checked_options(options, config)
-    if options.diff
-        return print_fix_diff(out, config, root, options.fix, options.unsafe)
+    if options.diff && options.fix
+        throw(UsageError("--diff writes nothing and --fix writes the changes; pass one"))
     end
     loads = reads_package(config) && !options.no_load
     if loads && !haskey(ENV, INNER_VARIABLE)
@@ -479,6 +475,9 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
         if !isempty(sources)
             frames = seeded_frames(sources, mod)
         end
+    end
+    if options.diff
+        return print_fix_diff(out, config, root, mod, frames, options.unsafe)
     end
     findings, skipped = run_rules(config, root; mod, frames, fix = options.fix || options.unsafe, unsafe = options.unsafe, update_baseline = options.update_baseline, own_methods)
     print_findings(out, root, findings, something(options.format, "human"))
@@ -507,6 +506,8 @@ function check_project(
         format::AbstractString = "human",
         deny_warnings::Bool = false,
         update_baseline::Bool = false,
+        fix::Bool = false,
+        unsafe::Bool = false,
     )::Int
     project = project_root(root)
     config = load_config(project)
@@ -514,7 +515,7 @@ function check_project(
     if any(reads_signatures, enabled_rules(config))::Bool
         frames = seeded_frames(Pair{String, Vector{Type}}["signatures" => Type[signatures...]], mod)
     end
-    findings, _ = run_rules(config, project; mod, frames, update_baseline)
+    findings, _ = run_rules(config, project; mod, frames, update_baseline, fix, unsafe)
     print_findings(out, project, findings, format)
     return exit_code(findings, deny_warnings)
 end

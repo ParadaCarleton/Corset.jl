@@ -225,8 +225,8 @@ end
     @test Set(Corset.rule_name.(filter(Corset.unsafe_fixable, Corset.RULES))) == Set(["abstract-field"])
     @test !Corset.fixable(Corset.AbstractFieldRule())
     previewed = package_tree("name = \"Demo\"\n", ["src/Demo.jl" => "module Demo\nstruct S\n    x::Real\nend\nend\n"])
-    output, code = captured_main(["check", previewed, "--diff", "--unsafe-fixes"])
+    output, code = captured_main(["check", previewed, "--no-load", "--diff", "--unsafe-fixes"])
     @test code == 1 && occursin("+@concrete struct S", output)
-    @test !occursin("@concrete", first(captured_main(["check", previewed, "--diff"])))
+    @test !occursin("@concrete", first(captured_main(["check", previewed, "--no-load", "--diff"])))
     @test_throws ArgumentError Corset.run_rules(Corset.load_config(previewed), previewed; unsafe = true)
 end

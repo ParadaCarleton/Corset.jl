@@ -84,17 +84,28 @@ fixes(::Config, ::Rule)::Bool = true
 
 fixes(config::Config, rule::TypeDisruptionRule)::Bool = level(config, named_check(rule, "literal-array")) !== :allow
 
-"""Run the fixer of every fixable rule in `rules` over the files under `directories` of `repository`; `unsafe` adds the unsafe fixes."""
-apply_fixes!(::Tuple{}, ::Repository, ::Tuple{Vararg{String}}, ::Bool)::Nothing = nothing
+"""
+Run the fixer of every fixable rule in `rules` over the files under `directories` of `repository`; `unsafe` adds the unsafe fixes.
+A fixer that reads types needs the loaded package `mod` and its `frames`, and is skipped without them.
+"""
+apply_fixes!(::Tuple{}, ::Repository, ::Tuple{Vararg{String}}, ::Union{Module, Nothing}, ::Union{AbstractVector{Inferred}, Nothing}, ::Bool)::Nothing = nothing
 
-function apply_fixes!(rules::Tuple, repository::Repository, directories::Tuple{Vararg{String}}, unsafe::Bool)::Nothing
-    apply_fix!(first(rules), repository, directories, unsafe)
-    return apply_fixes!(Base.tail(rules), repository, directories, unsafe)
+function apply_fixes!(
+        rules::Tuple, repository::Repository, directories::Tuple{Vararg{String}}, mod::Union{Module, Nothing}, frames::Union{AbstractVector{Inferred}, Nothing}, unsafe::Bool,
+    )::Nothing
+    apply_fix!(first(rules), repository, directories, mod, frames, unsafe)
+    return apply_fixes!(Base.tail(rules), repository, directories, mod, frames, unsafe)
 end
 
-"""Run the fixer of `rule` over the files under `directories` of `repository`, when `rule` has one, and its unsafe fix too when `unsafe`."""
-function apply_fix!(rule::Rule, repository::Repository, directories::Tuple{Vararg{String}}, unsafe::Bool)::Nothing
-    if fixable(rule)
+"""Run the fixer of `rule` over the files under `directories` of `repository`, when `rule` has one it can run, and its unsafe fix too when `unsafe`."""
+function apply_fix!(
+        rule::Rule, repository::Repository, directories::Tuple{Vararg{String}}, mod::Union{Module, Nothing}, frames::Union{AbstractVector{Inferred}, Nothing}, unsafe::Bool,
+    )::Nothing
+    if typed_fixable(rule)
+        if mod isa Module && !isnothing(frames)
+            fix!(rule, repository, directories, mod, frames, unsafe)
+        end
+    elseif fixable(rule)
         fix!(rule, repository, directories)
     end
     if unsafe && unsafe_fixable(rule)
@@ -117,13 +128,23 @@ function file_diff(
     )
 end
 
+"""The byte edits of the typed fixers among `rules` that `config` leaves on, planned over `repository` and not applied."""
+typed_edits(::Tuple{}, ::Config, ::Repository, ::Tuple{Vararg{String}}, ::Module, ::AbstractVector{Inferred}, ::Bool)::Vector{ByteRewrite} = ByteRewrite[]
+
+function typed_edits(rules::Tuple, config::Config, repository::Repository, directories::Tuple{Vararg{String}}, mod::Module, frames::AbstractVector{Inferred}, unsafe::Bool)::Vector{ByteRewrite}
+    rule = first(rules)
+    here = is_on(config, rule) && typed_fixable(rule) ? ByteRewrite[repair.edit for repair in kept_repairs(fix_plan(rule, repository, directories, mod, frames, unsafe), rule_name(rule))] : ByteRewrite[]
+    return vcat(here, typed_edits(Base.tail(rules), config, repository, directories, mod, frames, unsafe))
+end
+
 """
-    fix_diff(config, root, unsafe)
+    fix_diff(config, root, mod, frames, unsafe)
 
 The unified diff of the rewrites `--fix` would make, with the unsafe fixes when `unsafe` (`--unsafe-fixes`),
-computed on a copy of the source directories. The tree at `root` is not written.
+computed on a copy of the source directories. The tree at `root` is not written. The typed fixers need the
+loaded package `mod` and its `frames`, else they are left out.
 """
-function fix_diff(config::Config, root::AbstractString, unsafe::Bool)::String
+function fix_diff(config::Config, root::AbstractString, mod::Union{Module, Nothing}, frames::Union{AbstractVector{Inferred}, Nothing}, unsafe::Bool)::String
     original = repository(config, root)
     directories = present_directories(original, config.directories)
     copies = mktempdir()
@@ -131,7 +152,11 @@ function fix_diff(config::Config, root::AbstractString, unsafe::Bool)::String
         mkpath(dirname(joinpath(copies, directory)))
         cp(joinpath(original.root, directory), joinpath(copies, directory))
     end
-    apply_fixes!(fixing(config, enabled_rules(config)), repository(config, copies), directories, unsafe)
+    if mod isa Module && !isnothing(frames)
+        rewrites = rewritten_texts(typed_edits(RULES, config, original, directories, mod, frames, unsafe))
+        write_all!(joinpath.((copies,), relpath.(first.(rewrites), original.root)), last.(rewrites))
+    end
+    apply_fixes!(fixing(config, enabled_rules(config)), repository(config, copies), directories, nothing, nothing, unsafe)
     labels = relpath.(repository_sources(original, directories), original.root)
     return join(file_diff.(labels, joinpath.(original.root, labels), joinpath.(copies, labels)))
 end
@@ -168,7 +193,7 @@ function run_rules( # lint: unstable-variable  loops over a tuple of different r
         push!(skipped, "float-widening")
     end
     if fix
-        apply_fixes!(fixing(config, runnable), repository_, directories, unsafe)
+        apply_fixes!(fixing(config, runnable), repository_, directories, mod, frames, unsafe)
     end
     inferred = something(frames, Inferred[])
     context = Context(repository_, directories, mod; inferred, candidates = CandidateSearch(inferred; config.candidate_limit), own_methods)

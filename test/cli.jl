@@ -55,7 +55,7 @@ end
     @test isnothing(config.baseline)
     @test !config.pedantic
     @test level(config, only(r for r in RULES if rule_name(r) == "where-return")) === :warn
-    @test level(config, only(r for r in RULES if rule_name(r) == "float64")) === :allow
+    @test level(config, Corset.Check("float64", :pedantic, "")) === :allow
 
     @testset "Project.toml preferences, overlaid by LocalPreferences.toml key by key" begin
         root = package_tree(
@@ -194,7 +194,8 @@ end
     names = rule_name.(RULES)
     @test allunique(names)
     @test all(group in (:default, :pedantic) for group in rule_group.(RULES))
-    @test sort!([rule_name(rule) for rule in RULES if rule_group(rule) === :pedantic]) == [
+    @test allunique(Corset.check_names())
+    @test sort!([check.name for rule in RULES for check in Corset.checks(rule) if check.group === :pedantic]) == [
         "abstract-float", "c-type", "concrete-return", "constant-array", "file-length", "float64", "jscpd", "nothing-return", "one-letter",
         "quadratic-scan", "range-guard", "ref", "repeated-prefix", "struct-constant", "unwritten-undef", "wide-struct",
     ]
@@ -410,7 +411,7 @@ end
     config = with_overrides(load_config(root), true, Pair{String, Symbol}[], nothing)
     findings, skipped = run_rules(config, root; mod = fixture, frames = entry_frames(concrete_signatures(fixture), fixture))
     @test isempty(skipped)
-    pedantic = [rule_name(rule) for rule in RULES if rule_group(rule) === :pedantic]
+    pedantic = [check.name for rule in RULES for check in Corset.checks(rule) if check.group === :pedantic]
     @test setdiff(pedantic, Set(finding.rule for finding in findings)) == String[]
     @test "jet" in Set(finding.rule for finding in findings)
 end

@@ -129,7 +129,7 @@ function with_overrides(
         candidate_limit::Union{Nothing, Integer},
     )::Config
     levels::Dict{String, Symbol} = merge(config.levels, Dict{String, Symbol}(overrides))
-    unknown::Vector{String} = sort!(setdiff(collect(keys(levels)), collect(rule_name.(RULES))))
+    unknown::Vector{String} = sort!(setdiff(collect(keys(levels)), collect(check_names())))
     if !isempty(unknown)
         throw(UsageError("no such rule: $(join(unknown, ", ")); `corset rules` lists them"))
     end
@@ -208,7 +208,7 @@ function command_options(parsed::AbstractDict)::Union{RulesOptions, CheckOptions
 end
 
 """Whether any rule `config` leaves on reads the loaded package."""
-reads_package(config::Config)::Bool = !isempty(module_rule_names(enabled_rules(config)))
+reads_package(config::Config)::Bool = !isempty(module_rule_names(enabled_rules(config))) || any(reads_signatures, enabled_rules(config))::Bool
 
 """The package at `root`, loaded in the running process."""
 function load_package(root::AbstractString)::Module
@@ -424,15 +424,15 @@ function exit_code(findings::AbstractVector{Finding}, deny_warnings::Bool)::Int
     return Int(any(finding -> finding.level === :deny || deny_warnings, findings))
 end
 
-"""The `corset rules` line for `rule`: its name, group, the level `config` gives it, and its summary."""
-rule_line(config::Config, rule::Rule)::String = rpad(rule_name(rule), NAME_COLUMN) * rpad(rule_group(rule), 10) * rpad(level(config, rule), 7) * rule_summary(rule)
+"""The `corset rules` line for `check`: its name, group, the level `config` gives it, and its summary."""
+rule_line(config::Config, check::Check)::String = rpad(check.name, name_column()) * rpad(check.group, 10) * rpad(level(config, check), 7) * check.summary
 
-"""The width of the name column of `corset rules`: the longest rule name and a space."""
-const NAME_COLUMN = maximum(length ∘ rule_name, RULES) + 1
+"""The width of the name column of `corset rules`: the longest check name and a space."""
+name_column()::Int = maximum(length, check_names()) + 1
 
 """`corset rules`: one line per rule with its group and the level `config` gives it."""
 function print_rules(io::IO, config::Config)::Nothing
-    println(io, join(rule_line.((config,), RULES), "\n"))
+    println(io, join(rule_line.((config,), sorted_checks()), "\n"))
     return nothing
 end
 

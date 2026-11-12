@@ -104,8 +104,8 @@ function load_config(root::AbstractString)::Config
             for (rule, level) in something(prefs.levels, Dict{String, String}())
     )
     for (rule, level) in levels
-        if rule ∉ rule_name.(RULES)
-            throw(UsageError("[preferences.Corset.levels] names no rule $(repr(rule)); the rules are $(join(rule_name.(RULES), ", "))"))
+        if rule ∉ check_names()
+            throw(UsageError("[preferences.Corset.levels] names no rule $(repr(rule)); the rules are $(join(check_names(), ", "))"))
         end
         if level ∉ LEVELS
             throw(UsageError("[preferences.Corset.levels] sets $rule to $(repr(string(level))); a level is one of $(join(LEVELS, ", "))"))
@@ -214,10 +214,13 @@ function repository(config::Config, root::AbstractString)::Repository
     )
 end
 
-"""The level `config` gives `rule`: its own setting, else `:warn` for the default group and for the pedantic group when on."""
-function level(config::Config, rule::Rule)::Symbol
-    if haskey(config.levels, rule_name(rule))
-        return config.levels[rule_name(rule)]
+"""The level `config` gives `check`: its own setting, else `:warn` for the default group and for the pedantic group when on."""
+function level(config::Config, check::Check)::Symbol
+    if haskey(config.levels, check.name)
+        return config.levels[check.name]
     end
-    return ifelse(rule_group(rule) === :default || config.pedantic, :warn, :allow)
+    return ifelse(check.group === :default || config.pedantic, :warn, :allow)
 end
+
+"""The level `config` gives `rule`, which has one check; a rule with sub-checks has a level per check."""
+level(config::Config, rule::Rule)::Symbol = level(config, only(checks(rule)))

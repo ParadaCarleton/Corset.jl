@@ -30,33 +30,32 @@ function disallowed_keys(
 end
 
 """
-The findings among `sites` of `rule` at `level`: the sites no `# lint:` comment opts out, whose key the
+The findings among `sites` of the check `name` at `level`: the sites no `# lint:` comment opts out, whose key the
 baseline does not allow. With `update`, the baseline is seeded and lowered as `offenders!` does.
 `comments` holds the `# lint:` comments of the files already parsed; any other file is read.
 """
 function judge(
         repository::Repository,
-        rule::Rule,
+        name::String,
         level::Symbol,
         sites::AbstractVector{Site},
         update::Bool,
         comments::AbstractDict{String, Vector{OptOutComment}},
     )::Vector{Finding}
-    name::String = rule_name(rule)
     kept, _ = unopted(sites, name, comments)
     over = disallowed_keys(repository, name, sites, kept, update, comments)
     return Finding.(name, level, kept[in.(getfield.(kept, :key), (over,))])
 end
 
 """Whether `rule` reads the frames inference gives the entry signatures (`entry_frames`)."""
-reads_signatures(rule::Rule)::Bool = rule isa Union{UnstableVariableRule, BangRule, UnmarkedMutationRule, RuntimeDispatchRule, UnstableReturnRule, FloatWideningRule, RecursionLimitRule, JetRule}
+reads_signatures(rule::Rule)::Bool = rule isa Union{UnstableVariableRule, BangRule, UnmarkedMutationRule, RuntimeDispatchRule, UnstableReturnRule, TypeDisruptionRule, RecursionLimitRule, JetRule}
 
 """
 Whether `rule` has what it reads: the loaded package `mod` for a module rule, `frames` for a rule that
 reads inferred types, and JET on the load path for the `jet` rule.
 """
 can_run(rule::Rule, mod::Union{Module, Nothing}, frames::Union{AbstractVector{Inferred}, Nothing})::Bool =
-    (!(rule isa ModuleRule) || !isnothing(mod)) && (!reads_signatures(rule) || !isnothing(frames)) && (!(rule isa JetRule) || installed(JET_ID))
+    (!(rule isa ModuleRule) || !isnothing(mod)) && (!reads_signatures(rule) || rule isa TypeDisruptionRule || !isnothing(frames)) && (!(rule isa JetRule) || installed(JET_ID))
 
 """The names of the rules in `rules` that read the loaded package."""
 module_rule_names(rules::Tuple)::Vector{String} = [
@@ -65,8 +64,14 @@ module_rule_names(rules::Tuple)::Vector{String} = [
         if rule isa ModuleRule
 ]
 
+"""Whether `float-widening` is on, `rules` hold its rule, and there are no `frames` for it to read."""
+function widening_skipped(config::Config, rules::Tuple, frames::Union{AbstractVector{Inferred}, Nothing})::Bool
+    widening = only(filter(check -> check.name == "float-widening", checks(TypeDisruptionRule())))
+    return isnothing(frames) && any(rule -> rule isa TypeDisruptionRule, rules) && level(config, widening) !== :allow
+end
+
 """Whether `config` leaves `rule` on."""
-is_on(config::Config, rule::Rule)::Bool = level(config, rule) !== :allow
+is_on(config::Config, rule::Rule)::Bool = any(!=(:allow) ∘ Base.Fix1(level, config), checks(rule))
 
 """The rules `config` leaves on."""
 enabled_rules(config::Config)::Tuple = filter(Base.Fix1(is_on, config), RULES)
@@ -143,39 +148,36 @@ function run_rules( # lint: unstable-variable  loops over a tuple of different r
     enabled = enabled_rules(config)
     runnable = enabled[collect(can_run.(enabled, (mod,), (frames,)))]
     skipped = setdiff(module_rule_names(enabled), module_rule_names(runnable))
+    if widening_skipped(config, runnable, frames)
+        push!(skipped, "float-widening")
+    end
     if fix
         apply_fixes!(runnable, repository_, directories)
     end
     inferred = something(frames, Inferred[])
     context = Context(repository_, directories, mod; inferred, candidates = CandidateSearch(inferred; config.candidate_limit), own_methods)
-    sites = Dict{String, Vector{Site}}(rule_name(rule) => Site[] for rule in runnable)
+    sites = Dict{String, Vector{Site}}()
     for rule in runnable
         if !(rule isa FileRule)
-            append!(sites[rule_name(rule)], check(rule, context))
+            for (name, found) in grouped_sites!(rule, context)
+                append!(get!(sites, name, Site[]), found)
+            end
         end
     end
     file_rules = Tuple(rule for rule in runnable if rule isa FileRule)
     if !isempty(file_rules)
         for source in context.sources
             for rule in file_rules
-                append!(sites[rule_name(rule)], check(rule, context, source))
+                append!(get!(sites, rule_name(rule), Site[]), check(rule, context, source))
             end
         end
     end
     comments = context.comments
     findings = context.parse_errors
-    for rule in runnable
-        append!(
-            findings,
-            judge(
-                repository_,
-                rule,
-                level(config, rule),
-                sites[rule_name(rule)],
-                update_baseline,
-                comments,
-            ),
-        )
+    for rule in runnable, check in checks(rule)
+        if level(config, check) !== :allow
+            append!(findings, judge(repository_, check.name, level(config, check), get(sites, check.name, Site[]), update_baseline, comments))
+        end
     end
     return sort!(
             findings;

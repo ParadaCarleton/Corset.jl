@@ -66,6 +66,16 @@ empty_result(value::Int)::Nothing = nothing
 Some(value::Int)::Some = Some{Int}(value)
 '''
 
+[invariant-parameter]
+source = '''
+summed(values::AbstractVector{Real})::Int = 1
+nested(values::Vector{Vector{Real}})::Int = 1
+(bounded(values::V)::Int) where {V <: AbstractVector{Real}} = 1
+optional(values::AbstractVector{Union{Missing, Float64}})::Int = 1
+fine(values::AbstractVector{<:Real}, table::Dict{Symbol, Any}, pair::Tuple{Real, Real}, kind::Type{AbstractFloat}, matrix::Array{Float64, 2})::Int = 1
+(generic(values::AbstractVector{T})::Int) where {T} = 1
+'''
+
 [float64]
 source = '''
 widen(value::Float32)::Float64 = value * 2.0

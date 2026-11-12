@@ -46,3 +46,17 @@ end
     @test length(found_in(Corset.non_atomic_writes, "non-atomic-write")) == 9
     @test Corset.level(Corset.load_config(mktempdir()), Corset.NonAtomicWriteRule()) === :warn
 end
+
+@testset "banned-name: declared names with a banned word or suffix" begin
+    function sites(text::String; words = ("key", "cell"), suffixes = ("_of",))::Vector{Site}
+        root = write_tree(mktempdir(), ["a.jl" => text])
+        return Corset.banned_name_sites(Repository(root; banned_words = words, banned_suffixes = suffixes), Source(Repository(root), joinpath(root, "a.jl")))
+    end
+    text = "owner_of(x) = x\nf(cell_key, Key) = haskey(cell_key, 1)\nstruct S\n    key::Int\n    ok::Int\nend\ng(x) = for cell in x\n    q = cell\nend\nh(x) = x\n"
+    @test [site.line for site in sites(text)] == [1, 2, 2, 3, 7]
+    @test isempty(sites(text; words = (), suffixes = ()))
+    cells = Repository(mktempdir(); banned_words = ("cell",))
+    @test Corset.is_banned(:Cell_Count, cells)
+    @test !Corset.is_banned(:cellular, cells)
+    @test Corset.load_config(mktempdir()).banned_words == ()
+end

@@ -28,7 +28,7 @@ end
 
 """
     Repository(root; baseline = nothing, one_letter_exempt = (), skipped_directories = (), file_line_limit = 1500,
-        struct_field_limit = 12, strict_captures = false, forbidden_patterns = ())
+        struct_field_limit = 12, strict_captures = false, forbidden_patterns = (), banned_words = (), banned_suffixes = ())
 
 The tree the rules read, and the settings that relax them. The defaults are the strict reading: every
 finding of every rule fails. `root` is the tree whose source the rules read (made absolute).
@@ -44,6 +44,7 @@ finding of every rule fails. `root` is the tree whose source the rules read (mad
 - `strict_captures`: whether the anonymous-function rules also report a capture of plain immutable data
   (an `Int`, a tuple of them), for a project whose functions read only their arguments.
 - `forbidden_patterns`: the `ForbiddenPattern`s the `forbidden-pattern` rule reads.
+- `banned_words`, `banned_suffixes`: lowercase words (`_`-separated parts of a name) and name endings the `banned-name` rule reports.
 """
 struct Repository
     root::String
@@ -54,6 +55,8 @@ struct Repository
     struct_field_limit::Int
     strict_captures::Bool
     forbidden_patterns::Tuple{Vararg{ForbiddenPattern}}
+    banned_words::Tuple{Vararg{String}}
+    banned_suffixes::Tuple{Vararg{String}}
 end
 Repository(
     root::AbstractString;
@@ -64,6 +67,8 @@ Repository(
     struct_field_limit::Integer = DEFAULT_STRUCT_FIELD_LIMIT,
     strict_captures::Bool = false,
     forbidden_patterns::Tuple{Vararg{ForbiddenPattern}} = (),
+    banned_words::Tuple{Vararg{String}} = (),
+    banned_suffixes::Tuple{Vararg{String}} = (),
 )::Repository = Repository(
     abspath(root),
     baseline,
@@ -73,6 +78,8 @@ Repository(
     checked_field_limit(struct_field_limit, "struct_field_limit"),
     strict_captures,
     forbidden_patterns,
+    lowercase.(banned_words),
+    lowercase.(banned_suffixes),
 )
 
 const DEFAULT_FILE_LINE_LIMIT = 1500

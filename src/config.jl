@@ -25,6 +25,8 @@ struct Config
     struct_field_limit::Int
     strict_captures::Bool
     forbidden_patterns::Tuple{Vararg{ForbiddenPattern}}
+    banned_words::Tuple{Vararg{String}}
+    banned_suffixes::Tuple{Vararg{String}}
 end
 
 const LEVELS = (:allow, :warn, :deny)
@@ -52,6 +54,8 @@ end
     struct_field_limit::Union{Nothing, Int} = nothing
     strict_captures::Union{Nothing, Bool} = nothing
     forbidden_patterns::Union{Nothing, Vector{ForbiddenPatternPreference}} = nothing
+    banned_words::Union{Nothing, Vector{String}} = nothing
+    banned_suffixes::Union{Nothing, Vector{String}} = nothing
 end
 
 """Merge two preference dictionaries, with `over` overriding matching keys in `under`."""
@@ -120,6 +124,8 @@ function load_config(root::AbstractString)::Config
         checked_field_limit(something(prefs.struct_field_limit, DEFAULT_STRUCT_FIELD_LIMIT), "[preferences.Corset] struct_field_limit"),
         something(prefs.strict_captures, false),
         Tuple(forbidden_pattern.(something(prefs.forbidden_patterns, ForbiddenPatternPreference[]))),
+        Tuple(something(prefs.banned_words, String[])),
+        Tuple(something(prefs.banned_suffixes, String[])),
     )
 end
 
@@ -203,6 +209,8 @@ function repository(config::Config, root::AbstractString)::Repository
         config.struct_field_limit,
         config.strict_captures,
         config.forbidden_patterns,
+        config.banned_words,
+        config.banned_suffixes,
     )
 end
 

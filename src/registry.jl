@@ -110,6 +110,21 @@ Apply the `fix_plan` of `rule` (`apply_plan!`): every repair except those a `# l
 fix!(rule::Rule, repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site} =
     apply_plan!(fix_plan(rule, repository, directories), rule_name(rule))
 
+"""
+    unsafe_fix_plan(rule, repository, directories)
+
+The `FixPlan` of a fix that can change behavior or break code outside `directories`, such as a changed
+constructor. Only `--unsafe-fixes` runs it. Only a rule with such a fix has a method.
+"""
+function unsafe_fix_plan end
+
+"""Whether `rule` has an `unsafe_fix_plan`."""
+unsafe_fixable(rule::Rule)::Bool = hasmethod(unsafe_fix_plan, Tuple{typeof(rule), Repository, Tuple{Vararg{String}}})
+
+"""Apply the `unsafe_fix_plan` of `rule` as `fix!` applies a `fix_plan`. Returns the sites repaired."""
+unsafe_fix!(rule::Rule, repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site} =
+    apply_plan!(unsafe_fix_plan(rule, repository, directories), rule_name(rule))
+
 # The parameters a rule's body names, by what the rule reads.
 const RULE_PARAMETERS = (;
     ModuleRule = (Pair{Symbol, Any}(:context, :Context),),
@@ -350,6 +365,9 @@ fix_plan(::TypeDisruptionRule, repository::Repository, directories::Tuple{Vararg
 # The fixer repairs `literal-array`, so a `# lint: literal-array` comment pins a repair.
 fix!(rule::TypeDisruptionRule, repository::Repository, directories::Tuple{Vararg{String}})::Vector{Site} =
     apply_plan!(fix_plan(rule, repository, directories), "literal-array")
+
+unsafe_fix_plan(::AbstractFieldRule, repository::Repository, directories::Tuple{Vararg{String}})::FixPlan{ByteRewrite, typeof(concrete_texts)} =
+    abstract_field_plan(repository, directories)
 
 """Every rule, ordered by name."""
 const RULES = Tuple(sort!([type() for kind in (ModuleRule, TreeRule, FileRule) for type in subtypes(kind)]; by = rule_name))

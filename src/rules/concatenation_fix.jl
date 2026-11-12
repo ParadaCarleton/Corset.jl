@@ -96,11 +96,15 @@ end
 """The repairs of the Julia file `source`: one per outermost flattenable fold, whose rewrite also flattens the folds inside it."""
 flatten_repairs(source::Source)::Vector{Repair{ByteRewrite}} = flatten_repair.((source,), outer_folds(source.tree))
 
-"""The text `text` with the `range` of each of `edits` replaced by its `text`; the ranges do not overlap."""
+"""
+The text `text` with the `range` of each of `edits` replaced by its `text`; the ranges do not overlap.
+Edits at one offset land in this order: an insertion before a replacement, and insertions in the order of `edits`.
+"""
 function rewritten(text::AbstractString, edits::AbstractVector{ByteRewrite})::String
     result = String(text)
-    for edit in sort(edits; by = edit -> first(edit.range), rev = true)
-        result = splice_text(result, edit.range, edit.text)
+    order = [(first(edit.range), last(edit.range), index) for (index, edit) in pairs(edits)]
+    for (_, _, index) in sort(order; rev = true)
+        result = splice_text(result, edits[index].range, edits[index].text)
     end
     return result
 end

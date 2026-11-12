@@ -203,7 +203,7 @@ statement_number(operand::Any)::Int = nameof(typeof(operand)) === :SSAValue ? ge
 calls_global(call::Expr, mod::Module, name::Symbol)::Bool = call.head === :call && length(call.args) >= 2 && is_global(call.args[1], mod, name)
 
 """The call that lowered statement `index` of `code` makes or that statement assigns, as an expression; a statement that is no call gives an empty block."""
-function call_at(code::AbstractVector{Any}, index::Int)::Expr
+function call_at(code::AbstractVector{Any}, index::Int)::Expr # lint: unstable-variable  lowered code holds statements of any type
     statement = code[index]
     if !(statement isa Expr)
         return Expr(:block)

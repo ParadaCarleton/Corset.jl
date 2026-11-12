@@ -153,7 +153,7 @@ function fix_diff(config::Config, root::AbstractString, mod::Union{Module, Nothi
         cp(joinpath(original.root, directory), joinpath(copies, directory))
     end
     if mod isa Module && !isnothing(frames)
-        rewrites = rewritten_texts(typed_edits(RULES, config, original, directories, mod, frames, unsafe))
+        rewrites = rewritten_texts(typed_edits(RULES, config, original, directories, mod, frames, unsafe)) # lint: runtime-dispatch  walks the rule tuple once per diff
         write_all!(joinpath.((copies,), relpath.(first.(rewrites), original.root)), last.(rewrites))
     end
     apply_fixes!(fixing(config, enabled_rules(config)), repository(config, copies), directories, nothing, nothing, unsafe)

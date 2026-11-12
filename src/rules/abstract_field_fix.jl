@@ -12,8 +12,8 @@ const DYNAMIC_FIELD = Symbol("<dynamic>")
 """Whether `name` is an abstract type Base exports; `Any` and `Type` stay out, since a field of either erases a type on purpose."""
 is_base_abstract(name::Symbol)::Bool = name ∉ (:Any, :Type) && isdefined(Base, name) && getglobal(Base, name) isa Type && isabstracttype(getglobal(Base, name))
 
-"""The abstract types Base exports."""
-const BASE_ABSTRACT_TYPES = Set{Symbol}(filter(is_base_abstract, names(Base)))
+"""The abstract types Base exports, as a tuple so no caller can grow the shared set."""
+const BASE_ABSTRACT_TYPES = Tuple(filter(is_base_abstract, names(Base)))
 
 """A field `name::annotation` of a struct, the `node` of the whole declaration."""
 struct FieldDeclaration
@@ -118,7 +118,7 @@ function abstract_types_by_scope(sources::AbstractVector{Source})::Dict{String, 
     end
     resolvable = Dict{String, Set{Symbol}}()
     for key in union(keys(declared), keys(shadowed))
-        resolvable[key] = setdiff(union(BASE_ABSTRACT_TYPES, get(declared, key, Set{Symbol}())), get(shadowed, key, Set{Symbol}()))
+        resolvable[key] = setdiff(union(Set{Symbol}(BASE_ABSTRACT_TYPES), get(declared, key, Set{Symbol}())), get(shadowed, key, Set{Symbol}()))
     end
     return resolvable
 end
@@ -288,7 +288,7 @@ function parameter_fields(source::Source, node::SYNTAX.SyntaxNode, usage::Struct
     parameters = parameter_names(declared_head(node))
     fields = field_declaration.(filter(is_plain_field, statements))
     bare = Set{Symbol}(Symbol.(SYNTAX.sourcetext.(getfield.(fields, :annotation))))
-    abstract_types = get(usage.abstract_types, scope_key(source, node), BASE_ABSTRACT_TYPES)
+    abstract_types = get(usage.abstract_types, scope_key(source, node), Set{Symbol}(BASE_ABSTRACT_TYPES))
     chosen = FieldDeclaration[]
     for field in fields
         if names_abstract_type(field.annotation, abstract_types, parameters) && !may_be_reassigned(field.name, is_mutable, usage.written) && !needs_inference_from_bound(field, parameters, bare)

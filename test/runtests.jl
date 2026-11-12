@@ -1893,14 +1893,15 @@ end
     anything(x::Int) = Any[x]
     maybe(on::Bool) = on ? Plain() : nothing
     keyed(x::Int; y = 1) = x
+    spread(xs::Int...) = length(xs)
     end
     """
     signatures(mod) = Type[
-        Tuple{typeof(mod.keyed), Int}, Tuple{typeof(mod.flag), Bool}, Tuple{typeof(mod.label), String}, Tuple{typeof(mod.boxed), Int}, Tuple{typeof(mod.measure), mod.Shapes.Box},
+        Tuple{typeof(mod.keyed), Int}, Tuple{typeof(mod.spread), Int, Int}, Tuple{typeof(mod.flag), Bool}, Tuple{typeof(mod.label), String}, Tuple{typeof(mod.boxed), Int}, Tuple{typeof(mod.measure), mod.Shapes.Box},
         Tuple{typeof(mod.anything), Int}, Tuple{typeof(mod.maybe), Bool}, Tuple{Type{mod.Shapes.Box}, Float64},
     ]
     safe, _ = typed_fixed(Corset.AnnotationRule(), source, signatures)
-    @test occursin("Box(x::Float64)::Box = ", safe) && occursin("anything(x::Int)::AbstractVector = ", safe) && occursin("flag(b) = b", safe) && occursin("keyed(x::Int; y = 1) = x", safe)
+    @test occursin("Box(x::Float64)::Box = ", safe) && occursin("anything(x::Int)::AbstractVector = ", safe) && occursin("flag(b) = b", safe) && occursin("keyed(x::Int; y = 1) = x", safe) && occursin("spread(xs::Int...) = length(xs)", safe)
     loaded = Module(:Names)
     Base.include_string(loaded, source)
     @test Corset.resolved_name(loaded.T.Shapes.Box, loaded.T) == "Box"
@@ -1908,6 +1909,19 @@ end
     for written in ("flag(b::Bool)::typeof(b) = b", "label(s::AbstractString)::typeof(s) = s", "boxed(n::Real) = ", "measure(b) = b.side", "maybe(on::Bool) = on")
         @test occursin(written, unsafe_fixed)
     end
+end
+
+@testset "annotation: safe mode writes no result without a declared-signature frame" begin
+    tree = write_tree(mktempdir(), ["src/T.jl" => "module T\nkeep(x::Int) = x\nend\n"])
+    loaded = Module(:Loaded)
+    Base.include(loaded, joinpath(tree, "src", "T.jl"))
+    frames = Corset.typed_frames(Tuple{typeof(loaded.T.keep), Int})
+    places = Corset.frames_by_place(frames)
+    source = only(Corset.directory_sources(Repository(tree), ("src",)))
+    definition = only(Corset.typed_definitions(source, places, places, places))
+    undeclared = Corset.TypedDefinition(definition.node, definition.call, definition.spine, definition.frames, definition.observed, Corset.Inferred[])
+    @test Corset.result_text(undeclared, loaded.T, false) == ""
+    @test Corset.result_text(definition, loaded.T, false) == "typeof(x)"
 end
 
 @testset "run_rules with fix runs the typed fixers when the package and its frames are given" begin

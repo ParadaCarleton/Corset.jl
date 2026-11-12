@@ -603,6 +603,30 @@ end
         @test (@test_logs logged offenders!(Repository(mktempdir()), "concrete-return", sites; fix = CONCRETE_RETURN_FIX)) == site_keys(sites)
     end
 
+    @testset "invariant-parameter: an abstract type parameter without <:" begin
+        sites = found_in(source -> Corset.invariant_parameters(source, Base), "invariant-parameter")
+        @test site_keys(sites) == ["source.jl summed", "source.jl nested", "source.jl bounded", "source.jl optional"]
+        @test first(sites).detail == "`AbstractVector{Real}` takes only the parameter `Real` itself; write `AbstractVector{<:Real}`"
+        @test sites[2].detail == "`Vector{Real}` takes only the parameter `Real` itself; write `Vector{<:Real}`"
+        nested = "module Outer\nmodule Inner\nabstract type Element end\nlisted(items::AbstractVector{Element})::Int = 1\nend\nend\n"
+        root = write_tree(mktempdir(), ["nested.jl" => nested])
+        holder = Module(:Holder)
+        Base.include(holder, joinpath(root, "nested.jl"))
+        source = parsed(joinpath(root, "nested.jl"))
+        compiled = collect(Method, methods(holder.Outer.Inner.listed))
+        @test site_keys(Corset.invariant_parameters(source, holder, compiled)) == ["nested.jl listed"]
+        @test site_keys(Corset.invariant_parameters(source, holder)) == ["nested.jl listed"]
+        @test isempty(Corset.invariant_parameters(source, Base))
+        split = write_tree(mktempdir(), ["main.jl" => "module Outer\nmodule Inner\nabstract type Element end\ninclude(\"part.jl\")\nend\nend\n", "part.jl" => "listed(items::AbstractVector{Element})::Int = 1\n"])
+        included = Module(:Included)
+        Base.include(included, joinpath(split, "main.jl"))
+        part = parsed(joinpath(split, "part.jl"))
+        @test site_keys(Corset.invariant_parameters(part, included, collect(Method, methods(included.Outer.Inner.listed)))) == ["part.jl listed"]
+        @test Corset.resolved_type(:(Base.Float32), Base) === Float32
+        @test Corset.resolved_type(QuoteNode(:name), Base) === :name
+        @test all(isa.(Corset.resolved_type.([:(Base.missing_name), :(Int{Float64}), :(Vector{Int, Int, Int}), :(f(x)), 1.5], (Base,)), Corset.Unresolved))
+    end
+
     @testset "float64: Float64 tokens and untyped float literals" begin
         @test site_lines(float64_sites(parsed(snippet_file("float64")))) == [1, 1]
     end

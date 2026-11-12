@@ -84,18 +84,21 @@ fixes(::Config, ::Rule)::Bool = true
 
 fixes(config::Config, rule::TypeDisruptionRule)::Bool = level(config, named_check(rule, "literal-array")) !== :allow
 
-"""Run the fixer of every fixable rule in `rules` over the files under `directories` of `repository`."""
-apply_fixes!(::Tuple{}, ::Repository, ::Tuple{Vararg{String}})::Nothing = nothing
+"""Run the fixer of every fixable rule in `rules` over the files under `directories` of `repository`; `unsafe` adds the unsafe fixes."""
+apply_fixes!(::Tuple{}, ::Repository, ::Tuple{Vararg{String}}, ::Bool)::Nothing = nothing
 
-function apply_fixes!(rules::Tuple, repository::Repository, directories::Tuple{Vararg{String}})::Nothing
-    apply_fix!(first(rules), repository, directories)
-    return apply_fixes!(Base.tail(rules), repository, directories)
+function apply_fixes!(rules::Tuple, repository::Repository, directories::Tuple{Vararg{String}}, unsafe::Bool)::Nothing
+    apply_fix!(first(rules), repository, directories, unsafe)
+    return apply_fixes!(Base.tail(rules), repository, directories, unsafe)
 end
 
-"""Run the fixer of `rule` over the files under `directories` of `repository`, when `rule` has one."""
-function apply_fix!(rule::Rule, repository::Repository, directories::Tuple{Vararg{String}})::Nothing
+"""Run the fixer of `rule` over the files under `directories` of `repository`, when `rule` has one, and its unsafe fix too when `unsafe`."""
+function apply_fix!(rule::Rule, repository::Repository, directories::Tuple{Vararg{String}}, unsafe::Bool)::Nothing
     if fixable(rule)
         fix!(rule, repository, directories)
+    end
+    if unsafe && unsafe_fixable(rule)
+        unsafe_fix!(rule, repository, directories)
     end
     return nothing
 end
@@ -115,12 +118,12 @@ function file_diff(
 end
 
 """
-    fix_diff(config, root)
+    fix_diff(config, root, unsafe)
 
-The unified diff of the rewrites `--fix` would make, computed on a copy of the source directories.
-The tree at `root` is not written.
+The unified diff of the rewrites `--fix` would make, with the unsafe fixes when `unsafe` (`--unsafe-fixes`),
+computed on a copy of the source directories. The tree at `root` is not written.
 """
-function fix_diff(config::Config, root::AbstractString)::String
+function fix_diff(config::Config, root::AbstractString, unsafe::Bool)::String
     original = repository(config, root)
     directories = present_directories(original, config.directories)
     copies = mktempdir()
@@ -128,18 +131,19 @@ function fix_diff(config::Config, root::AbstractString)::String
         mkpath(dirname(joinpath(copies, directory)))
         cp(joinpath(original.root, directory), joinpath(copies, directory))
     end
-    apply_fixes!(fixing(config, enabled_rules(config)), repository(config, copies), directories)
+    apply_fixes!(fixing(config, enabled_rules(config)), repository(config, copies), directories, unsafe)
     labels = relpath.(repository_sources(original, directories), original.root)
     return join(file_diff.(labels, joinpath.(original.root, labels), joinpath.(copies, labels)))
 end
 
 """
-    run_rules(config, root; mod = nothing, frames = nothing, fix = false, update_baseline = false, own_methods = defined_methods(mod))
+    run_rules(config, root; mod = nothing, frames = nothing, fix = false, unsafe = false, update_baseline = false, own_methods = defined_methods(mod))
 
 The findings of every rule `config` leaves on, over the project at `root`, and the names of the rules
 skipped because they read the loaded package `mod` and none was given, or are `jet` and JET is not installed. The rules that read inferred types also
 need `frames`, the `entry_frames` of `mod`; without them they are skipped. `fix` first rewrites the files
-for the rules that have a fixer. `update_baseline` seeds and lowers the baseline file; without it the
+for the rules that have a fixer, and `unsafe` adds their unsafe fixes (`unsafe_fix_plan`); `unsafe` without
+`fix` throws. `update_baseline` seeds and lowers the baseline file; without it the
 baseline is only read. `own_methods` holds the `defined_methods` of `mod`.
 """
 function run_rules( # lint: unstable-variable  loops over a tuple of different rule types
@@ -148,9 +152,13 @@ function run_rules( # lint: unstable-variable  loops over a tuple of different r
         mod::Union{Module, Nothing} = nothing,
         frames::Union{AbstractVector{Inferred}, Nothing} = nothing,
         fix::Bool = false,
+        unsafe::Bool = false,
         update_baseline::Bool = false,
         own_methods::AbstractVector{Method} = defined_methods(mod),
     )::Tuple{Vector{Finding}, Vector{String}}
+    if unsafe && !fix
+        throw(ArgumentError("unsafe = true adds fixes to fix = true; pass both"))
+    end
     repository_ = repository(config, root)
     directories = present_directories(repository_, config.directories)
     enabled = enabled_rules(config)
@@ -160,7 +168,7 @@ function run_rules( # lint: unstable-variable  loops over a tuple of different r
         push!(skipped, "float-widening")
     end
     if fix
-        apply_fixes!(fixing(config, runnable), repository_, directories)
+        apply_fixes!(fixing(config, runnable), repository_, directories, unsafe)
     end
     inferred = something(frames, Inferred[])
     context = Context(repository_, directories, mod; inferred, candidates = CandidateSearch(inferred; config.candidate_limit), own_methods)

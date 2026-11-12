@@ -24,8 +24,15 @@ function abstract_fields(type::DataType)::Vector{Symbol}
     return field_names[abstract_declaration.(fieldtype.((type,), field_names))]
 end
 
-"""Whether field type `declared` is abstract: not a type parameter, not a `Union`, and `holds_abstract`."""
-abstract_declaration(@nospecialize(declared::Any))::Bool = !(declared isa TypeVar) && !(declared isa Union) && holds_abstract(declared)
+"""
+Whether field type `declared` is abstract: not a type parameter, not a `Union`, and `holds_abstract`; or the
+unbounded parameter ConcreteStructs.jl makes of a bare field `x` of a `@concrete struct` (`__T_x`, bounded by `Any`).
+A field `x <: AbstractT` is fine: its parameter has a bound.
+"""
+abstract_declaration(@nospecialize(declared::Any))::Bool = bare_concrete_field(declared) || (!(declared isa TypeVar) && !(declared isa Union) && holds_abstract(declared))
+
+"""Whether `declared` is the parameter ConcreteStructs.jl generates for a bare field."""
+bare_concrete_field(@nospecialize(declared::Any))::Bool = declared isa TypeVar && startswith(string(declared.name), "__T_") && declared.ub === Any
 
 """
 Whether `declared` is abstract or has an abstract type among its parameters, at any depth.

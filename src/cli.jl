@@ -68,6 +68,12 @@ function argument_settings()::ArgParseSettings
     )
     option!(
         check,
+        "--unsafe-fixes";
+        help = "also run the fixes that can change behavior or break code outside the checked directories; implies --fix, and --diff shows them",
+        action = :store_true,
+    )
+    option!(
+        check,
         "--diff";
         help = "print the changes --fix would make, write nothing, and exit 1 if there are any",
         action = :store_true,
@@ -166,6 +172,7 @@ struct CheckOptions
     pedantic::Bool
     format::Union{Nothing, String}
     fix::Bool
+    unsafe::Bool
     diff::Bool
     deny_warnings::Bool
     update_baseline::Bool
@@ -182,6 +189,7 @@ function CheckOptions(arguments::AbstractDict, update_baseline::Bool)::CheckOpti
         arguments["pedantic"],
         get(arguments, "format", nothing),
         get(arguments, "fix", false),
+        get(arguments, "unsafe-fixes", false),
         get(arguments, "diff", false),
         get(arguments, "deny-warnings", false),
         update_baseline,
@@ -436,12 +444,12 @@ function print_rules(io::IO, config::Config)::Nothing
     return nothing
 end
 
-"""`corset check --diff`: print the changes `--fix` would make to `io`; the exit code is 1 when there are any."""
-function print_fix_diff(io::IO, config::Config, root::AbstractString, fix::Bool)::Int # COV_EXCL_LINE
+"""`corset check --diff`: print the changes `--fix` (with `unsafe`, `--unsafe-fixes`) would make to `io`; the exit code is 1 when there are any."""
+function print_fix_diff(io::IO, config::Config, root::AbstractString, fix::Bool, unsafe::Bool)::Int # COV_EXCL_LINE
     if fix
         throw(UsageError("--diff writes nothing and --fix writes the changes; pass one"))
     end
-    changes = fix_diff(config, root)
+    changes = fix_diff(config, root, unsafe)
     print(io, changes)
     return Int(!isempty(changes))
 end
@@ -452,7 +460,7 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
     config = with_overrides(load_config(root), options.pedantic, options.overrides, options.candidate_limit)
     options = checked_options(options, config)
     if options.diff
-        return print_fix_diff(out, config, root, options.fix)
+        return print_fix_diff(out, config, root, options.fix, options.unsafe)
     end
     loads = reads_package(config) && !options.no_load
     if loads && !haskey(ENV, INNER_VARIABLE)
@@ -472,7 +480,7 @@ function run_options(options::CheckOptions, args::AbstractVector{<:AbstractStrin
             frames = seeded_frames(sources, mod)
         end
     end
-    findings, skipped = run_rules(config, root; mod, frames, fix = options.fix, update_baseline = options.update_baseline, own_methods)
+    findings, skipped = run_rules(config, root; mod, frames, fix = options.fix || options.unsafe, unsafe = options.unsafe, update_baseline = options.update_baseline, own_methods)
     print_findings(out, root, findings, something(options.format, "human"))
     if !isnothing(frames)
         println(err, seed_summary(sources, frames, Sys.maxrss()))

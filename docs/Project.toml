@@ -2,9 +2,10 @@
 Corset = "09bf9df1-bea6-4267-acd1-e930da7492cc"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 
-[sources]
-Corset = {path = ".."}
+[sources.Corset]
+path = ".."
 
 [compat]
+Corset = "0.4"
 Documenter = "1"
 julia = "1.13"
